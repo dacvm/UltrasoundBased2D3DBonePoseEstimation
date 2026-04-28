@@ -1,0 +1,33 @@
+{
+  "project": {
+    "root": "D:\\Documents\\BELANDA\\SonoSkin\\codes\\matlab\\bmodeimage_3dspace\\",
+    "functionsFolderName": "functions"
+  },
+  "input": {
+    "fcalFilename": "PlusDeviceSet_fCal_Epiphan_NDIPolaris_UTNML__20260312_120634.xml",
+    "sequenceFolder": "D:\\Documents\\BELANDA\\SonoSkin\\data\\dennis_data\\2026-13-04_phantom",
+    "sequenceFilenames": [
+      "SequenceRecording_2026-04-13_17-49-02.mha",
+      "SequenceRecording_2026-04-13_17-52-51.mha"
+    ],
+    "acsFilename": "CT_Femur_editedFlipped_scaled_20260421-174922.mat",
+    "manualAdjustmentFilename": "manual_transformation_adjustments_20260422-154031.mat",
+    "stlFilename": "CT_Femur_editedFlipped_scaled_distal.stl"
+  },
+  "imagePlaneSampling": {
+    "packetStartIndex": 100,
+    "packetStep": 100,
+    "packetEndIndex": null
+  },
+  "smoothing": {
+    "method": "sgolay",
+    "window": 20
+  },
+  "intersection": {
+    "normalFacingToleranceDeg": 50
+  },
+  "logging": {
+    "printPreparationProgress": true,
+    "printEvaluationProgress": false
+  }
+}
