@@ -51,8 +51,8 @@ end
 
 %% CONVERT POSE VECTOR TO MESH TRANSFORM
 
-% Convert the candidate pose parameters to a 4x4 mesh transform using the future pose-convention placeholder.
-T_candidateMeshToReference = poseVectorToTransformPlaceholder(poseVector, data.T_init_originct);
+% Convert the candidate state parameters to a 4x4 mesh transform using the future state-convention helper.
+T_candidateMeshToReference = stateVectorToTMatrix(poseVector, data.T_init_originct);
 
 %% COMPUTE PROBE-FACING PIXELS
 

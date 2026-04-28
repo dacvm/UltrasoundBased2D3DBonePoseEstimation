@@ -1,9 +1,9 @@
-function T_mesh_ref = poseVectorToTransformPlaceholder(poseVector, T_init_originct)
-%POSEVECTORTOTRANSFORMPLACEHOLDER Convert a future optimizer pose vector into a 4x4 transform.
-% This function declaration marks the exact place where the pose parameterization should be implemented later.
+function T_mesh_ref = stateVectorToTMatrix(stateVector, T_init_originct)
+%STATEVECTORTOTMATRIX Convert a future optimizer state vector into a 4x4 transform.
+% This function declaration marks the exact place where the state parameterization should be implemented later.
 %
 % What this function does:
-%   This placeholder converts an optimizer pose vector back into a 4-by-4
+%   This placeholder converts an optimizer state vector back into a 4-by-4
 %   mesh transform. At the moment, it validates the inputs and returns the
 %   initial transform unchanged.
 %
@@ -15,7 +15,7 @@ function T_mesh_ref = poseVectorToTransformPlaceholder(poseVector, T_init_origin
 %   matrix.
 %
 % Inputs:
-%   poseVector:
+%   stateVector:
 %       Future optimizer parameters. The current placeholder expects a
 %       numeric vector but does not use its values yet.
 %
@@ -30,12 +30,12 @@ function T_mesh_ref = poseVectorToTransformPlaceholder(poseVector, T_init_origin
 %
 % Important details for junior developers:
 %   - When the real pose convention is implemented, this function should
-%     apply the poseVector as a perturbation around T_init_originct.
+%     apply the stateVector as a perturbation around T_init_originct.
 %   - Be careful with rotation units later. Decide clearly whether rx, ry,
 %     rz are degrees, radians, Euler angles, or another representation.
 
-% Check that the pose vector is numeric before future pose-to-transform math is added.
-validateattributes(poseVector, {'numeric'}, {'vector'}, mfilename, 'poseVector');
+% Check that the state vector is numeric before future state-to-transform math is added.
+validateattributes(stateVector, {'numeric'}, {'vector'}, mfilename, 'stateVector');
 
 % Check that the initial transform is a 4-by-4 numeric matrix because this placeholder returns it directly.
 validateattributes(T_init_originct, {'numeric'}, {'size', [4 4]}, mfilename, 'T_init_originct');
