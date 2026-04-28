@@ -1,0 +1,36 @@
+ObjectType = Image
+NDims = 3
+BinaryData = True
+BinaryDataByteOrderMSB = False
+CompressedData = False
+Kinds = domain domain list
+TransformMatrix = 1 0 0 0 1 0 0 0 1
+DimSize = 776 716 779
+Offset = 0 0 0
+CenterOfRotation = 0 0 0
+AnatomicalOrientation = RAI
+ElementSpacing = 1 1 1
+ElementType = MET_UCHAR
+UltrasoundImageOrientation = MFA
+UltrasoundImageType = BRIGHTNESS
+Seq_Frame0000_ProbeToTrackerDeviceTransform = 0.886678 -0.453781 -0.0887979 766.676 -0.163283 -0.486955 0.858029 654.804 -0.432597 -0.746296 -0.505867 -133.313 0 0 0 1 
+Seq_Frame0000_ProbeToTrackerDeviceTransformStatus = OK
+Seq_Frame0000_ReferenceToTrackerDeviceTransform = 0.807151 -0.590173 -0.0142552 -22.0063 0.0310953 0.018389 0.999347 743.791 -0.589526 -0.807067 0.0331943 -155.467 0 0 0 1 
+Seq_Frame0000_ReferenceToTrackerDeviceTransformStatus = OK
+Seq_Frame0000_Timestamp = 0.024
+Seq_Frame0000_ImageStatus = OK
+Seq_Frame0001_ProbeToTrackerDeviceTransform = 0.886567 -0.45392 -0.0891918 766.619 -0.163132 -0.487194 0.857922 654.833 -0.432881 -0.746056 -0.505979 -133.306 0 0 0 1 
+Seq_Frame0001_ProbeToTrackerDeviceTransformStatus = OK
+Seq_Frame0001_ReferenceToTrackerDeviceTransform = 0.807064 -0.590303 -0.0137742 -22.0258 0.0304417 0.0183005 0.999369 743.788 -0.589678 -0.806974 0.0327395 -155.47 0 0 0 1 
+Seq_Frame0001_ReferenceToTrackerDeviceTransformStatus = OK
+Seq_Frame0001_Timestamp = 0.052
+Seq_Frame0001_ImageStatus = OK
+Seq_Frame0002_ProbeToTrackerDeviceTransform = 0.886585 -0.453852 -0.0893558 766.658 -0.16278 -0.486938 0.858134 654.841 -0.432977 -0.746264 -0.50559 -133.237 0 0 0 1 
+Seq_Frame0002_ProbeToTrackerDeviceTransformStatus = OK
+Seq_Frame0002_ReferenceToTrackerDeviceTransform = 0.80726 -0.59002 -0.0144315 -22.0142 0.031282 0.0183566 0.999342 743.781 -0.589366 -0.80718 0.0332755 -155.411 0 0 0 1 
+Seq_Frame0002_ReferenceToTrackerDeviceTransformStatus = OK
+Seq_Frame0002_Timestamp = 0.079
+Seq_Frame0002_ImageStatus = OK
+[continue_until_the_end_of_frame]
+ElementDataFile = LOCAL
+[binary_string_of_image_data_with_length_of_DimSize]
