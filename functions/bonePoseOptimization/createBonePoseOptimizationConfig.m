@@ -132,6 +132,38 @@ config.logging.printPreparationProgress = getRequiredField(rawConfig.logging, 'p
 % Store whether repeated per-plane geometry evaluation should print progress messages.
 config.logging.printEvaluationProgress = getRequiredField(rawConfig.logging, 'printEvaluationProgress', 'logging.printEvaluationProgress');
 
+%% OPTIMIZER OPTIONS
+
+% Read the optional optimizer group so older JSON files can still use the default CMA-ES settings.
+optimizerConfig = getOptionalField(rawConfig, 'optimizer', struct());
+
+% Store the local translation search radius in millimeters.
+config.optimizer.translationBoundMm = getOptionalField(optimizerConfig, 'translationBoundMm', 10);
+
+% Store the local rotation search radius in degrees because this is easier to edit than radians.
+config.optimizer.rotationBoundDeg = getOptionalField(optimizerConfig, 'rotationBoundDeg', 10);
+
+% Store the initial CMA-ES translation sigma in millimeters.
+config.optimizer.translationSigmaMm = getOptionalField(optimizerConfig, 'translationSigmaMm', 5);
+
+% Store the initial CMA-ES rotation sigma in degrees because the wrapper converts it to radians.
+config.optimizer.rotationSigmaDeg = getOptionalField(optimizerConfig, 'rotationSigmaDeg', 5);
+
+% Store the moderate CMA-ES population size for the 6D pose search.
+config.optimizer.populationSize = getOptionalField(optimizerConfig, 'populationSize', 12);
+
+% Store the moderate first-run function evaluation budget.
+config.optimizer.maxFunctionEvaluations = getOptionalField(optimizerConfig, 'maxFunctionEvaluations', 400);
+
+% Store whether CMA-ES should use parfor when the Parallel Computing Toolbox is available.
+config.optimizer.useParfor = getOptionalField(optimizerConfig, 'useParfor', true);
+
+% Store the worker cap used by the external cmaes_parfor implementation.
+config.optimizer.parforWorkers = getOptionalField(optimizerConfig, 'parforWorkers', 4);
+
+% Store the base output folder where each CMA-ES run creates a timestamped subfolder.
+config.optimizer.outputFolder = makeAbsolutePath(getOptionalField(optimizerConfig, 'outputFolder', fullfile('output', 'bonePoseOptimization', 'cmaes')), config.project.root);
+
 %% BOOKKEEPING
 
 % Store the loaded JSON file path so results can be traced back to the configuration source.
@@ -150,6 +182,19 @@ end
 
 % Return the requested value so the caller can assign it into the flat config struct.
 value = sourceStruct.(fieldName);
+end
+
+function value = getOptionalField(sourceStruct, fieldName, defaultValue)
+%GETOPTIONALFIELD Read an optional field or return a default value.
+% This local function lets new config fields be added without breaking older JSON files.
+
+% Use the configured value only when the source is a struct and the field is present.
+if isstruct(sourceStruct) && isfield(sourceStruct, fieldName) && ~isempty(sourceStruct.(fieldName))
+    value = sourceStruct.(fieldName);
+else
+    % Return the default value when the optional field is not available.
+    value = defaultValue;
+end
 end
 
 function absolutePath = makeAbsolutePath(inputPath, baseFolder)

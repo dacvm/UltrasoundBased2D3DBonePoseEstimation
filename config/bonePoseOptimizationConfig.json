@@ -24,10 +24,21 @@
     "window": 20
   },
   "intersection": {
-    "normalFacingToleranceDeg": 50
+    "normalFacingToleranceDeg": 30
   },
   "logging": {
     "printPreparationProgress": true,
     "printEvaluationProgress": false
+  },
+  "optimizer": {
+    "translationBoundMm": 10,
+    "rotationBoundDeg": 10,
+    "translationSigmaMm": 5,
+    "rotationSigmaDeg": 5,
+    "populationSize": 12,
+    "maxFunctionEvaluations": 400,
+    "useParfor": true,
+    "parforWorkers": 4,
+    "outputFolder": "output\\bonePoseOptimization\\cmaes"
   }
 }

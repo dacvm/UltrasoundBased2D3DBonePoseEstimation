@@ -73,6 +73,8 @@ T_candidate_init = stateVectorToTMatrix(poseVector, data.T_init_originct);
 % The intended future objective is to maximize sampled intensity, or minimize the negative sampled intensity.
 cost = 0;
 
+
+
 %% PACKAGE DETAILS FOR DEBUGGING
 
 % Store some of the details from the cost function

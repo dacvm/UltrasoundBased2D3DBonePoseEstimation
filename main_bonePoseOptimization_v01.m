@@ -22,22 +22,22 @@ initialPoseVector = zeros(6, 1);
 % displayBonePoseOptimizationIntersections(data, initialPoseVector, config, 'Initial Bone Pose Optimization Intersections');
 
 % EVALUATE THE INITIAL POSE
-% Evaluate the initial pose once so the future cost-function path already has probe-facing pixels available.
-[initialCost, initialCostDetails] = bonePoseCostPlaceholder(initialPoseVector, data, config);
+% Evaluate the initial pose once so the cost-function path already has probe-facing pixels available.
+[initialCost, initialCostDetails] = bonePoseCostFunction(initialPoseVector, data, config);
 
 % Keep the initial geometry evaluation visible in the workspace for inspection after the script finishes.
 initialEvaluation = initialCostDetails.poseEvaluation;
 
-% Print a compact summary so the user knows the placeholder pipeline reached the geometry stage.
-fprintf('Initial placeholder cost: %.6f\n', initialCost);
+% Print a compact summary so the user knows the cost-function pipeline reached the geometry stage.
+fprintf('Initial cost: %.6f\n', initialCost);
 fprintf('Computed probe-facing pixels for %d image planes.\n', numel(initialEvaluation));
 
-%% RUN FUTURE OPTIMIZATION PLACEHOLDER
+%% RUN CMA-ES OPTIMIZATION
 
-% Call the placeholder optimizer wrapper so the final script shape is already ready for real optimization code.
-optimizationResult = runBonePoseOptimizationPlaceholder(initialPoseVector, data, config, initialCost);
+% Call the optimizer wrapper so CMA-ES can minimize bonePoseCostFunction around the manual pose.
+optimizationResult = runBonePoseOptimization(initialPoseVector, data, config, initialCost);
 
-% Display the placeholder result so the script has a clear end point during early development.
+% Display the optimizer result so the run has a clear numeric summary before visual inspection.
 disp(optimizationResult);
 
 % DISPLAY THE FINAL RESULT
