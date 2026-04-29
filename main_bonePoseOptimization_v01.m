@@ -12,8 +12,8 @@ config = createBonePoseOptimizationConfig();
 data = prepareBonePoseOptimizationInputs(config);
 
 % CREATE INITIAL POSE PARAMETER
-% Convert the current manual alignment transform into a state vector for the optimizer.
-initialPoseVector = TMatrixToStateVector(data.T_init_originct);
+% Start the optimizer at zero SE(3) perturbation, which means "use data.T_init_originct unchanged".
+initialPoseVector = zeros(6, 1);
 
 % DISPLAY THE INITIAL SETUP
 % Show the starting mesh pose and sampled image-plane poses before any optimization step runs.

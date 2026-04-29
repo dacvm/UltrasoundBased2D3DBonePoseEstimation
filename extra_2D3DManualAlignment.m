@@ -1,3 +1,16 @@
+%% SUMMARY OF THIS SCRIPT
+% This is an example script. The main purpose of this script is manual
+% alignment of the bone mesh and the 2D ultrasound image planes. If you
+% need to adjust the bone mesh manually, using keyboards, use this script.
+% This script will output a .mat file of the transformation you have made
+% to the bone mesh:
+% 
+% This script showcasing
+% 1. What are the data that is required
+% 2. How to read the data that is required
+% 3. Showing the ultrasound 2D image plane in 3D
+% 4. Showing the scene (mesh and the image planes) and moving the bone mesh
+
 clear; clc; close all;
 % Generate path to functions
 addpath(genpath('functions'));

@@ -3,16 +3,15 @@ function [cost, details] = bonePoseCostPlaceholder(poseVector, data, config)
 % This function declaration defines the cost-function entry point that an optimizer can call later.
 %
 % What this function does:
-%   This placeholder shows the intended shape of the future cost function.
+%   This placeholder shows the intended shape of the cost function.
 %   It receives a pose vector, converts that vector into a candidate mesh
 %   transform, computes probe-facing intersection pixels for that pose, and
 %   then returns a scalar cost value.
 %
 % Why this function exists:
-%   A future optimizer needs one function that answers the question:
+%   An optimizer needs one function that answers the question:
 %   "How good is this candidate bone pose?" This placeholder already wires
-%   together the geometry pieces needed to answer that question later. The
-%   only missing part is the actual image-intensity scoring.
+%   together the geometry pieces needed to answer that question later.
 %
 % Inputs:
 %   poseVector:
@@ -51,18 +50,18 @@ end
 
 %% CONVERT POSE VECTOR TO MESH TRANSFORM
 
-% Convert the candidate state parameters to a 4x4 mesh transform using the future state-convention helper.
-T_candidateMeshToReference = stateVectorToTMatrix(poseVector, data.T_init_originct);
+% Convert the optimizer candidate state into a 4x4 transform around the initial pose.
+T_candidate_init = stateVectorToTMatrix(poseVector, data.T_init_originct);
 
 %% COMPUTE PROBE-FACING PIXELS
 
 % Evaluate the geometry for this candidate pose so the cost function can sample image intensities later.
 [poseEvaluation, transformedMesh] = computeProbeFacingPixelsForPose( ...
-    data.meshVerticesLocal, ...
-    data.meshFaces, ...
-    data.planes, ...
-    T_candidateMeshToReference, ...
-    config);
+                                        data.meshVerticesLocal, ...
+                                        data.meshFaces, ...
+                                        data.planes, ...
+                                        T_candidate_init, ...
+                                        config);
 
 %% FUTURE COST-FUNCTION PLACEHOLDER
 
@@ -72,15 +71,9 @@ cost = 0;
 
 %% PACKAGE DETAILS FOR DEBUGGING
 
-% Store the candidate transform so future debugging can compare optimizer poses.
-details.T_candidateMeshToReference = T_candidateMeshToReference;
-
-% Store the transformed mesh so users can visualize the exact geometry used for this candidate pose.
-details.transformedMesh = transformedMesh;
-
-% Store the per-plane selected pixels because this is the essential output needed for the future cost.
-details.poseEvaluation = poseEvaluation;
-
-% Store a short status message so it is obvious that this function is not a real cost yet.
-details.status = 'placeholder_cost_returns_zero';
+% Store some of the details from the cost function
+details.T_candidate_init = T_candidate_init;        % Candidate transform so future debugging can compare optimizer poses.
+details.transformedMesh = transformedMesh;          % Transformed mesh so users can visualize the exact geometry used for this candidate pose.
+details.poseEvaluation = poseEvaluation;            % Per-plane selected pixels because this is the essential output needed for the future cost.
+details.status = 'placeholder_cost_returns_zero';   % Short status message.
 end

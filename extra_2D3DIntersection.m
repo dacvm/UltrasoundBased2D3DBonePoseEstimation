@@ -1,3 +1,13 @@
+%% SUMMARY OF THIS SCRIPT
+% This is an example script. Treat it as a guideline if you want to do
+% things in the following:
+% 1. What are the data that is required
+% 2. How to read the data that is required
+% 3. Showing the ultrasound 2D image plane in 3D
+% 4. Showing the scene (mesh and the image planes)
+% 5. How to calculate 2D/3D intersection
+% 6. How to show the 2D/3D intersection
+
 clear; clc; close all;
 
 % Generate path to functions
