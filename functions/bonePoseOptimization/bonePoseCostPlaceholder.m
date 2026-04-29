@@ -63,6 +63,10 @@ T_candidate_init = stateVectorToTMatrix(poseVector, data.T_init_originct);
                                         T_candidate_init, ...
                                         config);
 
+% % Show the precomputed image intersections for sanity checking; comment this line before real optimization runs.
+% planeImages = {data.planes.image};
+% displayImageIntersections(planeImages, poseEvaluation, 'Cost Placeholder Probe-Facing Intersections');
+
 %% FUTURE COST-FUNCTION PLACEHOLDER
 
 % This is where future code should sample image intensities at poseEvaluation(idx).probeFacingPixels.

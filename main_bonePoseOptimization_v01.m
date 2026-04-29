@@ -15,11 +15,11 @@ data = prepareBonePoseOptimizationInputs(config);
 % Start the optimizer at zero SE(3) perturbation, which means "use data.T_init_originct unchanged".
 initialPoseVector = zeros(6, 1);
 
-% DISPLAY THE INITIAL SETUP
-% Show the starting mesh pose and sampled image-plane poses before any optimization step runs.
-displayBonePoseOptimizationScene(data, initialPoseVector, config, 'Initial Bone Pose Optimization Setup');
-% Show the starting mesh-plane intersection overlays inside each 2D image for closer inspection.
-displayBonePoseOptimizationIntersections(data, initialPoseVector, config, 'Initial Bone Pose Optimization Intersections');
+% % DISPLAY THE INITIAL SETUP
+% % Show the starting mesh pose and sampled image-plane poses before any optimization step runs.
+% displayBonePoseOptimizationScene(data, initialPoseVector, config, 'Initial Bone Pose Optimization Setup');
+% % Show the starting mesh-plane intersection overlays inside each 2D image for closer inspection.
+% displayBonePoseOptimizationIntersections(data, initialPoseVector, config, 'Initial Bone Pose Optimization Intersections');
 
 % EVALUATE THE INITIAL POSE
 % Evaluate the initial pose once so the future cost-function path already has probe-facing pixels available.

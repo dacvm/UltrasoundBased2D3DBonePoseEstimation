@@ -64,7 +64,6 @@ end
 
 % Apply the candidate rigid pose to the original local mesh vertices.
 mesh.V = applyRigidTransform(meshVerticesLocal, T_mesh_ref);
-
 % Reuse the same face connectivity because rigid motion does not change mesh topology.
 mesh.F = meshFaces;
 
@@ -89,10 +88,8 @@ for idx_plane = 1:n_planes
     % Compute all mesh-plane intersections and their rasterized pixel locations.
     [mask, pixelList, segments3D, segmentsUV, segmentFaceIdx] = meshPlaneIntersectionPixels(mesh, plane);
 
-    % Compute the physical pixel width used to convert UV coordinates to image columns.
+    % Compute the physical pixel width used to convert UV coordinates to image columns and.
     du = plane.W / plane.nCols;
-
-    % Compute the physical pixel height used to convert UV coordinates to image rows.
     dv = plane.H / plane.nRows;
 
     % Keep only the intersection segments whose source mesh faces point toward the probe.
