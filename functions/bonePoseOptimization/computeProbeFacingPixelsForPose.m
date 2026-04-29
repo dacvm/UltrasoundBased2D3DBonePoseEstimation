@@ -100,38 +100,18 @@ for idx_plane = 1:n_planes
         selectProbeFacingIntersectionSegments(mesh, segments3D, segmentsUV, segmentFaceIdx, plane, ...
                                              du, dv, plane.nRows, plane.nCols, config.intersection.normalFacingToleranceDeg);
 
-    % Store the full binary hit mask for optional debugging.
-    poseEvaluation(idx_plane).mask = mask;
-
-    % Store every hit pixel before probe-facing selection for optional comparison.
-    poseEvaluation(idx_plane).pixelList = pixelList;
-
-    % Store the 3D intersection segments before probe-facing selection for optional debugging.
-    poseEvaluation(idx_plane).segments3D = segments3D;
-
-    % Store the UV intersection segments before probe-facing selection for optional debugging.
-    poseEvaluation(idx_plane).segmentsUV = segmentsUV;
-
-    % Store face indices so each segment can be traced back to the source mesh face.
-    poseEvaluation(idx_plane).segmentFaceIdx = segmentFaceIdx;
-
-    % Store the logical mask that marks which segments passed the probe-facing test.
-    poseEvaluation(idx_plane).probeFacingSegmentMask = probeFacingSegmentMask;
-
-    % Store the selected 3D segments because they describe the visible curve in physical space.
-    poseEvaluation(idx_plane).probeFacingSegments3D = probeFacingSegments3D;
-
-    % Store the selected UV segments because they are useful for image-space debugging.
-    poseEvaluation(idx_plane).probeFacingSegmentsUV = probeFacingSegmentsUV;
-
-    % Store the selected image pixels because this is the key output needed by the future cost function.
-    poseEvaluation(idx_plane).probeFacingPixels = probeFacingPixels;
-
-    % Store the facing score so the future code can inspect how strongly each segment faced the probe.
-    poseEvaluation(idx_plane).segmentFacingScore = segmentFacingScore;
-
-    % Store the timestamp so the result can be mapped back to its source image plane.
-    poseEvaluation(idx_plane).timestamp = plane.timestamp;
+    % Store the necessary values 
+    poseEvaluation(idx_plane).mask                   = mask;                    % Full binary hit mask for optional debugging.
+    poseEvaluation(idx_plane).pixelList              = pixelList;               % Every hit pixel before probe-facing selection for optional comparison.
+    poseEvaluation(idx_plane).segments3D             = segments3D;              % 3D intersection segments before probe-facing selection for optional debugging.
+    poseEvaluation(idx_plane).segmentsUV             = segmentsUV;              % UV intersection segments before probe-facing selection for optional debugging.
+    poseEvaluation(idx_plane).segmentFaceIdx         = segmentFaceIdx;          % Face indices so each segment can be traced back to the source mesh face.
+    poseEvaluation(idx_plane).probeFacingSegmentMask = probeFacingSegmentMask;  % Logical mask that marks which segments passed the probe-facing test.
+    poseEvaluation(idx_plane).probeFacingSegments3D  = probeFacingSegments3D;   % Selected 3D segments because they describe the visible curve in physical space.
+    poseEvaluation(idx_plane).probeFacingSegmentsUV  = probeFacingSegmentsUV;   % Selected UV segments because they are useful for image-space debugging.
+    poseEvaluation(idx_plane).probeFacingPixels      = probeFacingPixels;       % Selected image pixels because this is the key output needed by the future cost function.
+    poseEvaluation(idx_plane).segmentFacingScore     = segmentFacingScore;      % Facing score so the future code can inspect how strongly each segment faced the probe.
+    poseEvaluation(idx_plane).timestamp              = plane.timestamp;         % Timestamp so the result can be mapped back to its source image plane.
 
     % Print a short progress line only when enabled because optimization may evaluate many poses.
     if config.logging.printEvaluationProgress
