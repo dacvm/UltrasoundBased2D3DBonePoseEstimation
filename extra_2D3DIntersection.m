@@ -311,12 +311,12 @@ for idx_plane = 1:n_planes
     intersections(idx_plane).segmentFacingScore     = segmentFacingScore;
     intersections(idx_plane).timestamp              = plane.timestamp;
 
-    % Draw returned 3D segments on top of the femur and image plane when intersections exist.
-    if ~isempty(segments3D)
-        % Loop over each returned 3D segment because every triangle contributes at most one segment.
-        for idx_segment = 1:numel(segments3D)
-            % Read and plot the current 3D segment endpoints from the cell array.
-            current_segment3D = segments3D{idx_segment};
+    % Draw only the probe-facing 3D segments so the 3D view matches the normal tolerance selection.
+    if ~isempty(probeFacingSegments3D)
+        % Loop over the filtered 3D segments because the full segment list also contains back-facing mesh hits.
+        for idx_segment = 1:numel(probeFacingSegments3D)
+            % Read the current filtered segment endpoints before plotting them in reference-frame coordinates.
+            current_segment3D = probeFacingSegments3D{idx_segment};
             plot3(ax1, current_segment3D(:, 1), current_segment3D(:, 2), current_segment3D(:, 3), 'r-', ...
                  'LineWidth', 2, 'Tag', 'plot_mesh_plane_intersection');
         end

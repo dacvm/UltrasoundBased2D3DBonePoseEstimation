@@ -280,10 +280,8 @@ end
 
 % Build a readable timestamp that can be used safely in a Windows folder name.
 runStamp = char(datetime('now', 'Format', 'yyyyMMdd_HHmmss'));
-
 % Build the first candidate run folder name from the timestamp.
 runFolder = fullfile(outputFolder, ['run_' runStamp]);
-
 % Start the collision counter at one so repeated runs in the same second can still be unique.
 runIndex = 1;
 
@@ -324,7 +322,6 @@ function progressFilePath = initializeCMAESProgressFile(runFolder)
 
 % Recreate the hard-coded folder shape that cmaes_parfor loads from pwd.
 progressFolder = fullfile(runFolder, 'functions', 'optimizers', 'CMAES', 'OptData');
-
 % Create the progress folder before saving OptSaver.mat into it.
 [progressFolderCreated, progressFolderMessage, progressFolderMessageId] = mkdir(progressFolder);
 
@@ -335,10 +332,8 @@ end
 
 % Initialize the external script's value history as empty because no evaluations have run yet.
 val_list = [];
-
 % Initialize the external script's run counter because cmaes_parfor saves it back to OptSaver.mat.
-i_opts = 1;
-
+i_opts   = 1;
 % Build the exact MAT-file path that the external cmaes_parfor progress code expects.
 progressFilePath = fullfile(progressFolder, 'OptSaver.mat');
 
@@ -405,47 +400,20 @@ function opts = buildCMAESOptions(cmaesSettings, lowerBounds, upperBounds)
 % Start from the external CMA-ES defaults so unspecified options keep their documented behavior.
 opts = cmaes_parfor('defaults');
 
-% Apply the local lower bounds that keep the Lie algebra perturbation small.
-opts.LBounds = lowerBounds;
-
-% Apply the local upper bounds that keep the Lie algebra perturbation small.
-opts.UBounds = upperBounds;
-
-% Use the selected moderate population size for this 6D problem.
-opts.PopSize = cmaesSettings.populationSize;
-
-% Limit total objective calls so the first real optimizer stays practical.
-opts.MaxFunEvals = cmaesSettings.maxFunctionEvaluations;
-
-% Keep restarts off for the first bounded local-search implementation.
-opts.Restarts = 0;
-
-% Keep vectorized objective evaluation off because bonePoseCostFunction evaluates one pose at a time.
-opts.EvalParallel = 'no';
-
-% Use parfor only when requested and supported by the installed MATLAB toolboxes.
-opts.ParforRun = double(cmaesSettings.useParfor && hasParallelComputingToolbox());
-
-% Pass the configured worker cap to the external parfor loop.
-opts.ParforWorkers = cmaesSettings.parforWorkers;
-
-% Save the final CMA-ES variables inside the per-run output folder.
-opts.SaveVariables = 'final';
-
-% Store the CMA-ES variable snapshot in the current run folder for later inspection.
-opts.SaveFilename = 'variablescmaes.mat';
-
-% Store CMA-ES log files in the current run folder next to the variable snapshot.
-opts.LogFilenamePrefix = 'outcmaes';
-
-% Keep CMA-ES file logging enabled so the run can be inspected afterward.
-opts.LogModulo = 1;
-
-% Disable live plotting because optimization scripts should not create extra figures during long runs.
-opts.LogPlot = 'off';
-
-% Print regular CMA-ES progress so users can see that the optimizer is still running.
-opts.DispModulo = 1;
+opts.LBounds            = lowerBounds;                              % Apply the local lower bounds that keep the Lie algebra perturbation small.
+opts.UBounds            = upperBounds;                              % Apply the local upper bounds that keep the Lie algebra perturbation small.
+opts.PopSize            = cmaesSettings.populationSize;             % Use the selected moderate population size for this 6D problem.
+opts.MaxFunEvals        = cmaesSettings.maxFunctionEvaluations;     % Limit total objective calls so the first real optimizer stays practical.
+opts.Restarts           = 0;                                        % Keep restarts off for the first bounded local-search implementation.
+opts.EvalParallel       = 'no';                                     % Keep vectorized objective evaluation off because bonePoseCostFunction evaluates one pose at a time.
+opts.ParforRun          = double(cmaesSettings.useParfor && hasParallelComputingToolbox()); % Use parfor only when requested and supported by the installed MATLAB toolboxes.
+opts.ParforWorkers      = cmaesSettings.parforWorkers;              % Pass the configured worker cap to the external parfor loop.
+opts.SaveVariables      = 'final';                                  % Save the final CMA-ES variables inside the per-run output folder.
+opts.SaveFilename       = 'variablescmaes.mat';                     % Store the CMA-ES variable snapshot in the current run folder for later inspection.
+opts.LogFilenamePrefix  = 'outcmaes';                               % Store CMA-ES log files in the current run folder next to the variable snapshot.
+opts.LogModulo          = 1;                                        % Keep CMA-ES file logging enabled so the run can be inspected afterward.
+opts.LogPlot            = 'off';                                    % Disable live plotting because optimization scripts should not create extra figures during long runs.
+opts.DispModulo         = 1;                                        % Print regular CMA-ES progress so users can see that the optimizer is still running.
 
 % Tell the user when parfor was requested but cannot be used in this MATLAB session.
 if cmaesSettings.useParfor && opts.ParforRun == 0

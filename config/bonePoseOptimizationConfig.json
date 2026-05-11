@@ -27,18 +27,18 @@
     "normalFacingToleranceDeg": 30
   },
   "logging": {
-    "printPreparationProgress": true,
+    "printPreparationProgress": false,
     "printEvaluationProgress": false
   },
   "optimizer": {
-    "translationBoundMm": 10,
-    "rotationBoundDeg": 10,
-    "translationSigmaMm": 5,
-    "rotationSigmaDeg": 5,
-    "populationSize": 12,
-    "maxFunctionEvaluations": 400,
+    "translationBoundMm": 1.0,
+    "rotationBoundDeg": 1.0,
+    "translationSigmaMm": 0.5,
+    "rotationSigmaDeg": 0.5,
+    "populationSize": 256,
+    "maxFunctionEvaluations": 1000,
     "useParfor": true,
-    "parforWorkers": 4,
+    "parforWorkers": 6,
     "outputFolder": "output\\bonePoseOptimization\\cmaes"
   }
 }

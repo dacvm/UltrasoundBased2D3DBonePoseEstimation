@@ -170,6 +170,8 @@ config.optimizer.outputFolder = makeAbsolutePath(getOptionalField(optimizerConfi
 config.source.configFilePath = configFilePath;
 end
 
+
+%% HELPER: GET REQUIRED FIELD
 function value = getRequiredField(sourceStruct, fieldName, displayName)
 %GETREQUIREDFIELD Read a required field and report a clear config path when it is missing.
 % This local function keeps the parser messages helpful for users editing the JSON file.
@@ -184,6 +186,9 @@ end
 value = sourceStruct.(fieldName);
 end
 
+
+%% HELPER: GET OPTIONAL FIELD
+
 function value = getOptionalField(sourceStruct, fieldName, defaultValue)
 %GETOPTIONALFIELD Read an optional field or return a default value.
 % This local function lets new config fields be added without breaking older JSON files.
@@ -196,6 +201,8 @@ else
     value = defaultValue;
 end
 end
+
+%% HELPER: MAKE ABSOLUTE PATH
 
 function absolutePath = makeAbsolutePath(inputPath, baseFolder)
 %MAKEABSOLUTEPATH Resolve a path against a base folder when it is relative.
@@ -213,6 +220,8 @@ else
 end
 end
 
+%% HELPER: IS ABSOLUTE?
+
 function isAbsolute = isAbsolutePath(inputPath)
 %ISABSOLUTEPATH Detect whether a path is already absolute on Windows or Unix-like systems.
 % This local function avoids assuming that every project will run from the same drive or operating system.
@@ -229,6 +238,8 @@ isUnixPath = startsWith(inputPath, '/');
 % Combine all supported absolute path forms into one logical flag.
 isAbsolute = isDrivePath || isUncPath || isUnixPath;
 end
+
+%% HELPER: ENSURE CELL STRING
 
 function values = ensureCellString(rawValues)
 %ENSURECELLSTRING Convert JSON string arrays into a MATLAB cell array of character vectors.
