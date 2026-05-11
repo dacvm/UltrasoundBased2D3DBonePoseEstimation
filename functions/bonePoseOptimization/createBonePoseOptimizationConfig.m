@@ -124,6 +124,23 @@ config.smoothing.window = getRequiredField(rawConfig.smoothing, 'window', 'smoot
 % Store the maximum angle for keeping probe-facing mesh intersections.
 config.intersection.normalFacingToleranceDeg = getRequiredField(rawConfig.intersection, 'normalFacingToleranceDeg', 'intersection.normalFacingToleranceDeg');
 
+%% COST OPTIONS
+
+% Read the optional cost group so older JSON files can still use the default objective settings.
+costConfig = getOptionalField(rawConfig, 'cost', struct());
+
+% Store the intensity normalization value; [] means the cost function should infer it from the image data.
+config.cost.intensityMax = getOptionalField(costConfig, 'intensityMax', []);
+
+% Store the minimum initial-pose pixel count that makes an image plane active in the cost average.
+config.cost.minReferencePixels = getOptionalField(costConfig, 'minReferencePixels', 10);
+
+% Store the current-pose pixel count below which an active image plane is treated as missing.
+config.cost.nMinPixels = getOptionalField(costConfig, 'nMinPixels', 10);
+
+% Store the penalty weight for active image planes that have too few current intersection pixels.
+config.cost.lambdaMissing = getOptionalField(costConfig, 'lambdaMissing', 1.0);
+
 %% LOGGING OPTIONS
 
 % Store whether slow preparation steps should print progress messages.

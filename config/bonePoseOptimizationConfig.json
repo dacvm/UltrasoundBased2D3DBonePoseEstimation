@@ -26,15 +26,21 @@
   "intersection": {
     "normalFacingToleranceDeg": 30
   },
+  "cost": {
+    "intensityMax": 255,
+    "minReferencePixels": 10,
+    "nMinPixels": 10,
+    "lambdaMissing": 1.0
+  },
   "logging": {
     "printPreparationProgress": false,
     "printEvaluationProgress": false
   },
   "optimizer": {
-    "translationBoundMm": 1.0,
-    "rotationBoundDeg": 1.0,
-    "translationSigmaMm": 0.5,
-    "rotationSigmaDeg": 0.5,
+    "translationBoundMm": 5.0,
+    "rotationBoundDeg": 5.0,
+    "translationSigmaMm": 2.0,
+    "rotationSigmaDeg": 2.0,
     "populationSize": 256,
     "maxFunctionEvaluations": 1000,
     "useParfor": true,

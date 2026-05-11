@@ -77,7 +77,6 @@ T_candidate_init = stateVectorToTMatrix(poseVector, data.T_init_originct);
                                         config);
 
 % Leave plotting to scripts or display helpers so repeated optimizer calls stay focused on cost computation.
-% Plot...
 
 %% COMPUTE INTENSITY-COVERAGE-AWARE COST
 
@@ -85,14 +84,14 @@ T_candidate_init = stateVectorToTMatrix(poseVector, data.T_init_originct);
 n_planes = numel(poseEvaluation);
 
 % Read the fixed initial-pose pixel counts prepared before optimization.
-n_initialIntersectionPixel      = getInitialIntersectionPixelCounts(data, n_planes);
+n_initialIntersectionPixel = getInitialIntersectionPixelCounts(data, n_planes);
 % Mark only planes with enough initial-pose pixels as active observations for the final average.
-activePlaneMask                 = n_initialIntersectionPixel >= costSettings.minReferencePixels;
+activePlaneMask             = n_initialIntersectionPixel >= costSettings.minReferencePixels;
 % Use a safe denominator so coverage never divides by zero or by a tiny inactive initial count.
-safeReferenceCounts             = max(n_initialIntersectionPixel, costSettings.minReferencePixels);
+safeReferenceCounts         = max(n_initialIntersectionPixel, costSettings.minReferencePixels);
 
-totalIntensity                  = 0;    % Start the running intensity sum at zero so debugging can still inspect all sampled candidate pixels.
-totalIntersectionPixels         = 0;    % Start the sampled-pixel count at zero so the diagnostic mean only uses valid selected pixels.
+totalIntensity = 0;             % Start the running intensity sum at zero so debugging can still inspect all sampled candidate pixels.
+totalIntersectionPixels = 0;    % Start the sampled-pixel count at zero so the diagnostic mean only uses valid selected pixels.
 
 perPlaneIntersectionPixelCounts = zeros(1, n_planes);   % Create one count slot per plane so debugging can show which images contributed to the cost.
 perPlaneMeanIntensity           = zeros(1, n_planes);   % Store the mean raw intensity per plane so users can see whether brightness or coverage drove a score.
@@ -101,19 +100,20 @@ perPlaneCoverage                = zeros(1, n_planes);   % Store the coverage fac
 perPlaneScore                   = zeros(1, n_planes);   % Store the final brightness-times-coverage score per plane before the sign flip for minimization.
 perPlaneMissingMask             = false(1, n_planes);   % Store the missing-pixel flag per plane so users can inspect the missing-intersection penalty.
 
-
 % Loop through every evaluated image plane because each active plane contributes one averaged score.
 for idx_plane = 1:n_planes
 
     % Read the selected probe-facing pixels for this plane; each row is stored as [row, col].
     probeFacingPixels = poseEvaluation(idx_plane).probeFacingPixels;
+
     % Count this plane's selected pixels even when there are zero pixels, because zero can trigger the missing penalty.
-    n_plane_pixels    = size(probeFacingPixels, 1);
+    n_plane_pixels = size(probeFacingPixels, 1);
 
     % Store the current-pose per-plane count so coverage and missing diagnostics use the same value.
     perPlaneIntersectionPixelCounts(idx_plane) = n_plane_pixels;
+
     % Mark this plane as missing when the current pose explains it with too few selected pixels.
-    perPlaneMissingMask(idx_plane)             = n_plane_pixels < costSettings.nMinPixels;
+    perPlaneMissingMask(idx_plane) = n_plane_pixels < costSettings.nMinPixels;
 
     % Skip intensity sampling when no selected pixels exist; the score stays zero for this plane.
     if n_plane_pixels == 0
@@ -129,15 +129,18 @@ for idx_plane = 1:n_planes
 
     % Convert [row, col] pixel coordinates to stored-image indexing, where column is the first dimension.
     selected_linear_indices = sub2ind(size(current_image), selected_cols, selected_rows);
+
     % Convert sampled intensities to double before averaging so integer image types cannot overflow.
-    selected_intensities    = double(current_image(selected_linear_indices));
+    selected_intensities = double(current_image(selected_linear_indices));
+
     % Compute this plane's mean sampled intensity because the objective rewards bright mesh-image overlap.
-    meanIntensity_i         = mean(selected_intensities(:));
+    meanIntensity_i = mean(selected_intensities(:));
 
     % Normalize the mean intensity so lambdaMissing has a stable interpretation across image types.
     meanIntensityNorm_i = meanIntensity_i / costSettings.intensityMax;
+
     % Compute the current coverage relative to the fixed initial-pose pixel count, capped at one.
-    coverage_i          = min(1, n_plane_pixels / safeReferenceCounts(idx_plane));
+    coverage_i = min(1, n_plane_pixels / safeReferenceCounts(idx_plane));
 
     % Reset non-finite normalized intensities to zero so one bad image cannot create NaN or Inf cost values.
     if ~isfinite(meanIntensityNorm_i)
@@ -157,18 +160,24 @@ for idx_plane = 1:n_planes
         score_i = 0;
     end
 
-    % Store some quantities for later report
-    perPlaneMeanIntensity(idx_plane)        = meanIntensity_i;          % Per-plane raw mean intensity for debugging and result inspection.
-    perPlaneMeanIntensityNorm(idx_plane)    = meanIntensityNorm_i;      % Per-plane normalized mean intensity for debugging the objective scale.
-    perPlaneCoverage(idx_plane)             = coverage_i;               % Per-plane coverage factor for checking whether small intersections are being downweighted.
-    perPlaneScore(idx_plane)                = score_i;                  % Per-plane score before averaging active planes.
+    % Store the per-plane raw mean intensity for debugging and result inspection.
+    perPlaneMeanIntensity(idx_plane) = meanIntensity_i;
+
+    % Store the per-plane normalized mean intensity for debugging the objective scale.
+    perPlaneMeanIntensityNorm(idx_plane) = meanIntensityNorm_i;
+
+    % Store the per-plane coverage factor for checking whether small intersections are being downweighted.
+    perPlaneCoverage(idx_plane) = coverage_i;
+
+    % Store the per-plane score before averaging active planes.
+    perPlaneScore(idx_plane) = score_i;
 
     % Add this plane's intensity values to the diagnostic total used for the global sampled-pixel mean.
-    totalIntensity          = totalIntensity + sum(selected_intensities(:));
+    totalIntensity = totalIntensity + sum(selected_intensities(:));
+
     % Add this plane's selected pixel count to the diagnostic denominator.
     totalIntersectionPixels = totalIntersectionPixels + n_plane_pixels;
 end
-
 
 % Compute the diagnostic raw mean intensity across all current selected pixels when any exist.
 if totalIntersectionPixels == 0
@@ -179,36 +188,31 @@ else
     meanIntensity = totalIntensity / totalIntersectionPixels;
 end
 
-
 % Use only active planes for the final average because inactive planes were not expected to contain bone.
 if any(activePlaneMask)
-
     % Negate the active-plane score mean so a minimizing optimizer prefers bright, well-covered intersections.
     intensityCoverageCost = -mean(perPlaneScore(activePlaneMask));
 
     % Average active missing flags so the penalty grows when the pose explains only a small subset of images.
-    missingPenaltyCost = mean(perPlaneMissingMask(activePlaneMask));
+    missingPenalty = mean(perPlaneMissingMask(activePlaneMask));
 
     % Combine the reward term and the missing-intersection penalty into the final scalar objective.
-    cost = intensityCoverageCost + costSettings.lambdaMissing * missingPenaltyCost;
+    cost = intensityCoverageCost + costSettings.lambdaMissing * missingPenalty;
 
     % Store a short status string so debugging can quickly identify the normal computed-cost case.
     costStatus = 'intensity_coverage_cost_computed';
-
 else
-
     % Use a large finite penalty instead of NaN or Inf when no plane has a usable initial count.
     intensityCoverageCost = costSettings.noActivePlanePenalty;
 
     % Treat the no-active-plane case as fully missing because the objective has no valid active average.
-    missingPenaltyCost = 1;
+    missingPenalty = 1;
 
     % Return the large finite penalty so optimizers can keep running without accepting an invalid objective.
     cost = costSettings.noActivePlanePenalty;
 
     % Store a short status string so debugging can quickly identify missing reference data.
     costStatus = 'no_active_reference_planes_large_penalty';
-
 end
 
 % Guard the final scalar because optimizers expect a finite numeric value from every objective call.
@@ -222,36 +226,43 @@ end
 
 %% PACKAGE DETAILS FOR DEBUGGING
 
-% Store values related to candidate properties
-details.T_candidate_init                = T_candidate_init;                 % Candidate transform so future debugging can compare optimizer poses.
-details.transformedMesh                 = transformedMesh;                  % Transformed mesh so users can visualize the exact geometry used for this candidate pose.
-details.poseEvaluation                  = poseEvaluation;                   % Store per-plane selected pixels because this is the essential geometry output needed by the cost.
-
-% Store values related to global values of the pixel intensities
-details.n_initialIntersectionPixel      = n_initialIntersectionPixel;       % Store fixed initial-pose per-image counts so users can verify the coverage references.
-details.activePlaneMask                 = activePlaneMask;                  % Store the active-plane mask so users can see which planes were included in the final average.
-details.totalIntensity                  = totalIntensity;                   % Diagnostic sum of all sampled intensities so users can verify the raw numerator.
-details.totalIntersectionPixels         = totalIntersectionPixels;          % Diagnostic count of all sampled pixels so users can verify the raw denominator.
-details.meanIntensity                   = meanIntensity;                    % Diagnostic mean sampled intensity for continuity with older inspection scripts.
-
-% Store values related to calculating the cost function
-details.perPlaneIntersectionPixelCounts = perPlaneIntersectionPixelCounts;  % Per-plane intersection pixel count, so users can see which images contributed enough pixels.
-details.perPlaneMeanIntensity           = perPlaneMeanIntensity;            % Per-plane raw mean intensity, for debugging brightness behavior.
-details.perPlaneMeanIntensityNorm       = perPlaneMeanIntensityNorm;        % Per-plane normalized mean intensity, for debugging intensity scaling.
-details.perPlaneCoverage                = perPlaneCoverage;                 % Per-plane coverage factors, for debugging tiny-intersection downweighting.
-details.perPlaneScore                   = perPlaneScore;                    % Per-plane scores, so users can inspect the value averaged by the reward term.
-details.perPlaneMissingMask             = perPlaneMissingMask;              % Per-plane missing flags, so users can inspect the missing-intersection penalty term.
-
-% Store the contribution value of cost function
-details.intensityCoverageCost           = intensityCoverageCost;            % The reward term separately so users can understand the final combined cost.
-details.missingPenaltyCost              = missingPenaltyCost;               % The missing penalty separately so users can tune lambdaMissing without re-reading the code.
-
-% Store the properties of cost function
-details.costSettings                    = costSettings;                     % Store the resolved cost settings so each result records the values used for scoring.
-details.status                          = costStatus;                       % Store a short status message for quick debugging in scripts.
+% Store the candidate transform so future debugging can compare optimizer poses.
+details.T_candidate_init                = T_candidate_init;
+% Store the transformed mesh so users can visualize the exact geometry used for this candidate pose.
+details.transformedMesh                 = transformedMesh;
+% Store per-plane selected pixels because this is the essential geometry output needed by the cost.
+details.poseEvaluation = poseEvaluation;
+% Store the diagnostic sum of all sampled intensities so users can verify the raw numerator.
+details.totalIntensity = totalIntensity;
+% Store the diagnostic count of all sampled pixels so users can verify the raw denominator.
+details.totalIntersectionPixels = totalIntersectionPixels;
+% Store the diagnostic mean sampled intensity for continuity with older inspection scripts.
+details.meanIntensity = meanIntensity;
+% Store current-pose per-image counts so users can see which images contributed enough pixels.
+details.perPlaneIntersectionPixelCounts = perPlaneIntersectionPixelCounts;
+% Store fixed initial-pose per-image counts so users can verify the coverage references.
+details.n_initialIntersectionPixel = n_initialIntersectionPixel;
+% Store the active-plane mask so users can see which planes were included in the final average.
+details.activePlaneMask = activePlaneMask;
+% Store per-plane raw mean intensity for debugging brightness behavior.
+details.perPlaneMeanIntensity = perPlaneMeanIntensity;
+% Store per-plane normalized mean intensity for debugging intensity scaling.
+details.perPlaneMeanIntensityNorm = perPlaneMeanIntensityNorm;
+% Store per-plane coverage factors for debugging tiny-intersection downweighting.
+details.perPlaneCoverage = perPlaneCoverage;
+% Store per-plane scores so users can inspect the value averaged by the reward term.
+details.perPlaneScore = perPlaneScore;
+% Store per-plane missing flags so users can inspect the missing-intersection penalty term.
+details.perPlaneMissingMask = perPlaneMissingMask;
+% Store the reward term separately so users can understand the final combined cost.
+details.intensityCoverageCost = intensityCoverageCost;
+% Store the missing penalty separately so users can tune lambdaMissing without re-reading the code.
+details.missingPenalty = missingPenalty;
+% Store the resolved cost settings so each result records the values used for scoring.
+details.costSettings = costSettings;
+% Store a short status message for quick debugging in scripts.
+details.status = costStatus;
 end
-
-
 
 %% HELPER: READ COST SETTINGS
 
@@ -283,8 +294,6 @@ costSettings.lambdaMissing = getNonnegativeScalarSetting(costConfig, 'lambdaMiss
 costSettings.noActivePlanePenalty = 1e6;
 end
 
-
-
 %% HELPER: READ ONE OPTIONAL SETTING
 
 function value = getOptionalSetting(sourceStruct, fieldName, defaultValue)
@@ -299,8 +308,6 @@ else
     value = defaultValue;
 end
 end
-
-
 
 %% HELPER: READ POSITIVE SCALAR SETTING
 
@@ -320,8 +327,6 @@ else
 end
 end
 
-
-
 %% HELPER: READ NONNEGATIVE SCALAR SETTING
 
 function value = getNonnegativeScalarSetting(sourceStruct, fieldName, defaultValue)
@@ -340,8 +345,6 @@ else
 end
 end
 
-
-
 %% HELPER: RESOLVE INTENSITY MAXIMUM
 
 function intensityMax = resolveIntensityMax(configuredIntensityMax, data)
@@ -357,8 +360,6 @@ end
 % Infer a denominator from the prepared image planes when the config leaves intensityMax empty or invalid.
 intensityMax = inferIntensityMaxFromPlanes(data.planes);
 end
-
-
 
 %% HELPER: INFER INTENSITY MAXIMUM FROM IMAGE DATA
 
@@ -403,8 +404,6 @@ for idx_plane = 1:numel(planes)
     return;
 end
 end
-
-
 
 %% HELPER: READ INITIAL INTERSECTION COUNTS
 

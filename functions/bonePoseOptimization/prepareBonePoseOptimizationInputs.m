@@ -33,6 +33,12 @@ function data = prepareBonePoseOptimizationInputs(config)
 %       Initial 4-by-4 transform built from ACS data and manual adjustment.
 %       This is the starting pose used by the placeholder optimization code.
 %
+%   data.n_initialIntersectionPixel:
+%       Number of probe-facing intersection pixels produced by the initial
+%       pose for each image plane. The cost function uses these fixed
+%       counts as the coverage baseline and does not update them during
+%       optimization.
+%
 %   data.T_image_probecalib and data.S_image_probecalib:
 %       Calibration transform and pixel scale information from the fCal XML
 %       file. They are stored for debugging and future extensions.
@@ -190,16 +196,16 @@ for index_filename = 1:n_filename
         base_axes = T_image_ref(1:3, 1:3);
 
         % Store the neccesary values 
-        plane.p0 = origin;                              % Top-left point of the finite image plane.
-        plane.ex = base_axes(:, 1);                     % Physical direction of increasing image column.
-        plane.ey = base_axes(:, 2);                     % Physical direction of increasing image row.
-        plane.n = base_axes(:, 3);                      % Physical normal direction of the image plane.
-        plane.W = (size(current_packet.Image, 1) - 1) * S_image_probecalib(1);  % Physical image width 
-        plane.H = (size(current_packet.Image, 2) - 1) * S_image_probecalib(2);  % Physical image height
-        plane.nRows = size(current_packet.Image, 2);    % Number of image rows
-        plane.nCols = size(current_packet.Image, 1);    % Number of image columns 
-        plane.image = current_packet.Image;             % Raw image so the future cost function can sample intensity values.
-        plane.timestamp = current_packet.Timestamp;     % Timestamp so outputs can be traced back to the source packet.
+        plane.p0        = origin;                                                       % Top-left point of the finite image plane.
+        plane.ex        = base_axes(:, 1);                                              % Physical direction of increasing image column.
+        plane.ey        = base_axes(:, 2);                                              % Physical direction of increasing image row.
+        plane.n         = base_axes(:, 3);                                              % Physical normal direction of the image plane.
+        plane.W         = (size(current_packet.Image, 1) - 1) * S_image_probecalib(1);  % Physical image width 
+        plane.H         = (size(current_packet.Image, 2) - 1) * S_image_probecalib(2);  % Physical image height
+        plane.nRows     = size(current_packet.Image, 2);                                % Number of image rows
+        plane.nCols     = size(current_packet.Image, 1);                                % Number of image columns 
+        plane.image     = current_packet.Image;                                         % Raw image so the future cost function can sample intensity values.
+        plane.timestamp = current_packet.Timestamp;                                     % Timestamp so outputs can be traced back to the source packet.
 
         % Append the current plane to the output array.
         planes(plane_index) = plane;
@@ -248,15 +254,35 @@ stl_path = fullfile(config.project.root, 'data', 'bones', config.input.stlFilena
 % Read the femur mesh in its local CT coordinate frame.
 [meshFaces, meshVerticesLocal] = readStlMesh(stl_path);
 
+%% COMPUTE INITIAL-POSE INTERSECTION COUNTS
+
+% Evaluate the initial manual pose once so the optimizer can compare later candidates against a fixed coverage baseline.
+[referencePoseEvaluation, ~] = computeProbeFacingPixelsForPose( ...
+                                meshVerticesLocal, ...
+                                meshFaces, ...
+                                planes, ...
+                                T_init_originct, ...
+                                config);
+
+% Preallocate one initial-count slot per plane so the count vector stays aligned with data.planes.
+n_initialIntersectionPixel = zeros(1, numel(referencePoseEvaluation));
+
+% Loop through the initial-pose evaluation and count only the probe-facing pixels used by the cost function.
+for idx_plane = 1:numel(referencePoseEvaluation)
+    % Store the initial-pose selected-pixel count so the cost function can penalize tiny bright intersections.
+    n_initialIntersectionPixel(idx_plane) = size(referencePoseEvaluation(idx_plane).probeFacingPixels, 1);
+end
+
 %% PACKAGE OUTPUT DATA
 
-data.meshVerticesLocal  = meshVerticesLocal;                % Local vertices so optimization can re-transform the same source geometry for every candidate pose.
-data.meshFaces          = meshFaces;                        % Mesh faces because the topology does not change during rigid-pose optimization.
-data.planes             = planes;                           % Image planes because they are fixed observations during mesh-pose optimization.
-data.T_init_originct    = T_init_originct;                  % Current manual alignment as the starting pose for future optimization.
-data.T_image_probecalib = T_image_probecalib;               % Calibration transform for inspection and future extensions.
-data.S_image_probecalib = S_image_probecalib;               % Calibration spacing for inspection and future extensions.
-data.config = config;                                       % Raw configuration with the data so future scripts can reproduce how it was prepared.
+data.meshVerticesLocal          = meshVerticesLocal;            % Local vertices so optimization can re-transform the same source geometry for every candidate pose.
+data.meshFaces                  = meshFaces;                    % Mesh faces because the topology does not change during rigid-pose optimization.
+data.planes                     = planes;                       % Image planes because they are fixed observations during mesh-pose optimization.
+data.T_init_originct            = T_init_originct;              % Current manual alignment as the starting pose for future optimization.
+data.T_image_probecalib         = T_image_probecalib;           % Calibration transform for inspection and future extensions.
+data.S_image_probecalib         = S_image_probecalib;           % Calibration spacing for inspection and future extensions.
+data.n_initialIntersectionPixel = n_initialIntersectionPixel;   % Initial-pose per-plane counts used as the fixed coverage baseline by the cost function.
+data.config                     = config;                       % Raw configuration with the data so future scripts can reproduce how it was prepared.
 
 % Print the number of collected planes when requested so setup can be verified quickly.
 if config.logging.printPreparationProgress
