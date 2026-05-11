@@ -268,19 +268,16 @@ else
 end
 
 % Read or infer the intensity maximum used to normalize sampled image brightness.
-costSettings.intensityMax = resolveIntensityMax(getOptionalSetting(costConfig, 'intensityMax', []), data);
-
+costSettings.intensityMax           = resolveIntensityMax(getOptionalSetting(costConfig, 'intensityMax', []), data);
 % Read the active-plane threshold, with a default that ignores tiny initial intersections.
-costSettings.minReferencePixels = getPositiveScalarSetting(costConfig, 'minReferencePixels', 10);
-
+costSettings.minReferencePixels     = getPositiveScalarSetting(costConfig, 'minReferencePixels', 10);
 % Read the missing-plane threshold, with a default that treats tiny current intersections as insufficient.
-costSettings.nMinPixels = getPositiveScalarSetting(costConfig, 'nMinPixels', 10);
-
+costSettings.nMinPixels             = getPositiveScalarSetting(costConfig, 'nMinPixels', 10);
 % Read the missing-plane penalty weight, with a normalized-intensity default of one cost unit.
-costSettings.lambdaMissing = getNonnegativeScalarSetting(costConfig, 'lambdaMissing', 1.0);
-
+costSettings.lambdaMissing          = getNonnegativeScalarSetting(costConfig, 'lambdaMissing', 1.0);
 % Keep one large finite fallback value for invalid reference data or unexpected non-finite costs.
-costSettings.noActivePlanePenalty = 1e6;
+costSettings.noActivePlanePenalty   = 1e6;
+
 end
 
 

@@ -60,11 +60,13 @@ end
 %% PARSE JSON CONFIGURATION
 
 % Read the entire JSON file as text because jsondecode expects one character vector.
-configText = fileread(configFilePath);
+configText      = fileread(configFilePath);
 % Decode the JSON text into a nested MATLAB struct that mirrors the file hierarchy.
-rawConfig = jsondecode(configText);
+rawConfig       = jsondecode(configText);
 % Store the folder containing the JSON file so relative paths can be resolved from the file location.
-configFolder = fileparts(configFilePath);
+configFolder    = fileparts(configFilePath);
+
+
 
 %% PROJECT PATHS
 
@@ -72,13 +74,15 @@ configFolder = fileparts(configFilePath);
 projectRootRaw = getRequiredField(rawConfig.project, 'root', 'project.root');
 
 % Resolve the project root relative to the configuration file folder when it is not already absolute.
-config.project.root = makeAbsolutePath(projectRootRaw, configFolder);
+config.project.root                         = makeAbsolutePath(projectRootRaw, configFolder);
 
 % Read the helper folder name from JSON so projects can rename the helper folder if needed.
-functionsFolderName = getRequiredField(rawConfig.project, 'functionsFolderName', 'project.functionsFolderName');
+functionsFolderName                         = getRequiredField(rawConfig.project, 'functionsFolderName', 'project.functionsFolderName');
 
 % Store the helper folder as an absolute path so callers can add paths consistently.
-config.project.functionsFolder = makeAbsolutePath(functionsFolderName, config.project.root);
+config.project.functionsFolder              = makeAbsolutePath(functionsFolderName, config.project.root);
+
+
 
 %% INPUT FILENAMES
 
@@ -86,43 +90,51 @@ config.project.functionsFolder = makeAbsolutePath(functionsFolderName, config.pr
 config.input.fcalFilename = getRequiredField(rawConfig.input, 'fcalFilename', 'input.fcalFilename');
 
 % Store the folder that contains the ultrasound sequence recordings used by the current validation script.
-config.input.sequenceFolder = makeAbsolutePath(getRequiredField(rawConfig.input, 'sequenceFolder', 'input.sequenceFolder'), config.project.root);
+config.input.sequenceFolder                 = makeAbsolutePath(getRequiredField(rawConfig.input, 'sequenceFolder', 'input.sequenceFolder'), config.project.root);
 
 % Store the sequence filenames as a cell array so later code can loop over them with normal MATLAB indexing.
-config.input.sequenceFilenames = ensureCellString(getRequiredField(rawConfig.input, 'sequenceFilenames', 'input.sequenceFilenames'));
+config.input.sequenceFilenames              = ensureCellString(getRequiredField(rawConfig.input, 'sequenceFilenames', 'input.sequenceFilenames'));
 
 % Store the ACS MAT filename used to build the original femur coordinate transform.
-config.input.acsFilename = getRequiredField(rawConfig.input, 'acsFilename', 'input.acsFilename');
+config.input.acsFilename                    = getRequiredField(rawConfig.input, 'acsFilename', 'input.acsFilename');
 
 % Store the manual adjustment MAT filename used as the initial mesh pose for optimization.
-config.input.manualAdjustmentFilename = getRequiredField(rawConfig.input, 'manualAdjustmentFilename', 'input.manualAdjustmentFilename');
+config.input.manualAdjustmentFilename       = getRequiredField(rawConfig.input, 'manualAdjustmentFilename', 'input.manualAdjustmentFilename');
 
 % Store the STL filename used as the femur mesh geometry.
-config.input.stlFilename = getRequiredField(rawConfig.input, 'stlFilename', 'input.stlFilename');
+config.input.stlFilename                    = getRequiredField(rawConfig.input, 'stlFilename', 'input.stlFilename');
+
+
 
 %% IMAGE-PLANE SAMPLING OPTIONS
 
 % Store the first sampled packet index used to collect image planes.
-config.imagePlaneSampling.packetStartIndex = getRequiredField(rawConfig.imagePlaneSampling, 'packetStartIndex', 'imagePlaneSampling.packetStartIndex');
+config.imagePlaneSampling.packetStartIndex  = getRequiredField(rawConfig.imagePlaneSampling, 'packetStartIndex', 'imagePlaneSampling.packetStartIndex');
 
 % Store the packet step size used to thin the image-plane collection.
-config.imagePlaneSampling.packetStep = getRequiredField(rawConfig.imagePlaneSampling, 'packetStep', 'imagePlaneSampling.packetStep');
+config.imagePlaneSampling.packetStep        = getRequiredField(rawConfig.imagePlaneSampling, 'packetStep', 'imagePlaneSampling.packetStep');
 
 % Store the optional final packet index, where JSON null becomes [] for "use sequence end".
-config.imagePlaneSampling.packetEndIndex = getRequiredField(rawConfig.imagePlaneSampling, 'packetEndIndex', 'imagePlaneSampling.packetEndIndex');
+config.imagePlaneSampling.packetEndIndex    = getRequiredField(rawConfig.imagePlaneSampling, 'packetEndIndex', 'imagePlaneSampling.packetEndIndex');
+
+
 
 %% SMOOTHING OPTIONS
 
 % Store the transform smoothing method used before image-plane construction.
-config.smoothing.method = getRequiredField(rawConfig.smoothing, 'method', 'smoothing.method');
+config.smoothing.method                     = getRequiredField(rawConfig.smoothing, 'method', 'smoothing.method');
 
 % Store the smoothing window used before image-plane construction.
-config.smoothing.window = getRequiredField(rawConfig.smoothing, 'window', 'smoothing.window');
+config.smoothing.window                     = getRequiredField(rawConfig.smoothing, 'window', 'smoothing.window');
+
+
 
 %% INTERSECTION OPTIONS
 
 % Store the maximum angle for keeping probe-facing mesh intersections.
 config.intersection.normalFacingToleranceDeg = getRequiredField(rawConfig.intersection, 'normalFacingToleranceDeg', 'intersection.normalFacingToleranceDeg');
+
+
 
 %% COST OPTIONS
 
@@ -130,24 +142,28 @@ config.intersection.normalFacingToleranceDeg = getRequiredField(rawConfig.inters
 costConfig = getOptionalField(rawConfig, 'cost', struct());
 
 % Store the intensity normalization value; [] means the cost function should infer it from the image data.
-config.cost.intensityMax = getOptionalField(costConfig, 'intensityMax', []);
+config.cost.intensityMax                    = getOptionalField(costConfig, 'intensityMax', []);
 
 % Store the minimum initial-pose pixel count that makes an image plane active in the cost average.
-config.cost.minReferencePixels = getOptionalField(costConfig, 'minReferencePixels', 10);
+config.cost.minReferencePixels              = getOptionalField(costConfig, 'minReferencePixels', 10);
 
 % Store the current-pose pixel count below which an active image plane is treated as missing.
-config.cost.nMinPixels = getOptionalField(costConfig, 'nMinPixels', 10);
+config.cost.nMinPixels                      = getOptionalField(costConfig, 'nMinPixels', 10);
 
 % Store the penalty weight for active image planes that have too few current intersection pixels.
-config.cost.lambdaMissing = getOptionalField(costConfig, 'lambdaMissing', 1.0);
+config.cost.lambdaMissing                   = getOptionalField(costConfig, 'lambdaMissing', 1.0);
+
+
 
 %% LOGGING OPTIONS
 
 % Store whether slow preparation steps should print progress messages.
-config.logging.printPreparationProgress = getRequiredField(rawConfig.logging, 'printPreparationProgress', 'logging.printPreparationProgress');
+config.logging.printPreparationProgress     = getRequiredField(rawConfig.logging, 'printPreparationProgress', 'logging.printPreparationProgress');
 
 % Store whether repeated per-plane geometry evaluation should print progress messages.
-config.logging.printEvaluationProgress = getRequiredField(rawConfig.logging, 'printEvaluationProgress', 'logging.printEvaluationProgress');
+config.logging.printEvaluationProgress      = getRequiredField(rawConfig.logging, 'printEvaluationProgress', 'logging.printEvaluationProgress');
+
+
 
 %% OPTIMIZER OPTIONS
 
@@ -155,31 +171,33 @@ config.logging.printEvaluationProgress = getRequiredField(rawConfig.logging, 'pr
 optimizerConfig = getOptionalField(rawConfig, 'optimizer', struct());
 
 % Store the local translation search radius in millimeters.
-config.optimizer.translationBoundMm = getOptionalField(optimizerConfig, 'translationBoundMm', 10);
+config.optimizer.translationBoundMm         = getOptionalField(optimizerConfig, 'translationBoundMm', 10);
 
 % Store the local rotation search radius in degrees because this is easier to edit than radians.
-config.optimizer.rotationBoundDeg = getOptionalField(optimizerConfig, 'rotationBoundDeg', 10);
+config.optimizer.rotationBoundDeg           = getOptionalField(optimizerConfig, 'rotationBoundDeg', 10);
 
 % Store the initial CMA-ES translation sigma in millimeters.
-config.optimizer.translationSigmaMm = getOptionalField(optimizerConfig, 'translationSigmaMm', 5);
+config.optimizer.translationSigmaMm         = getOptionalField(optimizerConfig, 'translationSigmaMm', 5);
 
 % Store the initial CMA-ES rotation sigma in degrees because the wrapper converts it to radians.
-config.optimizer.rotationSigmaDeg = getOptionalField(optimizerConfig, 'rotationSigmaDeg', 5);
+config.optimizer.rotationSigmaDeg           = getOptionalField(optimizerConfig, 'rotationSigmaDeg', 5);
 
 % Store the moderate CMA-ES population size for the 6D pose search.
-config.optimizer.populationSize = getOptionalField(optimizerConfig, 'populationSize', 12);
+config.optimizer.populationSize             = getOptionalField(optimizerConfig, 'populationSize', 12);
 
 % Store the moderate first-run function evaluation budget.
-config.optimizer.maxFunctionEvaluations = getOptionalField(optimizerConfig, 'maxFunctionEvaluations', 400);
+config.optimizer.maxFunctionEvaluations     = getOptionalField(optimizerConfig, 'maxFunctionEvaluations', 400);
 
 % Store whether CMA-ES should use parfor when the Parallel Computing Toolbox is available.
-config.optimizer.useParfor = getOptionalField(optimizerConfig, 'useParfor', true);
+config.optimizer.useParfor                  = getOptionalField(optimizerConfig, 'useParfor', true);
 
 % Store the worker cap used by the external cmaes_parfor implementation.
-config.optimizer.parforWorkers = getOptionalField(optimizerConfig, 'parforWorkers', 4);
+config.optimizer.parforWorkers              = getOptionalField(optimizerConfig, 'parforWorkers', 4);
 
 % Store the base output folder where each CMA-ES run creates a timestamped subfolder.
-config.optimizer.outputFolder = makeAbsolutePath(getOptionalField(optimizerConfig, 'outputFolder', fullfile('output', 'bonePoseOptimization', 'cmaes')), config.project.root);
+config.optimizer.outputFolder               = makeAbsolutePath(getOptionalField(optimizerConfig, 'outputFolder', fullfile('output', 'bonePoseOptimization', 'cmaes')), config.project.root);
+
+
 
 %% BOOKKEEPING
 
