@@ -4,12 +4,14 @@ clear; clc; close all;
 addpath(genpath('functions'));
 
 % CREATE CONFIGURATION
-% Build one configuration struct so filenames, sampling, and geometry options live in one place.
-config = createBonePoseOptimizationConfig();
+% Choose the discrete-frame config so this script reads one selected frame from each .mha file.
+configFilePath = fullfile(pwd, 'config', 'bonePoseOptimizationConfig_discreteFrames.json');
+% Build one configuration struct so filenames, geometry options, and optimizer options live in one place.
+config = createBonePoseOptimizationConfig(configFilePath);
 
 % PREPARE DATA FOR OPTIMIZATION
-% Load calibration, image planes, mesh data, and the initial bone pose once before optimization starts.
-data = prepareBonePoseOptimizationInputs(config);
+% Load calibration, discrete image planes, mesh data, and the initial bone pose once before optimization starts.
+data = prepareBonePoseOptimizationInputs_discreteFrames(config);
 
 % CREATE INITIAL POSE PARAMETER
 % Start the optimizer at zero SE(3) perturbation, which means "use data.T_init_originct unchanged".

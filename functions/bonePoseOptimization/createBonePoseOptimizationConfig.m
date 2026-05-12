@@ -26,9 +26,10 @@ function config = createBonePoseOptimizationConfig(configFilePath)
 %       A nested MATLAB struct that follows the same category layout as the
 %       JSON file. For example:
 %           config.project.root
-%           config.input.sequenceFilenames
-%           config.imagePlaneSampling.packetStep
-%           config.smoothing.method
+%           config.input.sequenceFolder
+%           config.input.sequenceFilenames           % Present only for continuous sequence configs.
+%           config.imagePlaneSampling.packetStep     % Present only for continuous sequence configs.
+%           config.smoothing.method                  % Present only for continuous sequence configs.
 %           config.intersection.normalFacingToleranceDeg
 %           config.logging.printPreparationProgress
 %
@@ -37,9 +38,8 @@ function config = createBonePoseOptimizationConfig(configFilePath)
 %     where [] means "use the last packet from each sequence".
 %   - Relative paths are resolved from the JSON file location, not from a
 %     random current folder. This makes the config file more portable.
-%   - sequenceFilenames is converted to a cell array of char vectors because
-%     the rest of the MATLAB code uses curly-brace indexing, such as
-%     config.input.sequenceFilenames{index_filename}.
+%   - sequenceFilenames is optional because discrete-frame configs discover
+%     .mha files from input.sequenceFolder instead of listing every file.
 
 %% SELECT CONFIGURATION FILE
 
@@ -47,6 +47,9 @@ function config = createBonePoseOptimizationConfig(configFilePath)
 if nargin < 1 || isempty(configFilePath)
     configFilePath = fullfile(pwd, 'config', 'bonePoseOptimizationConfig.json');
 end
+
+% Normalize char and string inputs so callers can pass either MATLAB text type.
+configFilePath = ensureScalarText(configFilePath, 'configFilePath');
 
 % Convert the configuration file path to an absolute path so later relative paths have a stable base.
 configFilePath = makeAbsolutePath(configFilePath, pwd);
@@ -92,8 +95,11 @@ config.input.fcalFilename = getRequiredField(rawConfig.input, 'fcalFilename', 'i
 % Store the folder that contains the ultrasound sequence recordings used by the current validation script.
 config.input.sequenceFolder                 = makeAbsolutePath(getRequiredField(rawConfig.input, 'sequenceFolder', 'input.sequenceFolder'), config.project.root);
 
-% Store the sequence filenames as a cell array so later code can loop over them with normal MATLAB indexing.
-config.input.sequenceFilenames              = ensureCellString(getRequiredField(rawConfig.input, 'sequenceFilenames', 'input.sequenceFilenames'));
+% Store explicit sequence filenames only when the config uses the old continuous-sequence workflow.
+if isfield(rawConfig.input, 'sequenceFilenames')
+    % Convert the sequence filenames to a cell array so existing continuous-sequence code keeps curly-brace indexing.
+    config.input.sequenceFilenames          = ensureCellString(rawConfig.input.sequenceFilenames);
+end
 
 % Store the ACS MAT filename used to build the original femur coordinate transform.
 config.input.acsFilename                    = getRequiredField(rawConfig.input, 'acsFilename', 'input.acsFilename');
@@ -108,24 +114,30 @@ config.input.stlFilename                    = getRequiredField(rawConfig.input, 
 
 %% IMAGE-PLANE SAMPLING OPTIONS
 
-% Store the first sampled packet index used to collect image planes.
-config.imagePlaneSampling.packetStartIndex  = getRequiredField(rawConfig.imagePlaneSampling, 'packetStartIndex', 'imagePlaneSampling.packetStartIndex');
+% Parse image-plane sampling only when the config uses the old continuous-sequence workflow.
+if isfield(rawConfig, 'imagePlaneSampling')
+    % Store the first sampled packet index used to collect image planes.
+    config.imagePlaneSampling.packetStartIndex  = getRequiredField(rawConfig.imagePlaneSampling, 'packetStartIndex', 'imagePlaneSampling.packetStartIndex');
 
-% Store the packet step size used to thin the image-plane collection.
-config.imagePlaneSampling.packetStep        = getRequiredField(rawConfig.imagePlaneSampling, 'packetStep', 'imagePlaneSampling.packetStep');
+    % Store the packet step size used to thin the image-plane collection.
+    config.imagePlaneSampling.packetStep        = getRequiredField(rawConfig.imagePlaneSampling, 'packetStep', 'imagePlaneSampling.packetStep');
 
-% Store the optional final packet index, where JSON null becomes [] for "use sequence end".
-config.imagePlaneSampling.packetEndIndex    = getRequiredField(rawConfig.imagePlaneSampling, 'packetEndIndex', 'imagePlaneSampling.packetEndIndex');
+    % Store the optional final packet index, where JSON null becomes [] for "use sequence end".
+    config.imagePlaneSampling.packetEndIndex    = getRequiredField(rawConfig.imagePlaneSampling, 'packetEndIndex', 'imagePlaneSampling.packetEndIndex');
+end
 
 
 
 %% SMOOTHING OPTIONS
 
-% Store the transform smoothing method used before image-plane construction.
-config.smoothing.method                     = getRequiredField(rawConfig.smoothing, 'method', 'smoothing.method');
+% Parse smoothing only when the config uses the old continuous-sequence workflow.
+if isfield(rawConfig, 'smoothing')
+    % Store the transform smoothing method used before image-plane construction.
+    config.smoothing.method                 = getRequiredField(rawConfig.smoothing, 'method', 'smoothing.method');
 
-% Store the smoothing window used before image-plane construction.
-config.smoothing.window                     = getRequiredField(rawConfig.smoothing, 'window', 'smoothing.window');
+    % Store the smoothing window used before image-plane construction.
+    config.smoothing.window                 = getRequiredField(rawConfig.smoothing, 'window', 'smoothing.window');
+end
 
 
 
@@ -219,6 +231,38 @@ end
 
 % Return the requested value so the caller can assign it into the flat config struct.
 value = sourceStruct.(fieldName);
+end
+
+
+%% HELPER: ENSURE SCALAR TEXT
+
+function value = ensureScalarText(rawValue, displayName)
+%ENSURESCALARTEXT Convert a char vector or string scalar into a char vector.
+% This local function keeps path arguments simple and prevents accidental string arrays.
+
+% Accept string scalars because modern MATLAB code often passes paths as strings.
+if isstring(rawValue)
+    % Stop early when the caller passed several strings because one config path is expected.
+    if ~isscalar(rawValue)
+        error('createBonePoseOptimizationConfig:InvalidText', ...
+            '%s must be a character vector or string scalar.', displayName);
+    end
+
+    % Convert the string scalar to a char vector so the path helpers can use classic MATLAB I/O.
+    value = char(rawValue);
+    return;
+end
+
+% Accept character vectors because the rest of this project mostly uses char paths.
+if ischar(rawValue) && (isrow(rawValue) || isempty(rawValue))
+    % Return the path unchanged after confirming it is one row of text.
+    value = rawValue;
+    return;
+end
+
+% Stop early when the caller passed a non-text value such as a cell array or numeric value.
+error('createBonePoseOptimizationConfig:InvalidText', ...
+    '%s must be a character vector or string scalar.', displayName);
 end
 
 
