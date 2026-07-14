@@ -5,6 +5,9 @@ addpath(genpath('functions'));
 
 %% READ THE SNAPSHOT DATA
 
+fprintf('Reading the snapshot data...\n');
+
+% Define the filepath to the snapshot
 filepath_snapshots = 'D:\Documents\BELANDA\SonoSkin\data\dennis_data\2026-07-14-phantomsnapshot\measurement_01';
 
 % Stop early with a clear message when the configured snapshot root is missing.
@@ -26,12 +29,16 @@ snapshotDirectories = snapshotDirectories(snapshotSortOrder);
 % Define an empty reader-output array for snapshot groups with no MHA files.
 emptySequences = struct('header', {}, 'packets', {});
 
+% Define the matching empty table for snapshot groups with no CSV files.
+emptyRigidBodies = table();
+
 % Preallocate one result entry per snapshot group to avoid growing the array in a loop.
 snapshotTemplate = struct( ...
     'name', '', ...
     'bone', 'U', ...
     'path', '', ...
-    'sequences', emptySequences);
+    'sequences', emptySequences, ...
+    'rigidbodies', emptyRigidBodies);
 snapshotData = repmat(snapshotTemplate, 1, numel(snapshotDirectories));
 
 % Load every snapshot group independently while keeping its identifying metadata.
@@ -60,20 +67,61 @@ for snapshotIndex = 1:numel(snapshotDirectories)
     [~, fileSortOrder] = sort({mhaFiles.name});
     mhaFiles = mhaFiles(fileSortOrder);
 
+    % Select and sort the CSV files separately because their names use a
+    % different prefix from the MHA files. Both sorted lists remain in the
+    % chronological acquisition order used to couple each snapshot pair.
+    csvFiles = dir(fullfile(snapshotPath, '*.csv'));
+    csvFiles = csvFiles(~[csvFiles.isdir]);
+    [~, csvSortOrder] = sort({csvFiles.name});
+    csvFiles = csvFiles(csvSortOrder);
+
+    % Stop before reading when a snapshot is missing one half of a coupled
+    % MHA/CSV pair. This prevents later rows from being paired incorrectly.
+    if numel(mhaFiles) ~= numel(csvFiles)
+        error(['Snapshot file count mismatch in "%s": found %d MHA ' ...
+            'file(s) and %d CSV file(s).'], snapshotPath, ...
+            numel(mhaFiles), numel(csvFiles));
+    end
+
     % Start with the required empty shape so an empty directory remains valid.
     snapshotSequences = emptySequences;
 
-    % Keep each complete reader result, including both its header and packets.
+    % Preallocate one cell per CSV so the loop does not repeatedly grow a
+    % table while reading the individual one-row snapshot results.
+    snapshotRigidBodyTables = cell(1, numel(csvFiles));
+
+    % Read both members of each coupled snapshot in the existing file loop.
     for fileIndex = 1:numel(mhaFiles)
         mhaPath = fullfile(snapshotPath, mhaFiles(fileIndex).name);
         snapshotSequences(fileIndex) = read_sequence_image(mhaPath);
+
+        % Read the rigid bodies acquired with the MHA snapshot at this index.
+        csvPath = fullfile(snapshotPath, csvFiles(fileIndex).name);
+        currentRigidBodies = readCSV_qualisysRigidBodySnapshot(csvPath);
+
+        % A snapshot CSV must contribute exactly one row to the combined
+        % table. Rejecting other sizes keeps its row aligned with one MHA file.
+        if height(currentRigidBodies) ~= 1
+            error('Expected one rigid-body row in "%s", but found %d.', ...
+                csvPath, height(currentRigidBodies));
+        end
+        snapshotRigidBodyTables{fileIndex} = currentRigidBodies;
     end
 
-    % Store the snapshot metadata beside all sequence results from that folder.
+    % Join all one-row tables only once after reading. Their row order now
+    % matches the order of snapshotSequences in this directory.
+    if isempty(snapshotRigidBodyTables)
+        snapshotRigidBodies = emptyRigidBodies;
+    else
+        snapshotRigidBodies = vertcat(snapshotRigidBodyTables{:});
+    end
+
+    % Store the metadata, images, and combined rigid-body table together.
     snapshotData(snapshotIndex).name = snapshotName;
     snapshotData(snapshotIndex).bone = boneCode;
     snapshotData(snapshotIndex).path = snapshotPath;
     snapshotData(snapshotIndex).sequences = snapshotSequences;
+    snapshotData(snapshotIndex).rigidbodies = snapshotRigidBodies;
 end
 
 %% READ THE ULTRASOUND PROBE CALIBRATION DATA FROM FCAL SOFTWARE
@@ -107,6 +155,8 @@ T_image_probecalib(1:3, 1:3) = R_image_probe_orth;
 S_image_probecalib = vecnorm(R_image_probe_raw,2,1);
 
 %% DISPLAY THE IMAGE IN 3D SPACE
+
+fprintf('Displaying the snapshot data...\n');
 
 % Prepare the figure object
 fig1 = figure('Name', 'Figure');
@@ -212,5 +262,38 @@ for snapshotIndex = 1:numel(snapshotData)
 end
 
 
-%% READ THE BONE RIGID BODY DATA FROM QUALISYS
+%% READ THE POST-PROCESS CT-SCAN DATA (BONES AND PINS)
+
+filepath_bonectpostprocess = 'D:\Documents\BELANDA\SonoSkin\codes\matlab\ctknee_postprocessing\outputs\kneephantom';
+filename_bonectpostprocess = 'kneephantom_bones_and_bonepins.mat';
+fullfile_bonectpostprocess = fullfile(filepath_bonectpostprocess, filename_bonectpostprocess);
+
+% Stop with a direct message when the configured coordinate-system file is missing.
+if ~isfile(fullfile_bonectpostprocess)
+    error('Knee CT post-processed MAT file not found: %s', filepath_ercmat);
+end
+
+% Pseudo-declare the expected coordinate-system struct before loading it, so
+% readers can see that this script expects a struct named acs from the MAT file.
+% This empty value is intentionally replaced by the checked MAT-file value below.
+bonepins = struct(); 
+bones    = struct();
+
+% Load only the expected variable into a temporary struct to avoid silently
+% adding unrelated MAT-file variables to the script workspace.
+loaded_ctmat = load(fullfile_bonectpostprocess, 'bonepins', 'bones');
+
+% Verify that the MAT file contains the promised variable.
+if ~isfield(loaded_ctmat, 'bonepins')
+    error('MAT file does not contain the expected ''bonepins'' struct: %s', filepath_ercmat);
+end
+if ~isfield(loaded_ctmat, 'bones')
+    error('MAT file does not contain the expected ''bones'' struct: %s', filepath_ercmat);
+end
+
+% Replace the pseudo-declaration with the loaded femur and tibia coordinate systems.
+bonepins = loaded_ctmat.bonepins;
+bones    = loaded_ctmat.bones;
+
+%% DISPLAY THE BONES AND PINS
 
