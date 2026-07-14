@@ -1,0 +1,37 @@
+{
+  "project": {
+    "root": "D:\\Documents\\BELANDA\\SonoSkin\\codes\\matlab\\bmodeimage_3dspace\\",
+    "functionsFolderName": "functions"
+  },
+  "input": {
+    "fcalFilename": "PlusDeviceSet_fCal_Epiphan_NDIPolaris_UTNML__20260312_120634.xml",
+    "sequenceFolder": "D:\\Documents\\BELANDA\\SonoSkin\\data\\dennis_data\\2026-13-04_phantom\\selected_sequence",
+    "acsFilename": "CT_Femur_editedFlipped_scaled_20260421-174922.mat",
+    "manualAdjustmentFilename": "manual_transformation_adjustments_20260422-154031.mat",
+    "stlFilename": "CT_Femur_editedFlipped_scaled_distal.stl"
+  },
+  "intersection": {
+    "normalFacingToleranceDeg": 30
+  },
+  "cost": {
+    "intensityMax": 255,
+    "minReferencePixels": 10,
+    "nMinPixels": 10,
+    "lambdaMissing": 1.0
+  },
+  "logging": {
+    "printPreparationProgress": false,
+    "printEvaluationProgress": false
+  },
+  "optimizer": {
+    "translationBoundMm": 5.0,
+    "rotationBoundDeg": 5.0,
+    "translationSigmaMm": 2.0,
+    "rotationSigmaDeg": 2.0,
+    "populationSize": 256,
+    "maxFunctionEvaluations": 1000,
+    "useParfor": true,
+    "parforWorkers": 6,
+    "outputFolder": "output\\bonePoseOptimization\\cmaes"
+  }
+}
