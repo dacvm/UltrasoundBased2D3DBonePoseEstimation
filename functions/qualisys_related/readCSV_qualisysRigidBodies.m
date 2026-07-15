@@ -6,7 +6,8 @@ function allRigidBodies = readCSV_qualisysRigidBodies(csvFilePath)
 %   csvFilePath - (string) Path to the CSV file containing the rigid body data.
 %                 The CSV file should have columns with the following format:
 %                 <rigid_body_name>_<parameter>, where <parameter> is:
-%                 - 'q1', 'q2', 'q3', 'q4': quaternion components (q4 is the scalar part).
+%                 - 'q1', 'q2', 'q3', 'q4': quaternion components stored
+%                   as [w, x, y, z], so q1 is the scalar part.
 %                 - 't1', 't2', 't3': translation vector components.
 %                 The CSV must also include a 'timestamp' column.
 %
@@ -16,7 +17,8 @@ function allRigidBodies = readCSV_qualisysRigidBodies(csvFilePath)
 %       - The first column contains timestamps.
 %       - Each remaining column corresponds to a rigid body.
 %         Each cell contains a struct with:
-%           - q: The normalized quaternion as [q4, q1, q2, q3].
+%           - q: The normalized quaternion as [q1, q2, q3, q4], which
+%                follows MATLAB's scalar-first [w, x, y, z] order.
 %           - t: The translation vector [t1, t2, t3].
 %           - T: The 4x4 rigid body transformation matrix.
 %
@@ -94,11 +96,8 @@ function allRigidBodies = readCSV_qualisysRigidBodies(csvFilePath)
             % Extract quaternion
             q = table2array(quaternions(row, :)); 
 
-            % Reorder quaternion to [q4, q1, q2, q3]
-            % (fromt the csv, q4 is the scalar, i put it in the front using matlab notation)
-            q = [q(4), q(1:3)];
-
-            % Normalize the quaternion
+            % The acquisition application already writes q1-to-q4 in
+            % MATLAB's scalar-first [w, x, y, z] order, so only normalize it.
             q = q / norm(q);
 
             t = table2array(translations(row, :)); % Extract translation

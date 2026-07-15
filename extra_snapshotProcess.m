@@ -311,6 +311,32 @@ pinSelection = struct( ...
 % validates that every requested place identifies exactly one pin.
 boneUnits = coupleBonesAndPins(bones, bonepins, pinSelection);
 
+% The experiment treats the bones, pins, and reference object as static, so
+% use the first recorded rigid-body row as their shared representative pose.
+if isempty(snapshotData) || height(snapshotData(1).rigidbodies) < 1
+    error('extra_snapshotProcess:MissingInitialRigidBodies', ...
+        'The first snapshot must contain at least one rigid-body row.');
+end
+firstSnapshotRigidBodies = snapshotData(1).rigidbodies;
+
+% Require the tracked reference body before entering the bone loop because
+% every bone transformation depends on the same reference pose.
+if ~ismember('B_N_REF', firstSnapshotRigidBodies.Properties.VariableNames)
+    error('extra_snapshotProcess:MissingReferenceRigidBody', ...
+        'The first snapshot rigid-body table does not contain B_N_REF.');
+end
+firstReferenceRecord = firstSnapshotRigidBodies.B_N_REF{1};
+if ~isstruct(firstReferenceRecord) || ~isfield(firstReferenceRecord, 'T')
+    error('extra_snapshotProcess:InvalidReferenceRigidBody', ...
+        'The first B_N_REF record must contain a transformation field T.');
+end
+
+% Re-read this transform from the first CSV row instead of reusing the value
+% left by the ultrasound loop, which belongs to its last processed packet.
+T_ref_global = firstReferenceRecord.T;
+validateattributes(T_ref_global, {'numeric'}, {'size', [4, 4], 'finite'}, ...
+    mfilename, 'T_ref_global');
+
 % Visit the coupled units instead of assuming that bones and pins have the
 % same array length or ordering.
 for boneIndex = 1:numel(boneUnits)
@@ -321,38 +347,81 @@ for boneIndex = 1:numel(boneUnits)
     currentBone = currentUnit.boneData;
     currentPin  = currentUnit.pins(currentUnit.selectedPinIndex);
 
-    % Draw the CT bone surface first. Transparency keeps the selected pin
+    % Build the motion-capture name from the same bone code and pin place
+    % used by pinSelection, for example C_F_PRO or C_T_DIS.
+    pinRigidBodyName = sprintf('C_%s_%s', ...
+        currentUnit.bone, currentUnit.selectedPinPlace);
+    if ~ismember(pinRigidBodyName, firstSnapshotRigidBodies.Properties.VariableNames)
+        error('extra_snapshotProcess:MissingPinRigidBody', ...
+            'The first snapshot rigid-body table does not contain %s.', ...
+            pinRigidBodyName);
+    end
+
+    % Read the tracked pin pose from the same first row as the reference so
+    % both measurements share one acquisition time and one global frame.
+    firstPinRecord = firstSnapshotRigidBodies.(pinRigidBodyName){1};
+    if ~isstruct(firstPinRecord) || ~isfield(firstPinRecord, 'T')
+        error('extra_snapshotProcess:InvalidPinRigidBody', ...
+            'The first %s record must contain a transformation field T.', ...
+            pinRigidBodyName);
+    end
+    T_pin_global = firstPinRecord.T;
+    validateattributes(T_pin_global, {'numeric'}, {'size', [4, 4], 'finite'}, ...
+        mfilename, 'T_pin_global');
+
+    % Express the tracked pin in ref. Left division is the numerically safer
+    % equivalent of inv(T_ref_global) * T_pin_global from the frame rule.
+    T_pin_ref = T_ref_global \ T_pin_global;
+
+    % Build the common CT-to-ref transform from the pin correspondence.
+    % Right division is equivalent to T_pin_ref * inv(T_pin_CT).
+    T_CT_ref = T_pin_ref / currentPin.T_pin_CT;
+
+    % Propagate the stored bone ACS from CT into ref using the shared CT map.
+    T_bone_ref = T_CT_ref * currentBone.T_bone_CT;
+
+    % Mesh vertices are already CT-frame points, so transform them with
+    % T_CT_ref rather than with the bone ACS transform itself.
+    bonePointsRef = applyRigidTransform(currentBone.mesh.Points, T_CT_ref);
+    boneMeshRef = triangulation( ...
+        currentBone.mesh.ConnectivityList, bonePointsRef);
+
+    % Draw the ref-frame bone surface first. Transparency keeps the selected pin
     % markers and the ultrasound planes visible through the mesh.
-    trisurf(currentBone.mesh, ...
+    trisurf(boneMeshRef, ...
         'Parent', ax1, ...
         'FaceColor', [0.92, 0.83, 0.74], ...
         'EdgeColor', 'none', ...
         'FaceAlpha', 0.40, ...
         'Tag', 'plot_ct_bone_meshes');
 
-    % Draw the anatomical coordinate system stored with the current bone.
-    boneOrigin   = currentBone.T_bone_CT(1:3, 4);
-    boneBaseAxes = currentBone.T_bone_CT(1:3, 1:3);
+    % Draw the anatomical coordinate system after propagating it into ref.
+    boneOrigin   = T_bone_ref(1:3, 4);
+    boneBaseAxes = T_bone_ref(1:3, 1:3);
     boneAxisName = sprintf('%s Bone ACS', char(currentUnit.name));
     display_axis_v2(ax1, boneOrigin, boneBaseAxes, quiverscale, boneAxisName, ...
         'Tag', 'plot_ct_bone_acs_axes', 'Mode', 'default');
 
-    % The marker centroids are stored as columns of a 3-by-N matrix. Only
-    % markers belonging to the pin selected above are displayed.
+    % The marker centroids are CT-frame columns in a 3-by-N matrix. Transpose
+    % them for the shared point helper so the displayed markers also use ref.
+    pinMarkerCentroidsRef = applyRigidTransform( ...
+        currentPin.marker_centroids.', T_CT_ref);
+
+    % Only markers belonging to the pin selected above are displayed.
     scatter3(ax1, ...
-        currentPin.marker_centroids(1, :), ...
-        currentPin.marker_centroids(2, :), ...
-        currentPin.marker_centroids(3, :), ...
+        pinMarkerCentroidsRef(:, 1), ...
+        pinMarkerCentroidsRef(:, 2), ...
+        pinMarkerCentroidsRef(:, 3), ...
         50, ...
         'filled', ...
         'MarkerFaceColor', [1.00, 0.85, 0.15], ...
         'MarkerEdgeColor', [0.20, 0.20, 0.20], ...
         'Tag', 'plot_ct_pin_markers');
 
-    % Draw the selected pin frame directly from its authoritative CT
-    % transform. Include the place in the label to show which pin was used.
-    pinOrigin = currentPin.T_pin_CT(1:3, 4);
-    pinBaseAxes = currentPin.T_pin_CT(1:3, 1:3);
+    % Draw the selected tracked pin frame in ref. Include the place in the
+    % label to show which pin supplied the CT-to-ref correspondence.
+    pinOrigin = T_pin_ref(1:3, 4);
+    pinBaseAxes = T_pin_ref(1:3, 1:3);
     pinAxisName = sprintf('%s %s Pin', ...
         char(currentUnit.name), char(currentUnit.selectedPinPlace));
     display_axis_v2(ax1, pinOrigin, pinBaseAxes, quiverscale, pinAxisName, ...
@@ -361,4 +430,3 @@ end
 
 % Render the completed scene immediately after both coupled units are drawn.
 drawnow;
-
