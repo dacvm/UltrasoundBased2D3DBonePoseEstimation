@@ -8,7 +8,7 @@ addpath(genpath('functions'));
 fprintf('Reading the snapshot data...\n');
 
 % Define the filepath to the snapshot
-filepath_snapshots = 'D:\Documents\BELANDA\SonoSkin\data\dennis_data\2026-07-14-phantomsnapshot\measurement_01';
+filepath_snapshots = 'D:\Documents\BELANDA\SonoSkin\data\dennis_data\2026-07-15_phantomflexion\measurement_01';
 
 % Stop early with a clear message when the configured snapshot root is missing.
 if ~isfolder(filepath_snapshots)
@@ -174,7 +174,7 @@ quiverscale = 20;
 
 % Leave this empty to use the Reference-to-Tracker transform stored in each packet.
 % Set it to a 4-by-4 Reference-to-Tracker matrix when the reference object was absent during acquisition.
-T_global_ref_override = [eul2rotm([0 0 -pi/2]), [0 0 0]'; 0 0 0 1];
+T_global_ref_override = [];
 
 % Validate a configured override once so an invalid matrix fails before the display loop starts.
 if ~isempty(T_global_ref_override)
@@ -297,3 +297,65 @@ bones    = loaded_ctmat.bones;
 
 %% DISPLAY THE BONES AND PINS
 
+fprintf('Displaying the CT bones and selected bone pins...\n');
+
+% Choose one pin place for each bone code. Change only these values when a
+% different redundant pin should drive the processing and display.
+pinSelection = struct( ...
+    'F', "PRO", ...
+    'T', "DIS");
+
+% Group each bone with all pins that share its bone code. The helper also
+% validates that every requested place identifies exactly one pin.
+boneUnits = coupleBonesAndPins(bones, bonepins, pinSelection);
+
+% Visit the coupled units instead of assuming that bones and pins have the
+% same array length or ordering.
+for boneIndex = 1:numel(boneUnits)
+
+    % Use short names so every display command clearly reads from the same
+    % bone and from the pin selected for that bone.
+    currentUnit = boneUnits(boneIndex);
+    currentBone = currentUnit.boneData;
+    currentPin  = currentUnit.pins(currentUnit.selectedPinIndex);
+
+    % Draw the CT bone surface first. Transparency keeps the selected pin
+    % markers and the ultrasound planes visible through the mesh.
+    trisurf(currentBone.mesh, ...
+        'Parent', ax1, ...
+        'FaceColor', [0.92, 0.83, 0.74], ...
+        'EdgeColor', 'none', ...
+        'FaceAlpha', 0.40, ...
+        'Tag', 'plot_ct_bone_meshes');
+
+    % Draw the anatomical coordinate system stored with the current bone.
+    boneOrigin   = currentBone.T_bone_CT(1:3, 4);
+    boneBaseAxes = currentBone.T_bone_CT(1:3, 1:3);
+    boneAxisName = sprintf('%s Bone ACS', char(currentUnit.name));
+    display_axis_v2(ax1, boneOrigin, boneBaseAxes, quiverscale, boneAxisName, ...
+        'Tag', 'plot_ct_bone_acs_axes', 'Mode', 'default');
+
+    % The marker centroids are stored as columns of a 3-by-N matrix. Only
+    % markers belonging to the pin selected above are displayed.
+    scatter3(ax1, ...
+        currentPin.marker_centroids(1, :), ...
+        currentPin.marker_centroids(2, :), ...
+        currentPin.marker_centroids(3, :), ...
+        50, ...
+        'filled', ...
+        'MarkerFaceColor', [1.00, 0.85, 0.15], ...
+        'MarkerEdgeColor', [0.20, 0.20, 0.20], ...
+        'Tag', 'plot_ct_pin_markers');
+
+    % Draw the selected pin frame directly from its authoritative CT
+    % transform. Include the place in the label to show which pin was used.
+    pinOrigin = currentPin.T_pin_CT(1:3, 4);
+    pinBaseAxes = currentPin.T_pin_CT(1:3, 1:3);
+    pinAxisName = sprintf('%s %s Pin', ...
+        char(currentUnit.name), char(currentUnit.selectedPinPlace));
+    display_axis_v2(ax1, pinOrigin, pinBaseAxes, quiverscale, pinAxisName, ...
+        'Tag', 'plot_ct_pin_axes', 'Mode', 'default');
+end
+
+% Render the completed scene immediately after both coupled units are drawn.
+drawnow;
