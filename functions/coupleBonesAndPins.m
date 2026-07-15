@@ -23,11 +23,13 @@ function boneUnits = coupleBonesAndPins(bones, bonepins, pinSelection)
 %                       pins, so a spelling mistake does not go unnoticed.
 %
 %   BONEUNITS is a struct array with one entry per bone. Each entry contains:
-%       name               - Readable bone name from BONES.
-%       code               - Normalized bone identifier used for matching.
+%       name               - Readable bone name stored as a character vector.
+%       bone               - Normalized bone code stored as a character vector,
+%                            matching the source BONES and BONEPINS field name.
 %       boneData           - The complete original bone entry.
 %       pins               - Every original pin belonging to this bone.
-%       selectedPinPlace   - The normalized place requested in PINSELECTION.
+%       selectedPinPlace   - Normalized selected place stored as a character
+%                            vector.
 %       selectedPinIndex   - Index of the selected pin inside this entry's
 %                            PINS array.
 %   The original BONES and BONEPINS arrays are not modified. Downstream code
@@ -95,11 +97,11 @@ end
 % Preallocate the output with the documented fields. The empty pins value
 % keeps the same struct schema as the loaded bonepins array.
 unitTemplate = struct( ...
-    'name', "", ...
-    'code', "", ...
+    'name', '', ...
+    'bone', '', ...
     'boneData', bones(1), ...
     'pins', bonepins([]), ...
-    'selectedPinPlace', "", ...
+    'selectedPinPlace', '', ...
     'selectedPinIndex', []);
 boneUnits = repmat(unitTemplate, 1, numel(bones));
 
@@ -145,11 +147,11 @@ for boneIndex = 1:numel(bones)
 
     % Copy the original records into the coupled unit and store only the
     % selected local index, avoiding a second copy that could become stale.
-    boneUnits(boneIndex).name = string(bones(boneIndex).name);
-    boneUnits(boneIndex).code = currentCode;
+    boneUnits(boneIndex).name = char(string(bones(boneIndex).name));
+    boneUnits(boneIndex).bone = char(currentCode);
     boneUnits(boneIndex).boneData = bones(boneIndex);
     boneUnits(boneIndex).pins = matchingPins;
-    boneUnits(boneIndex).selectedPinPlace = selectedPlace;
+    boneUnits(boneIndex).selectedPinPlace = char(selectedPlace);
     boneUnits(boneIndex).selectedPinIndex = selectedPinIndex;
 end
 end

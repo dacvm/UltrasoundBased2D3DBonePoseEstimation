@@ -264,6 +264,8 @@ end
 
 %% READ THE POST-PROCESS CT-SCAN DATA (BONES AND PINS)
 
+fprintf('Reading the CT bones and selected bone pins...\n');
+
 filepath_bonectpostprocess = 'D:\Documents\BELANDA\SonoSkin\codes\matlab\ctknee_postprocessing\outputs\kneephantom';
 filename_bonectpostprocess = 'kneephantom_bones_and_bonepins.mat';
 fullfile_bonectpostprocess = fullfile(filepath_bonectpostprocess, filename_bonectpostprocess);
@@ -302,8 +304,8 @@ fprintf('Displaying the CT bones and selected bone pins...\n');
 % Choose one pin place for each bone code. Change only these values when a
 % different redundant pin should drive the processing and display.
 pinSelection = struct( ...
-    'F', "PRO", ...
-    'T', "DIS");
+    'F', 'PRO', ...
+    'T', 'DIS');
 
 % Group each bone with all pins that share its bone code. The helper also
 % validates that every requested place identifies exactly one pin.
