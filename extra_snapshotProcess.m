@@ -174,11 +174,11 @@ quiverscale = 20;
 
 % Leave this empty to use the Reference-to-Tracker transform stored in each packet.
 % Set it to a 4-by-4 Reference-to-Tracker matrix when the reference object was absent during acquisition.
-T_global_ref_override = [];
+T_ref_global_override = [];
 
 % Validate a configured override once so an invalid matrix fails before the display loop starts.
-if ~isempty(T_global_ref_override)
-    validateattributes(T_global_ref_override, {'numeric'}, ...
+if ~isempty(T_ref_global_override)
+    validateattributes(T_ref_global_override, {'numeric'}, ...
         {'size', [4, 4], 'finite'}, mfilename, 'T_global_ref_override');
 end
 
@@ -209,25 +209,25 @@ for snapshotIndex = 1:numel(snapshotData)
             end
 
             % Read the probe pose from the current packet.
-            T_global_probe = current_packet.ProbeToTrackerDeviceTransform;
+            T_probe_global = current_packet.ProbeToTrackerDeviceTransform;
             % Read the reference pose from the current packet.
             % The default is to use data from the packet, but the explicit 
             % override can be used for exceptional datasets (like when you 
             % forgot to put the reference object during experiment)
-            if isempty(T_global_ref_override)
+            if isempty(T_ref_global_override)
                 % Skip the packet when normal acquisition did not provide a usable reference pose.
                 if ~current_packet.ReferenceToTrackerDeviceTransformStatus
                     continue;
                 end
                 % Read the tracked reference pose that belongs to this packet.
-                T_global_ref = current_packet.ReferenceToTrackerDeviceTransform;
+                T_ref_global = current_packet.ReferenceToTrackerDeviceTransform;
             else
                 % Reuse the predefined reference pose because this dataset was recorded without a reference object.
-                T_global_ref = T_global_ref_override;
+                T_ref_global = T_ref_global_override;
             end
 
             % Express the probe pose in the reference frame using the same propagation as the sequence display script.
-            T_probe_ref    = inv(T_global_ref) * T_global_probe;
+            T_probe_ref    = inv(T_ref_global) * T_probe_global;
 
             % Draw the probe coordinate frame to make the probe pose easy to inspect.
             origin    = T_probe_ref(1:3, 4);
@@ -297,7 +297,7 @@ end
 bonepins = loaded_ctmat.bonepins;
 bones    = loaded_ctmat.bones;
 
-%% DISPLAY THE BONES AND PINS
+%% GATHERING ALL THE TRANFORMATION TO BE IN ONE COORDINATE SYSTEM (REF) AND DISPLAYING THE BONES AND PINS
 
 fprintf('Displaying the CT bones and selected bone pins...\n');
 
@@ -361,3 +361,4 @@ end
 
 % Render the completed scene immediately after both coupled units are drawn.
 drawnow;
+
