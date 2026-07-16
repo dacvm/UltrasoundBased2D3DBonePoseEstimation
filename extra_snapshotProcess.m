@@ -467,3 +467,5 @@ end
 
 % Render the completed scene immediately after both coupled units are drawn.
 drawnow;
+
+%% COMPUTE AND SHOW THE INTERSECTION
