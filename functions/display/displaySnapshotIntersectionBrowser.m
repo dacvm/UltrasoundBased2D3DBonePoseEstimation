@@ -1,9 +1,9 @@
-function figBrowser = displaySnapshotIntersectionBrowser(snapshotPlanes, intersections, ax3D)
+function figBrowser = displaySnapshotIntersectionBrowser(snapshotPlanes, intersections, boneMeshesRefByCode)
 %DISPLAYSNAPSHOTINTERSECTIONBROWSER Browse precomputed snapshot intersections.
 % This display-only function builds a results-first browser so many
 % ultrasound snapshots can be inspected without drawing every 2D image at
-% once. Selecting a table row updates one large 2D overlay and replaces the
-% matching intersection highlight in the existing 3D scene.
+% once. Selecting a table row updates one large 2D overlay and rebuilds a
+% matching bone, image plane, and intersection in the browser's own 3D axes.
 %
 % Inputs:
 %   snapshotPlanes : Struct array containing finite image-plane geometry,
@@ -12,21 +12,21 @@ function figBrowser = displaySnapshotIntersectionBrowser(snapshotPlanes, interse
 %   intersections  : Struct array of precomputed raw and probe-facing
 %                    mesh-plane intersection results. It must have one entry
 %                    for every entry in snapshotPlanes.
-%   ax3D            : Existing MATLAB axes that contains the 3D ultrasound
-%                    and bone scene. The selected probe-facing segments are
-%                    drawn here without changing the underlying scene.
+%   boneMeshesRefByCode : Scalar struct whose fields are bone codes such as
+%                         F and T. Each value is a reference-frame mesh struct
+%                         with exact fields V for vertices and F for faces.
 %
 % Output:
 %   figBrowser      : Handle to the new uifigure that contains the sortable
-%                    results table and selected 2D intersection display.
+%                    results table, selected 2D image, and selected 3D scene.
 
 %% VALIDATE THE DISPLAY INPUTS
 
-% Require the complete public interface so a missing 3D axes handle does not
-% silently disable part of the results-first workflow.
+% Require the complete public interface so a missing mesh lookup does not
+% silently disable the selected 3D anatomy display.
 if nargin ~= 3
     error('displaySnapshotIntersectionBrowser:InvalidInputCount', ...
-        'Expected snapshotPlanes, intersections, and ax3D.');
+        'Expected snapshotPlanes, intersections, and boneMeshesRefByCode.');
 end
 
 % Check the two aligned result containers before inspecting their fields.
@@ -65,11 +65,42 @@ if ~all(isfield(intersections, requiredIntersectionFields))
         'intersections is missing one or more required display fields.');
 end
 
-% Validate the 3D axes at browser creation. The callbacks will check it again
-% later because users are allowed to close the original 3D figure first.
-if ~isgraphics(ax3D, 'axes')
-    error('displaySnapshotIntersectionBrowser:Invalid3DAxes', ...
-        'ax3D must be a valid MATLAB axes handle.');
+% Require one mesh lookup struct because row selection uses the plane's bone
+% code to choose the correct anatomy without reading graphics from ax1.
+if ~isstruct(boneMeshesRefByCode) || ~isscalar(boneMeshesRefByCode)
+    error('displaySnapshotIntersectionBrowser:InvalidBoneMeshMap', ...
+        'boneMeshesRefByCode must be a scalar struct keyed by bone code.');
+end
+
+% Validate every available mesh once so callbacks can focus only on display
+% work and never fail halfway through a row update.
+boneMeshCodes = fieldnames(boneMeshesRefByCode);
+expectedMeshFields = sort({'V', 'F'});
+for boneMeshIndex = 1:numel(boneMeshCodes)
+    currentBoneMeshCode = boneMeshCodes{boneMeshIndex};
+    currentBoneMesh = boneMeshesRefByCode.(currentBoneMeshCode);
+
+    % Enforce the same exact V/F mesh interface used by the geometry helper.
+    if ~isstruct(currentBoneMesh) || ~isscalar(currentBoneMesh) || ...
+            ~isequal(sort(fieldnames(currentBoneMesh)), expectedMeshFields(:))
+        error('displaySnapshotIntersectionBrowser:InvalidBoneMeshFields', ...
+            'Mesh "%s" must be a scalar struct with exact fields V and F.', ...
+            currentBoneMeshCode);
+    end
+
+    % Check the numeric shapes needed by patch before the browser is created.
+    if ~isnumeric(currentBoneMesh.V) || size(currentBoneMesh.V, 2) ~= 3 || ...
+            isempty(currentBoneMesh.V) || any(~isfinite(currentBoneMesh.V(:)))
+        error('displaySnapshotIntersectionBrowser:InvalidBoneMeshVertices', ...
+            'Mesh "%s" field V must be a non-empty finite Nv-by-3 array.', ...
+            currentBoneMeshCode);
+    end
+    if ~isnumeric(currentBoneMesh.F) || size(currentBoneMesh.F, 2) ~= 3 || ...
+            any(~isfinite(currentBoneMesh.F(:)))
+        error('displaySnapshotIntersectionBrowser:InvalidBoneMeshFaces', ...
+            'Mesh "%s" field F must be a finite Nf-by-3 array.', ...
+            currentBoneMeshCode);
+    end
 end
 
 %% BUILD THE RESULTS TABLE DATA
@@ -124,18 +155,18 @@ resultsData = table( ...
 
 %% CREATE THE RESULTS-FIRST USER INTERFACE
 
-% Use one responsive figure so the table stays readable while the selected
-% image receives most of the remaining screen area.
+% Use a wide responsive figure so the table, 2D image, and 3D scene can remain
+% readable beside each other on a standard desktop display.
 figBrowser = uifigure( ...
     'Name', 'Snapshot Mesh-Plane Intersection Browser', ...
-    'Position', [80, 80, 1500, 850], ...
+    'Position', [20, 60, 1880, 880], ...
     'CloseRequestFcn', @closeBrowser);
 
-% Reserve the full left side for the table and use the lower-right area for
-% selected-result metadata and the fixed overlay color key.
-mainGrid = uigridlayout(figBrowser, [2, 2], ...
+% Place the three primary views from left to right as requested. The table
+% keeps a fixed width while both plot columns share the remaining space.
+mainGrid = uigridlayout(figBrowser, [2, 3], ...
     'RowHeight', {'1x', 115}, ...
-    'ColumnWidth', {650, '1x'}, ...
+    'ColumnWidth', {650, '1x', '1x'}, ...
     'Padding', [10, 10, 10, 10], ...
     'RowSpacing', 8, ...
     'ColumnSpacing', 10);
@@ -152,12 +183,13 @@ resultsTable = uitable(mainGrid, ...
     'ColumnEditable', false(1, width(resultsData)), ...
     'ColumnSortable', true(1, width(resultsData)), ...
     'SelectionType', 'row', ...
-    'Multiselect', 'off');
+    'Multiselect', 'off', ...
+    'Tag', 'snapshot_intersection_results_table');
 resultsTable.Layout.Row = [1, 2];
 resultsTable.Layout.Column = 1;
 
 % Create one large image axes because only the selected row should be drawn.
-imageAxes = uiaxes(mainGrid);
+imageAxes = uiaxes(mainGrid, 'Tag', 'snapshot_intersection_image_axes');
 imageAxes.Layout.Row = 1;
 imageAxes.Layout.Column = 2;
 xlabel(imageAxes, 'Column');
@@ -165,11 +197,29 @@ ylabel(imageAxes, 'Row');
 box(imageAxes, 'on');
 colormap(imageAxes, gray(256));
 
-% Place result details and the color explanation below the image so users do
+% Create a separate 3D axes owned by this browser. The static ax1 overview is
+% intentionally not passed into or modified by this function.
+sceneAxes = uiaxes(mainGrid, 'Tag', 'snapshot_intersection_3d_axes');
+sceneAxes.Layout.Row = 1;
+sceneAxes.Layout.Column = 3;
+xlabel(sceneAxes, 'X');
+ylabel(sceneAxes, 'Y');
+zlabel(sceneAxes, 'Z');
+grid(sceneAxes, 'on');
+box(sceneAxes, 'on');
+axis(sceneAxes, 'equal');
+view(sceneAxes, 35, 40);
+title(sceneAxes, 'Selected 3D scene', 'Interpreter', 'none');
+
+% Provide explicit 3D navigation tools without changing the interaction
+% modes of the neighboring 2D ultrasound axes.
+axtoolbar(sceneAxes, {'rotate', 'pan', 'zoomin', 'zoomout', 'restoreview'});
+
+% Place result details and the color explanation below both plots so users do
 % not need to infer overlay meaning from marker shapes alone.
 infoPanel = uipanel(mainGrid, 'Title', 'Selected snapshot');
 infoPanel.Layout.Row = 2;
-infoPanel.Layout.Column = 2;
+infoPanel.Layout.Column = [2, 3];
 infoGrid = uigridlayout(infoPanel, [2, 1], ...
     'RowHeight', {'1x', '1x'}, ...
     'Padding', [8, 4, 8, 4], ...
@@ -191,6 +241,11 @@ overlayLegendLabel = uilabel(infoGrid, ...
     'WordWrap', 'on');
 overlayLegendLabel.Layout.Row = 2;
 
+% Track whether a selected 3D scene has already been rendered. This lets row
+% changes preserve a user-adjusted view angle while the first row uses the
+% standard project view.
+hasRendered3DScene = false;
+
 %% CONNECT TABLE SELECTION TO THE TWO DISPLAYS
 
 % Show a readable empty state instead of attempting to select a row that does
@@ -200,6 +255,16 @@ if nResults == 0
     axis(imageAxes, 'off');
     text(imageAxes, 0.5, 0.5, ...
         'No valid tracked snapshots are available for intersection display.', ...
+        'Units', 'normalized', ...
+        'HorizontalAlignment', 'center', ...
+        'VerticalAlignment', 'middle', ...
+        'Interpreter', 'none');
+
+    % Give the 3D column its own empty message so the complete layout remains
+    % understandable even when no tracked plane can be selected.
+    axis(sceneAxes, 'off');
+    text(sceneAxes, 0.5, 0.5, ...
+        'No selected 3D scene is available.', ...
         'Units', 'normalized', ...
         'HorizontalAlignment', 'center', ...
         'VerticalAlignment', 'middle', ...
@@ -330,59 +395,125 @@ renderSnapshot(resultIndex(1));
             size(currentIntersection.probeFacingPixels, 1), ...
             char(string(currentIntersection.status)));
 
-        % Skip 3D updates when the original figure was closed after the browser opened.
-        if ~isgraphics(ax3D, 'axes')
-            return;
+        % Save the current camera orientation before clearing graphics so a
+        % user-adjusted view survives selection of another table row.
+        previousSceneView = sceneAxes.View;
+        cla(sceneAxes);
+        hold(sceneAxes, 'on');
+
+        % Select only the anatomical mesh identified by this snapshot's bone
+        % code. Unknown codes intentionally leave the mesh absent.
+        currentBoneCode = char(string(currentPlane.bone));
+        hasMatchingBoneMesh = ~isempty(currentBoneCode) && ...
+            isvarname(currentBoneCode) && ...
+            isfield(boneMeshesRefByCode, currentBoneCode);
+        if hasMatchingBoneMesh
+            currentBoneMesh = boneMeshesRefByCode.(currentBoneCode);
+
+            % Draw the selected reference-frame mesh with the same appearance
+            % used by the static overview figure.
+            patch(sceneAxes, ...
+                'Faces', currentBoneMesh.F, ...
+                'Vertices', currentBoneMesh.V, ...
+                'FaceColor', [0.92, 0.83, 0.74], ...
+                'EdgeColor', 'none', ...
+                'FaceAlpha', 0.40, ...
+                'Tag', 'plot_browser_bone_mesh');
         end
 
-        % Remove the old selected result so repeated navigation never stacks
-        % stale 3D intersection curves.
-        delete(findobj(ax3D, 'Tag', 'plot_snapshot_mesh_plane_intersection'));
+        % Reconstruct the image-to-reference transform from the stored plane
+        % origin and unit directions so no external graphics object is needed.
+        T_image_ref = eye(4);
+        T_image_ref(1:3, 1) = reshape(currentPlane.ex, 3, 1);
+        T_image_ref(1:3, 2) = reshape(currentPlane.ey, 3, 1);
+        T_image_ref(1:3, 3) = reshape(currentPlane.n, 3, 1);
+        T_image_ref(1:3, 4) = reshape(currentPlane.p0, 3, 1);
 
-        % Preserve the axes hold state because adding a line to axes with hold
-        % disabled would otherwise replace the complete 3D overview scene.
-        previousHoldState = ishold(ax3D);
-        hold(ax3D, 'on');
+        % Recover physical pixel spacing from the finite plane dimensions.
+        % Single-pixel dimensions use unit spacing because their extent is zero.
+        if currentPlane.nCols > 1
+            pixelSpacingX = currentPlane.W / (currentPlane.nCols - 1);
+        else
+            pixelSpacingX = 1;
+        end
+        if currentPlane.nRows > 1
+            pixelSpacingY = currentPlane.H / (currentPlane.nRows - 1);
+        else
+            pixelSpacingY = 1;
+        end
 
-        % Match the example by drawing only probe-facing 3D segments in red.
+        % Draw only the selected ultrasound plane so the browser 3D view stays
+        % lightweight even though the static overview contains every snapshot.
+        display_image3D(sceneAxes, currentPlane.image, T_image_ref, ...
+            'SwapXY', true, ...
+            'PixelSpacing', [pixelSpacingX, pixelSpacingY], ...
+            'Tag', 'plot_browser_usimage', ...
+            'Colormap', 'gray', ...
+            'FaceAlpha', 0.55);
+
+        % Match the previous interaction by highlighting only probe-facing 3D
+        % segments. A zero-hit row simply leaves this object group empty.
         for segmentIndex = 1:numel(currentIntersection.probeFacingSegments3D)
             currentSegment3D = ...
                 currentIntersection.probeFacingSegments3D{segmentIndex};
-            plot3(ax3D, ...
+            plot3(sceneAxes, ...
                 currentSegment3D(:, 1), ...
                 currentSegment3D(:, 2), ...
                 currentSegment3D(:, 3), ...
                 'r-', ...
                 'LineWidth', 2, ...
-                'Tag', 'plot_snapshot_mesh_plane_intersection');
+                'Tag', 'plot_browser_mesh_plane_intersection');
+        end
+        hold(sceneAxes, 'off');
+
+        % Reapply scene styling because cla removes titles and labels together
+        % with the previous selected graphics objects.
+        xlabel(sceneAxes, 'X');
+        ylabel(sceneAxes, 'Y');
+        zlabel(sceneAxes, 'Z');
+        grid(sceneAxes, 'on');
+        box(sceneAxes, 'on');
+        axis(sceneAxes, 'tight');
+        daspect(sceneAxes, [1, 1, 1]);
+
+        % Use the standard view for the first scene, then preserve any view
+        % angle chosen through the 3D toolbar on later selections.
+        if hasRendered3DScene
+            view(sceneAxes, previousSceneView);
+        else
+            view(sceneAxes, 35, 40);
         end
 
-        % Restore the caller's graphics behavior after the selected lines exist.
-        if ~previousHoldState
-            hold(ax3D, 'off');
+        % Add lighting only when a mesh is present because the textured image
+        % plane and intersection lines do not need surface shading.
+        if hasMatchingBoneMesh
+            camlight(sceneAxes, 'headlight');
+            lighting(sceneAxes, 'gouraud');
+            material(sceneAxes, 'dull');
         end
+
+        % Identify the selected anatomy directly above the independent 3D axes.
+        title(sceneAxes, sprintf('%s | Bone %s', ...
+            char(string(currentPlane.snapshotName)), currentBoneCode), ...
+            'Interpreter', 'none');
+        hasRendered3DScene = true;
         drawnow limitrate;
     end
 
     function closeBrowser(sourceFigure, ~)
-        %CLOSEBROWSER Remove the selected 3D overlay and close the browser.
-        % The cleanup is needed so closing the inspection UI does not leave a
-        % red curve in the independent 3D overview figure.
+        %CLOSEBROWSER Close the self-contained snapshot browser.
+        % All selected 3D graphics now belong to sourceFigure, so deleting the
+        % browser also cleans its mesh, plane, and intersection without ever
+        % changing the separate static overview figure.
         %
         % Inputs:
         %   sourceFigure : Browser uifigure supplied by its CloseRequestFcn.
         %   ~            : Unused close event supplied by MATLAB.
         %
         % Outputs:
-        %   None. The function deletes tagged highlights and the browser figure.
+        %   None. The function deletes the browser and all child graphics.
 
-        % Delete the browser-owned 3D lines only when the original axes still exists.
-        if isgraphics(ax3D, 'axes')
-            delete(findobj(ax3D, ...
-                'Tag', 'plot_snapshot_mesh_plane_intersection'));
-        end
-
-        % Finish the normal close operation after associated graphics are clean.
+        % Delete only the browser; ax1 is intentionally outside this ownership boundary.
         delete(sourceFigure);
     end
 

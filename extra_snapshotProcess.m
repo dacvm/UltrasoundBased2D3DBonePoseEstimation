@@ -630,7 +630,7 @@ for planeIndex = 1:numel(snapshotPlanes)
         numel(probeFacingSegments3D), size(probeFacingPixels, 1));
 end
 
-% Open one results-first browser. It will draw only the selected image and
-% replace the selected intersection highlight in the existing 3D axes.
+% Open one results-first browser with its own 3D axes. The separate ax1 scene
+% remains a static overview and is never changed by browser row selection.
 figIntersectionBrowser = displaySnapshotIntersectionBrowser( ...
-    snapshotPlanes, intersections, ax1);
+    snapshotPlanes, intersections, boneMeshesRefByCode);
