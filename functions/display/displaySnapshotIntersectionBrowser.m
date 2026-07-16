@@ -355,7 +355,9 @@ renderSnapshot(resultIndex(1));
         % A full-width or full-height drag corresponds to half a revolution.
         newAzimuth = sceneRotationStartView(1) - ...
             180 * pointerDelta(1) / sceneRotationAxesSize(1);
-        newElevation = sceneRotationStartView(2) + ...
+        % Reverse the screen-space vertical delta so an upward drag produces
+        % an upward apparent rotation and a downward drag does the opposite.
+        newElevation = sceneRotationStartView(2) - ...
             180 * pointerDelta(2) / sceneRotationAxesSize(2);
 
         % Keep azimuth in MATLAB's conventional signed-degree range.
