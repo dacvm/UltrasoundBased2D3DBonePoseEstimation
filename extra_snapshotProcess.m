@@ -301,6 +301,76 @@ bones    = loaded_ctmat.bones;
 
 fprintf('Displaying the CT bones and selected bone pins...\n');
 
+% Average the reference and selected pin poses over every acquisition place.
+% Pooling all rows gives each recorded rigid-body sample the same weight.
+rigidBodyNamesToAverage = {'B_N_REF', 'C_F_PRO', 'C_T_DIS'};
+averagedRigidBodyTransforms = struct();
+
+% Count all rows once so the collection arrays have their final size.
+totalRigidBodySampleCount = 0;
+for snapshotIndex = 1:numel(snapshotData)
+    totalRigidBodySampleCount = totalRigidBodySampleCount + ...
+        height(snapshotData(snapshotIndex).rigidbodies);
+end
+
+% Loop for all selected rigid bodies
+for rigidBodyIndex = 1:numel(rigidBodyNamesToAverage)
+
+    % Get current rigid body name
+    rigidBodyName = rigidBodyNamesToAverage{rigidBodyIndex};
+
+    % Collect the quaternion and translation from every row at every place.
+    quaternionSamples  = zeros(totalRigidBodySampleCount, 4);
+    translationSamples = zeros(totalRigidBodySampleCount, 3);
+    sampleIndex = 0;
+
+    for snapshotIndex = 1:numel(snapshotData)
+        currentRigidBodies = snapshotData(snapshotIndex).rigidbodies;
+
+        % An empty snapshot place has no measurements to add to the average.
+        if isempty(currentRigidBodies)
+            continue
+        end
+        rigidBodyRecords = currentRigidBodies.(rigidBodyName);
+
+        for recordIndex = 1:numel(rigidBodyRecords)
+            currentRecord = rigidBodyRecords{recordIndex};
+
+            % Normalize the scalar-first [w x y z] quaternion before storing
+            % it, then store the matching translation in the same row.
+            sampleIndex   = sampleIndex + 1;
+            quaternionRow = reshape(currentRecord.q, 1, 4);
+            quaternionSamples(sampleIndex, :)  = quaternionRow / norm(quaternionRow);
+            translationSamples(sampleIndex, :) = reshape(currentRecord.t, 1, 3);
+        end
+    end
+
+    % Give a direct error when the input contains no rows for this body.
+    if sampleIndex == 0
+        error('extra_snapshotProcess:NoValidRigidBodySamples', ...
+            'No rigid-body samples are available for %s.', ...
+            rigidBodyName);
+    end
+
+    % Convert the stored rows to MATLAB quaternion objects and use meanrot
+    % for rotation. Translation uses the regular arithmetic mean.
+    meanQuaternion  = meanrot(quaternion(quaternionSamples(1:sampleIndex, :)));
+    meanRotation    = quat2rotm(compact(meanQuaternion));
+    meanTranslation = mean(translationSamples(1:sampleIndex, :), 1);
+
+    % Combine the two averages into one global rigid-body transform.
+    meanTransform           = eye(4);
+    meanTransform(1:3, 1:3) = meanRotation;
+    meanTransform(1:3, 4)   = meanTranslation(:);
+    averagedRigidBodyTransforms.(rigidBodyName) = meanTransform;
+
+    fprintf('Averaged %s from %d rigid-body sample(s).\n', rigidBodyName, sampleIndex);
+end
+
+% Every bone transformation uses the same averaged reference pose.
+T_ref_global = averagedRigidBodyTransforms.B_N_REF;
+validateattributes(T_ref_global, {'numeric'}, {'size', [4, 4], 'finite'}, mfilename, 'T_ref_global');
+
 % Choose one pin place for each bone code. Change only these values when a
 % different redundant pin should drive the processing and display.
 pinSelection = struct( ...
@@ -310,32 +380,6 @@ pinSelection = struct( ...
 % Group each bone with all pins that share its bone code. The helper also
 % validates that every requested place identifies exactly one pin.
 boneUnits = coupleBonesAndPins(bones, bonepins, pinSelection);
-
-% The experiment treats the bones, pins, and reference object as static, so
-% use the first recorded rigid-body row as their shared representative pose.
-if isempty(snapshotData) || height(snapshotData(1).rigidbodies) < 1
-    error('extra_snapshotProcess:MissingInitialRigidBodies', ...
-        'The first snapshot must contain at least one rigid-body row.');
-end
-firstSnapshotRigidBodies = snapshotData(1).rigidbodies;
-
-% Require the tracked reference body before entering the bone loop because
-% every bone transformation depends on the same reference pose.
-if ~ismember('B_N_REF', firstSnapshotRigidBodies.Properties.VariableNames)
-    error('extra_snapshotProcess:MissingReferenceRigidBody', ...
-        'The first snapshot rigid-body table does not contain B_N_REF.');
-end
-firstReferenceRecord = firstSnapshotRigidBodies.B_N_REF{1};
-if ~isstruct(firstReferenceRecord) || ~isfield(firstReferenceRecord, 'T')
-    error('extra_snapshotProcess:InvalidReferenceRigidBody', ...
-        'The first B_N_REF record must contain a transformation field T.');
-end
-
-% Re-read this transform from the first CSV row instead of reusing the value
-% left by the ultrasound loop, which belongs to its last processed packet.
-T_ref_global = firstReferenceRecord.T;
-validateattributes(T_ref_global, {'numeric'}, {'size', [4, 4], 'finite'}, ...
-    mfilename, 'T_ref_global');
 
 % Visit the coupled units instead of assuming that bones and pins have the
 % same array length or ordering.
@@ -351,21 +395,15 @@ for boneIndex = 1:numel(boneUnits)
     % used by pinSelection, for example C_F_PRO or C_T_DIS.
     pinRigidBodyName = sprintf('C_%s_%s', ...
         currentUnit.bone, currentUnit.selectedPinPlace);
-    if ~ismember(pinRigidBodyName, firstSnapshotRigidBodies.Properties.VariableNames)
-        error('extra_snapshotProcess:MissingPinRigidBody', ...
-            'The first snapshot rigid-body table does not contain %s.', ...
+    if ~isfield(averagedRigidBodyTransforms, pinRigidBodyName)
+        error('extra_snapshotProcess:MissingAveragedPinRigidBody', ...
+            'No averaged rigid-body transform was prepared for %s.', ...
             pinRigidBodyName);
     end
 
-    % Read the tracked pin pose from the same first row as the reference so
-    % both measurements share one acquisition time and one global frame.
-    firstPinRecord = firstSnapshotRigidBodies.(pinRigidBodyName){1};
-    if ~isstruct(firstPinRecord) || ~isfield(firstPinRecord, 'T')
-        error('extra_snapshotProcess:InvalidPinRigidBody', ...
-            'The first %s record must contain a transformation field T.', ...
-            pinRigidBodyName);
-    end
-    T_pin_global = firstPinRecord.T;
+    % Use the pooled pin pose that was averaged in the same global frame as
+    % the pooled reference pose above.
+    T_pin_global = averagedRigidBodyTransforms.(pinRigidBodyName);
     validateattributes(T_pin_global, {'numeric'}, {'size', [4, 4], 'finite'}, ...
         mfilename, 'T_pin_global');
 
@@ -383,8 +421,7 @@ for boneIndex = 1:numel(boneUnits)
     % Mesh vertices are already CT-frame points, so transform them with
     % T_CT_ref rather than with the bone ACS transform itself.
     bonePointsRef = applyRigidTransform(currentBone.mesh.Points, T_CT_ref);
-    boneMeshRef = triangulation( ...
-        currentBone.mesh.ConnectivityList, bonePointsRef);
+    boneMeshRef   = triangulation(currentBone.mesh.ConnectivityList, bonePointsRef);
 
     % Draw the ref-frame bone surface first. Transparency keeps the selected pin
     % markers and the ultrasound planes visible through the mesh.
@@ -420,7 +457,7 @@ for boneIndex = 1:numel(boneUnits)
 
     % Draw the selected tracked pin frame in ref. Include the place in the
     % label to show which pin supplied the CT-to-ref correspondence.
-    pinOrigin = T_pin_ref(1:3, 4);
+    pinOrigin   = T_pin_ref(1:3, 4);
     pinBaseAxes = T_pin_ref(1:3, 1:3);
     pinAxisName = sprintf('%s %s Pin', ...
         char(currentUnit.name), char(currentUnit.selectedPinPlace));
