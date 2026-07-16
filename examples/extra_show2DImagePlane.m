@@ -9,11 +9,12 @@ is_record = false;
 
 % Build the absolute path to the sample fCal XML file containing
 % calibration matrix for ultrasound
-str_filename = 'PlusDeviceSet_fCal_Epiphan_NDIPolaris_UTNML__20260312_120634.xml';
-fcalConfigPath = fullfile(pwd, 'data', str_filename);
+filepath_fcalconfig = 'D:\Documents\BELANDA\SonoSkin\codes\matlab\bmodeimage_3dspace\data';
+filename_fcalconfig = 'PlusDeviceSet_fCal_Epiphan_NDIPolaris_UTNML__20260312_120634.xml';
+fullfile_fcalconfig = fullfile(filepath_fcalconfig, filename_fcalconfig);
 
 % Parse all <Transform> entries under <CoordinateDefinitions>.
-transformations = read_fcal_transforms(fcalConfigPath);
+transformations = read_fcal_transforms(fullfile_fcalconfig);
 % get the transformation of the image in the probe coordinate frame
 T_image_probecalib = transformations(1).Matrix;
 
@@ -48,7 +49,7 @@ sequences = cell(1,n_filename);
 fprintf('Smoothing the qualisys data...\n');
 for index_filename = 1:n_filename
     % Get the Sequence Recording file
-    sequencePath = fullfile('D:\Documents\BELANDA\SonoSkin\data\dennis_data\2026-13-04_phantom', filenames{index_filename});
+    sequencePath = fullfile('D:\Documents\BELANDA\SonoSkin\data\dennis_data\2026-04-13_phantom', filenames{index_filename});
     % Parse the sequence file into a MATLAB struct.
     sequence = read_sequence_image(sequencePath);
     
