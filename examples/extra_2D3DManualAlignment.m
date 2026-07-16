@@ -22,11 +22,12 @@ is_record = false;
 
 % Build the absolute path to the sample fCal XML file containing
 % calibration matrix for ultrasound
-str_filename = 'PlusDeviceSet_fCal_Epiphan_NDIPolaris_UTNML__20260312_120634.xml';
-fcalConfigPath = fullfile(pwd, 'data', str_filename);
+filepath_fcalconfig = 'D:\Documents\BELANDA\SonoSkin\codes\matlab\bmodeimage_3dspace\data';
+filename_fcalconfig = 'PlusDeviceSet_fCal_Epiphan_NDIPolaris_UTNML__20260312_120634.xml';
+fullfile_fcalconfig = fullfile(filepath_fcalconfig, filename_fcalconfig);
 
 % Parse all <Transform> entries under <CoordinateDefinitions>.
-transformations = read_fcal_transforms(fcalConfigPath);
+transformations = read_fcal_transforms(fullfile_fcalconfig);
 % get the transformation of the image in the probe coordinate frame
 T_image_probecalib = transformations(1).Matrix;
 
@@ -61,7 +62,7 @@ sequences = cell(1,n_filename);
 fprintf('Smoothing the qualisys data...\n');
 for index_filename = 1:n_filename
     % Get the Sequence Recording file
-    sequencePath = fullfile('D:\Documents\BELANDA\SonoSkin\data\dennis_data\2026-13-04_phantom', filenames{index_filename});
+    sequencePath = fullfile('D:\Documents\BELANDA\SonoSkin\data\dennis_data\2026-04-13_phantom', filenames{index_filename});
     % Parse the sequence file into a MATLAB struct.
     sequence = read_sequence_image(sequencePath);
     
@@ -162,14 +163,14 @@ for index_filename = 1:n_filename
     end
 end
 
-%%
+%% LOAD ACS DATA
 
-% Store the femur ACS mat filename in a dedicated variable so we do not mix it with XML filenames.
-acs_filename = 'CT_Femur_editedFlipped_scaled_20260421-174922.mat';
 % Build the absolute path to the femur ACS mat file in the bones folder.
-acs_path = fullfile(pwd, 'data', 'bones', acs_filename);
+filepath_acs = 'D:\Documents\BELANDA\SonoSkin\codes\matlab\bmodeimage_3dspace\data\bones';
+filename_acs = 'CT_Femur_editedFlipped_scaled_20260421-174922.mat';
+fullfile_acs = fullfile(filepath_acs, filename_acs);
 % Load the mat content into a struct so we can safely pick the ACS variable by name.
-acs_loaded = load(acs_path);
+acs_loaded = load(fullfile_acs);
 % Use the "acs" field directly when available because that is the expected variable name.
 if isfield(acs_loaded, 'acs')
     acs = acs_loaded.acs;
@@ -184,10 +185,12 @@ T_femurct_originct = [acs.f.R', acs.f.origin'; 0 0 0 1];
 
 %% INTERACTIVE FEMUR STL POSE CONTROL
 
-% Build the fixed STL path from project root exactly as requested.
-stl_path = fullfile(pwd, 'data', 'bones', 'CT_Femur_editedFlipped_scaled_distal.stl');
+% Build the absolute path to the femur STL file in the bones folder.
+filepath_stl = 'D:\Documents\BELANDA\SonoSkin\codes\matlab\bmodeimage_3dspace\data\bones';
+filename_stl = 'CT_Femur_editedFlipped_scaled_distal.stl';
+fullfile_stl = fullfile(filepath_stl, filename_stl);
 % Read STL mesh into faces and vertices while handling common stlread output variants.
-[femur_faces, femur_vertices_ct] = readStlMeshLocal(stl_path);
+[femur_faces, femur_vertices_ct] = readStlMeshLocal(fullfile_stl);
 
 % Apply the baseline femur transform once so the first draw matches T_femurct_originct.
 femur_vertices_world = applyRigidTransformLocal(femur_vertices_ct, T_femurct_originct);

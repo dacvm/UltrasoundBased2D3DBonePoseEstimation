@@ -20,11 +20,12 @@ is_record = false;
 
 % Build the absolute path to the sample fCal XML file containing
 % calibration matrix for ultrasound
-str_filename = 'PlusDeviceSet_fCal_Epiphan_NDIPolaris_UTNML__20260312_120634.xml';
-fcalConfigPath = fullfile(pwd, 'data', str_filename);
+filepath_fcalconfig = 'D:\Documents\BELANDA\SonoSkin\codes\matlab\bmodeimage_3dspace\data';
+filename_fcalconfig = 'PlusDeviceSet_fCal_Epiphan_NDIPolaris_UTNML__20260312_120634.xml';
+fullfile_fcalconfig = fullfile(filepath_fcalconfig, filename_fcalconfig);
 
 % Parse all <Transform> entries under <CoordinateDefinitions>.
-transformations = read_fcal_transforms(fcalConfigPath);
+transformations = read_fcal_transforms(fullfile_fcalconfig);
 % get the transformation of the image in the probe coordinate frame
 T_image_probecalib = transformations(1).Matrix;
 
@@ -59,7 +60,7 @@ sequences = cell(1,n_filename);
 fprintf('Smoothing the qualisys data...\n');
 for index_filename = 1:n_filename
     % Get the Sequence Recording file
-    sequencePath = fullfile('D:\Documents\BELANDA\SonoSkin\data\dennis_data\2026-13-04_phantom', filenames{index_filename});
+    sequencePath = fullfile('D:\Documents\BELANDA\SonoSkin\data\dennis_data\2026-04-13_phantom', filenames{index_filename});
     % Parse the sequence file into a MATLAB struct.
     sequence = read_sequence_image(sequencePath);
     
@@ -179,11 +180,12 @@ end
 %% LOAD ACS DATA
 
 % Build the absolute path to the femur ACS mat file in the bones folder.
-acs_filename = 'CT_Femur_editedFlipped_scaled_20260421-174922.mat';
-acs_path     = fullfile(pwd, 'data', 'bones', acs_filename);
+filepath_acs = 'D:\Documents\BELANDA\SonoSkin\codes\matlab\bmodeimage_3dspace\data\bones';
+filename_acs = 'CT_Femur_editedFlipped_scaled_20260421-174922.mat';
+fullfile_acs     = fullfile(filepath_acs, filename_acs);
 
 % Load the mat content into a struct so we can safely pick the ACS variable by name.
-acs_loaded = load(acs_path);
+acs_loaded = load(fullfile_acs);
 % Use the "acs" field directly when available because that is the expected variable name.
 if isfield(acs_loaded, 'acs')
     acs = acs_loaded.acs;
@@ -204,11 +206,12 @@ T_femurct_originct = [acs.f.R', acs.f.origin'; 0 0 0 1];
 % Get the transformation from the CT-scan coordinate frame to the manual
 % adjustment (T that transform the bone close to the images, I did this manually)
 % Build the absolute path to the .mat file that contains that transformation
-manualadjustment_filename = 'manual_transformation_adjustments_20260422-154031.mat';
-manualadjustment_path     = fullfile(pwd, 'output', 'manual_transformation_adjustments', manualadjustment_filename);
+filepath_manualadjustment = 'D:\Documents\BELANDA\SonoSkin\codes\matlab\bmodeimage_3dspace\output\manual_transformation_adjustments';
+filename_manualadjustment = 'manual_transformation_adjustments_20260422-154031.mat';
+fullfile_manualadjustment     = fullfile(filepath_manualadjustment, filename_manualadjustment);
 
 % Load the content (T_femurlabmanual_bonect and T_femurlabmanual_originct)
-manualadjustment_loaded   = load(manualadjustment_path);
+manualadjustment_loaded   = load(fullfile_manualadjustment);
 T_femurlabmanual_bonect   = manualadjustment_loaded.T_femurlabmanual_bonect;
 
 % Propagate the original femur transformation with this manual adjustment
@@ -218,8 +221,10 @@ T_femurlabmanual_originct = T_femurlabmanual_bonect * T_femurct_originct;
 %% LOAD MESH FILE
 
 % Read STL mesh into faces and vertices while handling common stlread output variants.
-stl_path                      = fullfile(pwd, 'data', 'bones', 'CT_Femur_editedFlipped_scaled_distal.stl');
-[femur_faces, femur_vertices] = readStlMesh(stl_path);
+filepath_stl                  = 'D:\Documents\BELANDA\SonoSkin\codes\matlab\bmodeimage_3dspace\data\bones';
+filename_stl                  = 'CT_Femur_editedFlipped_scaled_distal.stl';
+fullfile_stl                  = fullfile(filepath_stl, filename_stl);
+[femur_faces, femur_vertices] = readStlMesh(fullfile_stl);
 
 % Apply the baseline femur transform once so the first draw matches T_femurct_originct.
 femur_vertices_world = applyRigidTransform(femur_vertices, T_femurlabmanual_originct);
