@@ -211,9 +211,23 @@ axis(sceneAxes, 'equal');
 view(sceneAxes, 35, 40);
 title(sceneAxes, 'Selected 3D scene', 'Interpreter', 'none');
 
-% Provide explicit 3D navigation tools without changing the interaction
-% modes of the neighboring 2D ultrasound axes.
-axtoolbar(sceneAxes, {'rotate', 'pan', 'zoomin', 'zoomout', 'restoreview'});
+% Keep the supported toolbar modes that do not need the default left-drag
+% rotation. Rotation is handled below so MATLAB does not enter its fast
+% uifigure interaction state and hide the neighboring ultrasound axes.
+sceneToolbar = axtoolbar( ...
+    sceneAxes, {'pan', 'zoomin', 'zoomout', 'restoreview'});
+
+% Remove the built-in gestures from only the 3D axes. A custom left-drag
+% callback provides rotation, while the explicit toolbar still provides
+% pan, zoom, and restore-view controls.
+disableDefaultInteractivity(sceneAxes);
+sceneAxes.Interactions = [];
+sceneAxes.ButtonDownFcn = @startSceneRotation;
+
+% Track an active mouse drag at figure level so rotation continues when the
+% pointer moves quickly between motion events inside the 3D axes.
+figBrowser.WindowButtonMotionFcn = @continueSceneRotation;
+figBrowser.WindowButtonUpFcn = @stopSceneRotation;
 
 % Place result details and the color explanation below both plots so users do
 % not need to infer overlay meaning from marker shapes alone.
@@ -245,6 +259,16 @@ overlayLegendLabel.Layout.Row = 2;
 % changes preserve a user-adjusted view angle while the first row uses the
 % standard project view.
 hasRendered3DScene = false;
+
+% Store the small amount of state needed by the custom left-drag rotation.
+% The start values make each redraw independent of skipped motion events.
+isSceneRotationActive = false;
+sceneRotationStartPointer = [NaN, NaN];
+sceneRotationStartView = [NaN, NaN];
+sceneRotationAxesSize = [1, 1];
+scenePointerBeforeRotation = 'arrow';
+resultsTableEnableBeforeRotation = 'on';
+sceneHeadlight = gobjects(0);
 
 %% CONNECT TABLE SELECTION TO THE TWO DISPLAYS
 
@@ -278,6 +302,111 @@ end
 resultsTable.Selection = 1;
 resultsTable.SelectionChangedFcn = @handleSelectionChanged;
 renderSnapshot(resultIndex(1));
+
+    function startSceneRotation(~, ~)
+        %STARTSCENEROTATION Begin a custom left-button rotation gesture.
+        % This callback replaces MATLAB's built-in UIAxes rotation because
+        % that interaction can hide sibling axes while the pointer moves.
+
+        % Do not rotate before a scene exists or for any non-left click.
+        if ~hasRendered3DScene || ...
+                ~strcmp(figBrowser.SelectionType, 'normal')
+            return;
+        end
+
+        % Let an explicitly selected pan or zoom toolbar mode own the drag.
+        if isSceneToolbarModeActive()
+            return;
+        end
+
+        % Record the drag origin so skipped motion events cannot accumulate error.
+        isSceneRotationActive = true;
+        sceneRotationStartPointer = figBrowser.CurrentPoint;
+        sceneRotationStartView = sceneAxes.View;
+        sceneRotationAxesSize = max(sceneAxes.Position(3:4), 1);
+        scenePointerBeforeRotation = figBrowser.Pointer;
+
+        % Keep a release over the table routed to the figure-level callback.
+        % The inactive state keeps the table appearance without accepting input.
+        resultsTableEnableBeforeRotation = resultsTable.Enable;
+        resultsTable.Enable = 'inactive';
+        figBrowser.Pointer = 'fleur';
+    end
+
+    function continueSceneRotation(~, ~)
+        %CONTINUESCENEROTATION Update the 3D view during an active mouse drag.
+        % Direct view updates avoid the figure-wide fast interaction renderer,
+        % so the independent middle ultrasound axes remains on screen.
+
+        % Mouse movement outside an active rotation should have no effect.
+        if ~isSceneRotationActive
+            return;
+        end
+
+        % Convert total pointer movement into azimuth and elevation changes.
+        currentPointerPosition = figBrowser.CurrentPoint;
+        pointerDelta = currentPointerPosition - sceneRotationStartPointer;
+
+        % Ignore repeated motion events that report the same pixel location.
+        if all(pointerDelta == 0)
+            return;
+        end
+
+        % A full-width or full-height drag corresponds to half a revolution.
+        newAzimuth = sceneRotationStartView(1) - ...
+            180 * pointerDelta(1) / sceneRotationAxesSize(1);
+        newElevation = sceneRotationStartView(2) + ...
+            180 * pointerDelta(2) / sceneRotationAxesSize(2);
+
+        % Keep azimuth in MATLAB's conventional signed-degree range.
+        newAzimuth = mod(newAzimuth + 180, 360) - 180;
+
+        % Avoid the singular camera direction at exactly either vertical pole.
+        newElevation = min(max(newElevation, -89.9), 89.9);
+        view(sceneAxes, newAzimuth, newElevation);
+
+        % Move the existing light with the camera so mesh shading stays stable.
+        if ~isempty(sceneHeadlight) && isgraphics(sceneHeadlight, 'light')
+            camlight(sceneHeadlight, 'headlight');
+        end
+
+        % Process only the latest pending redraw to keep mouse motion responsive.
+        drawnow limitrate nocallbacks;
+    end
+
+    function stopSceneRotation(~, ~)
+        %STOPSCENEROTATION Finish the custom rotation after mouse release.
+        % Resetting the state ensures later pointer movement cannot alter the view.
+
+        % A release without a matching start has no state to restore.
+        if ~isSceneRotationActive
+            return;
+        end
+
+        isSceneRotationActive = false;
+        sceneRotationStartPointer = [NaN, NaN];
+        sceneRotationStartView = [NaN, NaN];
+
+        % Restore controls changed only for the duration of the drag.
+        resultsTable.Enable = resultsTableEnableBeforeRotation;
+        figBrowser.Pointer = scenePointerBeforeRotation;
+    end
+
+    function isActive = isSceneToolbarModeActive()
+        %ISSCENETOOLBARMODEACTIVE Check whether pan or zoom owns left-drag.
+        % The restore-view control is a push button and has no active state.
+
+        isActive = false;
+        toolbarButtons = sceneToolbar.Children;
+        for toolbarButtonIndex = 1:numel(toolbarButtons)
+            currentToolbarButton = toolbarButtons(toolbarButtonIndex);
+            if isprop(currentToolbarButton, 'Value') && ...
+                    strcmp(currentToolbarButton.Value, 'on')
+                isActive = true;
+                return;
+            end
+        end
+    end
 
     function handleSelectionChanged(~, eventData)
         %HANDLESELECTIONCHANGED Render the snapshot represented by a selected row.
@@ -323,6 +452,9 @@ renderSnapshot(resultIndex(1));
         %
         % Outputs:
         %   None. The function updates existing UI and 3D graphics objects.
+
+        % End a stale drag before replacing graphics or preserving its camera.
+        stopSceneRotation([], []);
 
         % Read the aligned records once so all display elements use one acquisition.
         currentPlane = snapshotPlanes(selectedResultIndex);
@@ -398,6 +530,7 @@ renderSnapshot(resultIndex(1));
         % Save the current camera orientation before clearing graphics so a
         % user-adjusted view survives selection of another table row.
         previousSceneView = sceneAxes.View;
+        sceneHeadlight = gobjects(0);
         cla(sceneAxes);
         hold(sceneAxes, 'on');
 
@@ -418,6 +551,8 @@ renderSnapshot(resultIndex(1));
                 'FaceColor', [0.92, 0.83, 0.74], ...
                 'EdgeColor', 'none', ...
                 'FaceAlpha', 0.40, ...
+                'HitTest', 'off', ...
+                'PickableParts', 'none', ...
                 'Tag', 'plot_browser_bone_mesh');
         end
 
@@ -444,12 +579,17 @@ renderSnapshot(resultIndex(1));
 
         % Draw only the selected ultrasound plane so the browser 3D view stays
         % lightweight even though the static overview contains every snapshot.
-        display_image3D(sceneAxes, currentPlane.image, T_image_ref, ...
+        selectedImageSurface = display_image3D( ...
+            sceneAxes, currentPlane.image, T_image_ref, ...
             'SwapXY', true, ...
             'PixelSpacing', [pixelSpacingX, pixelSpacingY], ...
             'Tag', 'plot_browser_usimage', ...
             'Colormap', 'gray', ...
             'FaceAlpha', 0.55);
+
+        % Send clicks through the textured plane to the 3D axes callback.
+        selectedImageSurface.HitTest = 'off';
+        selectedImageSurface.PickableParts = 'none';
 
         % Match the previous interaction by highlighting only probe-facing 3D
         % segments. A zero-hit row simply leaves this object group empty.
@@ -462,6 +602,8 @@ renderSnapshot(resultIndex(1));
                 currentSegment3D(:, 3), ...
                 'r-', ...
                 'LineWidth', 2, ...
+                'HitTest', 'off', ...
+                'PickableParts', 'none', ...
                 'Tag', 'plot_browser_mesh_plane_intersection');
         end
         hold(sceneAxes, 'off');
@@ -487,7 +629,7 @@ renderSnapshot(resultIndex(1));
         % Add lighting only when a mesh is present because the textured image
         % plane and intersection lines do not need surface shading.
         if hasMatchingBoneMesh
-            camlight(sceneAxes, 'headlight');
+            sceneHeadlight = camlight(sceneAxes, 'headlight');
             lighting(sceneAxes, 'gouraud');
             material(sceneAxes, 'dull');
         end
