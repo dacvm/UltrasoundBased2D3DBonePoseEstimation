@@ -8,7 +8,7 @@ addpath(genpath('functions'));
 fprintf('Reading the snapshot data...\n');
 
 % Define the filepath to the snapshot
-filepath_snapshots = 'D:\Documents\BELANDA\SonoSkin\data\dennis_data\2026-07-15_phantomflexion\measurement_03';
+filepath_snapshots = 'D:\Documents\BELANDA\SonoSkin\data\dennis_data\2026-07-15_phantomflexion\measurement_02';
 
 % Stop early with a clear message when the configured snapshot root is missing.
 if ~isfolder(filepath_snapshots)
@@ -78,9 +78,8 @@ for snapshotIndex = 1:numel(snapshotDirectories)
     % Stop before reading when a snapshot is missing one half of a coupled
     % MHA/CSV pair. This prevents later rows from being paired incorrectly.
     if numel(mhaFiles) ~= numel(csvFiles)
-        error(['Snapshot file count mismatch in "%s": found %d MHA ' ...
-            'file(s) and %d CSV file(s).'], snapshotPath, ...
-            numel(mhaFiles), numel(csvFiles));
+        error('Snapshot file count mismatch in "%s": found %d MHA file(s) and %d CSV file(s).', ...
+            snapshotPath, numel(mhaFiles), numel(csvFiles));
     end
 
     % Start with the required empty shape so an empty directory remains valid.
@@ -102,8 +101,7 @@ for snapshotIndex = 1:numel(snapshotDirectories)
         % A snapshot CSV must contribute exactly one row to the combined
         % table. Rejecting other sizes keeps its row aligned with one MHA file.
         if height(currentRigidBodies) ~= 1
-            error('Expected one rigid-body row in "%s", but found %d.', ...
-                csvPath, height(currentRigidBodies));
+            error('Expected one rigid-body row in "%s", but found %d.', csvPath, height(currentRigidBodies));
         end
         snapshotRigidBodyTables{fileIndex} = currentRigidBodies;
     end
@@ -260,7 +258,8 @@ for snapshotIndex = 1:numel(snapshotData)
             end
 
             % Express the probe pose in the reference frame using the same propagation as the sequence display script.
-            T_probe_ref    = inv(T_ref_global) * T_probe_global;
+            % Left division is the numerically safer equivalent of inv(T_ref_global) * T_pin_global from the frame rule.
+            T_probe_ref    = T_ref_global \ T_probe_global;
 
             % Draw the probe coordinate frame to make the probe pose easy to inspect.
             origin    = T_probe_ref(1:3, 4);
@@ -297,10 +296,8 @@ for snapshotIndex = 1:numel(snapshotData)
 
             % Packet images use [width, height] storage, so width follows
             % the first dimension and rows follow the second dimension.
-            snapshotPlanes(snapshotPlaneCount).W = ...
-                (size(current_packet.Image, 1) - 1) * S_image_probecalib(1);
-            snapshotPlanes(snapshotPlaneCount).H = ...
-                (size(current_packet.Image, 2) - 1) * S_image_probecalib(2);
+            snapshotPlanes(snapshotPlaneCount).W     = (size(current_packet.Image, 1) - 1) * S_image_probecalib(1);
+            snapshotPlanes(snapshotPlaneCount).H     = (size(current_packet.Image, 2) - 1) * S_image_probecalib(2);
             snapshotPlanes(snapshotPlaneCount).nRows = size(current_packet.Image, 2);
             snapshotPlanes(snapshotPlaneCount).nCols = size(current_packet.Image, 1);
             snapshotPlanes(snapshotPlaneCount).image = current_packet.Image;
@@ -308,11 +305,11 @@ for snapshotIndex = 1:numel(snapshotData)
 
             % Preserve source identifiers because a sortable table cannot
             % rely on its visible row number to identify the original data.
-            snapshotPlanes(snapshotPlaneCount).bone = snapshotData(snapshotIndex).bone;
-            snapshotPlanes(snapshotPlaneCount).snapshotName = snapshotData(snapshotIndex).name;
+            snapshotPlanes(snapshotPlaneCount).bone          = snapshotData(snapshotIndex).bone;
+            snapshotPlanes(snapshotPlaneCount).snapshotName  = snapshotData(snapshotIndex).name;
             snapshotPlanes(snapshotPlaneCount).snapshotIndex = snapshotIndex;
             snapshotPlanes(snapshotPlaneCount).sequenceIndex = sequenceIndex;
-            snapshotPlanes(snapshotPlaneCount).packetIndex = packetIndex;
+            snapshotPlanes(snapshotPlaneCount).packetIndex   = packetIndex;
 
             % Update the figure during the loop so MATLAB shows progress while loading all snapshots.
             % drawnow;
@@ -549,7 +546,7 @@ fprintf('Computing snapshot mesh-plane intersections...\n');
 
 % Match the validated example so mesh faces must lie within this angle of
 % the probe-facing direction before their intersection pixels are selected.
-normalFacingToleranceDeg = 50;
+normalFacingToleranceDeg = 25;
 
 % Keep every raw and probe-facing output because the results browser shows
 % counts and overlays without recomputing geometry during row selection.
@@ -571,27 +568,29 @@ intersections = repmat(intersectionTemplate, 1, numel(snapshotPlanes));
 % Compute every result once so table browsing only redraws the selected
 % image and never repeats the expensive mesh-plane intersection calculation.
 for planeIndex = 1:numel(snapshotPlanes)
-    currentPlane = snapshotPlanes(planeIndex);
+
+    % Get the current plane and bone
+    currentPlane    = snapshotPlanes(planeIndex);
     currentBoneCode = char(currentPlane.bone);
     intersections(planeIndex).timestamp = currentPlane.timestamp;
 
     % Keep unknown bone groups visible in the table, but do not intersect
     % them with an arbitrary anatomical mesh.
-    if isempty(currentBoneCode) || ~isvarname(currentBoneCode) || ...
-            ~isfield(boneMeshesRefByCode, currentBoneCode)
-        intersections(planeIndex).status = sprintf( ...
-            'Skipped: no reference-frame mesh for bone code "%s".', currentBoneCode);
-        fprintf('[Snapshot %d/%d, %s] %s\n', ...
-            planeIndex, numel(snapshotPlanes), currentPlane.snapshotName, ...
-            intersections(planeIndex).status);
+    if isempty(currentBoneCode) || ~isvarname(currentBoneCode) || ~isfield(boneMeshesRefByCode, currentBoneCode)
+
+        % Store the status for future debugging
+        intersections(planeIndex).status = sprintf('Skipped: no reference-frame mesh for bone code "%s".', currentBoneCode);
+        % Display the status for the user
+        fprintf('[Snapshot %d/%d, %s] %s\n', planeIndex, numel(snapshotPlanes), currentPlane.snapshotName, intersections(planeIndex).status);
+
+        % Skip this plane.
         continue;
     end
 
     % Select the transformed femur or tibia mesh that matches this plane's
     % snapshot group before running the shared geometry helper.
     currentMesh = boneMeshesRefByCode.(currentBoneCode);
-    [mask, pixelList, segments3D, segmentsUV, segmentFaceIdx] = ...
-        meshPlaneIntersectionPixels(currentMesh, currentPlane);
+    [mask, pixelList, segments3D, segmentsUV, segmentFaceIdx] = meshPlaneIntersectionPixels(currentMesh, currentPlane);
 
     % Use the same plane-to-pixel conversion as the validated intersection
     % example and the optimization geometry pipeline.
@@ -600,26 +599,24 @@ for planeIndex = 1:numel(snapshotPlanes)
 
     % Filter the raw intersection to mesh faces whose normals point toward
     % the ultrasound probe within the configured angular tolerance.
-    [probeFacingSegmentMask, probeFacingSegments3D, ...
-        probeFacingSegmentsUV, probeFacingPixels, segmentFacingScore] = ...
+    [probeFacingSegmentMask, probeFacingSegments3D, probeFacingSegmentsUV, probeFacingPixels, segmentFacingScore] = ...
         selectProbeFacingIntersectionSegments( ...
             currentMesh, segments3D, segmentsUV, segmentFaceIdx, currentPlane, ...
-            du, dv, currentPlane.nRows, currentPlane.nCols, ...
-            normalFacingToleranceDeg);
+            du, dv, currentPlane.nRows, currentPlane.nCols, normalFacingToleranceDeg);
 
     % Store all geometry outputs in the same order as snapshotPlanes so one
     % stable result index can drive both the table and image display.
-    intersections(planeIndex).mask = mask;
-    intersections(planeIndex).pixelList = pixelList;
-    intersections(planeIndex).segments3D = segments3D;
-    intersections(planeIndex).segmentsUV = segmentsUV;
-    intersections(planeIndex).segmentFaceIdx = segmentFaceIdx;
-    intersections(planeIndex).probeFacingSegmentMask = probeFacingSegmentMask;
-    intersections(planeIndex).probeFacingSegments3D = probeFacingSegments3D;
-    intersections(planeIndex).probeFacingSegmentsUV = probeFacingSegmentsUV;
-    intersections(planeIndex).probeFacingPixels = probeFacingPixels;
-    intersections(planeIndex).segmentFacingScore = segmentFacingScore;
-    intersections(planeIndex).status = 'Computed';
+    intersections(planeIndex).mask                      = mask;
+    intersections(planeIndex).pixelList                 = pixelList;
+    intersections(planeIndex).segments3D                = segments3D;
+    intersections(planeIndex).segmentsUV                = segmentsUV;
+    intersections(planeIndex).segmentFaceIdx            = segmentFaceIdx;
+    intersections(planeIndex).probeFacingSegmentMask    = probeFacingSegmentMask;
+    intersections(planeIndex).probeFacingSegments3D     = probeFacingSegments3D;
+    intersections(planeIndex).probeFacingSegmentsUV     = probeFacingSegmentsUV;
+    intersections(planeIndex).probeFacingPixels         = probeFacingPixels;
+    intersections(planeIndex).segmentFacingScore        = segmentFacingScore;
+    intersections(planeIndex).status                    = 'Computed';
 
     % Print compact progress because processing many snapshots can take long
     % enough that users need to see which input is currently being evaluated.
@@ -632,5 +629,4 @@ end
 
 % Open one results-first browser with its own 3D axes. The separate ax1 scene
 % remains a static overview and is never changed by browser row selection.
-figIntersectionBrowser = displaySnapshotIntersectionBrowser( ...
-    snapshotPlanes, intersections, boneMeshesRefByCode);
+figIntersectionBrowser = displaySnapshotIntersectionBrowser(snapshotPlanes, intersections, boneMeshesRefByCode);
