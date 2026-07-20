@@ -1,148 +1,135 @@
-# Ultrasound Snapshot Processing Tool
+# Ultrasound Snapshot Processing
 
-This MATLAB tool places tracked ultrasound snapshots and CT bone meshes in
-the same coordinate system. It then calculates where the femur or tibia mesh
-crosses each ultrasound image and opens a browser for viewing the results.
-In review mode, a user can select good snapshots and export them to a MAT
-file for later processing.
+## Short summary
 
-## Experiment context
+This MATLAB tool combines tracked ultrasound snapshots with CT-derived femur and tibia meshes. It places the ultrasound images and CT bones in the same reference coordinate system, calculates where each bone mesh crosses its ultrasound image plane, and opens an interactive browser for inspecting the results.
 
-This tool was made for a knee-phantom flexion experiment. During the
-experiment, ultrasound snapshots were recorded near the femur and tibia.
-The ultrasound probe, a fixed reference rigid body, and rigid bodies attached
-to bone pins were tracked during acquisition.
+The recommended entry point is `extra_snapshotProcess_from_config.m`. It reads experiment paths and settings from `config/extra_snapshotProcess_config.json`. In review mode, the browser also lets the user select useful snapshots and export them to a MAT file for later processing.
 
-The different measurements provide complementary information:
+The `legacy/extra_snapshotProcess.m` script is the older version with experiment-specific paths written directly in the MATLAB file. It is kept for reference, but the config-driven script is easier to reuse with a new dataset.
 
-- The ultrasound MHA files contain the images and the tracked probe and
-  reference poses.
-- The matching Qualisys CSV files contain the tracked reference and bone-pin
-  rigid bodies.
-- The fCal XML file describes the calibration from ultrasound image
-  coordinates to probe coordinates.
-- The post-processed CT data contains the femur and tibia meshes, anatomical
-  coordinate systems, and bone-pin coordinate systems.
+## Experiment setup
 
-Together, these inputs allow the CT bones and ultrasound images to be shown
-in one reference frame.
+This workflow was developed for a knee-phantom flexion experiment. A similar setup can also be used with a cadaver leg. The experiment contains:
 
-## Supported script
+- Femur and tibia bone pins with optical marker rigid bodies.
+- A fixed reference rigid body used as the common experiment coordinate frame.
+- A tracked ultrasound probe.
+- Ultrasound snapshots recorded near the femur and tibia.
+- A CT scan of the bones, bone pins, and optical markers.
 
-The supported entry point is:
+The ultrasound acquisition stores the image together with the tracked probe and reference poses in a Plus sequence image file. A matching Qualisys CSV file stores the reference and bone-pin rigid-body poses. Probe calibration from fCal connects ultrasound image coordinates to probe coordinates. The processed CT data connects each CT bone mesh to the corresponding bone-pin coordinate system.
 
-`extra_snapshotProcess_from_config.m`
+The rigid-body names and coordinate-frame definitions used by Qualisys must match the definitions used when the CT data is prepared. If the marker order, pin name, axis direction, or handedness is different, the CT bones will not align correctly with the ultrasound images.
 
-Its experiment-specific paths and settings are stored in:
+## Required input data
 
-`config/extra_snapshotProcess_config.json`
+### Ultrasound snapshots and tracking data
 
-The script finds the project root from its own location. It therefore does
-not depend on MATLAB's current folder when it is started from the editor or
-with an absolute path.
+Provide one root directory containing separate snapshot-group folders. Each folder name should contain `femur` or `tibia`, because the script uses this text to select the matching CT bone mesh. For example:
 
-The `legacy/extra_snapshotProcess.m` script keeps the older hardcoded
-workflow for reference. It contains dataset-specific paths and is not the
-recommended entry point for a new experiment.
-
-## Required data
-
-### 1. Ultrasound snapshot folders
-
-Set `snapshotDirectory` to a directory containing one or more snapshot-group
-folders. A folder name should contain `femur` or `tibia` so the script can
-choose the correct CT mesh.
+```text
+measurement_02/
++-- femur_snapshot_01/
+|   +-- snapshot_001.mha
+|   +-- snapshot_001.csv
+|   +-- snapshot_002.mha
+|   +-- snapshot_002.csv
++-- tibia_snapshot_01/
+    +-- snapshot_001.mha
+    +-- snapshot_001.csv
+```
 
 Each snapshot-group folder must contain:
 
 - One or more Plus sequence image files (`.mha`).
 - The same number of Qualisys rigid-body snapshot files (`.csv`).
 
-The script sorts the MHA and CSV filenames and pairs them in that order.
-Use consistent names so the sorted files describe the same acquisitions.
-Each CSV file must contain exactly one data row and all rigid bodies listed
-in `rigidBodyNamesToAverage`.
+The script sorts the MHA and CSV filenames separately and pairs files at the same position. Use consistent filenames so both sorted lists describe the same acquisition order. Each CSV file must contain exactly one data row and every rigid body listed in `rigidBodyNamesToAverage`.
 
-### 2. Ultrasound probe calibration
+The standard Plus sequence file format is described in the [Plus File Sequence documentation](https://pluslib.readthedocs.io/en/latest/file-formats/FileSequenceFile.html).
 
-Set `fcalConfigFile` to an fCal/PLUS XML calibration file. The file must
-contain exactly one transform named `ImageToProbe`. The script uses this
-transform to place every ultrasound image relative to the tracked probe.
+### Ultrasound probe calibration
 
-### 3. Post-processed CT scan data
+Provide an fCal/PLUS XML calibration file containing exactly one transform named `ImageToProbe`. The script uses this transform to place the ultrasound image relative to the tracked probe. The scale stored in this transform is also used to convert image pixels to physical image-plane dimensions.
 
-Set `ctPostProcessedMatFile` to a MAT file containing variables named
-`bones` and `bonepins`. This file is produced by the sibling
-[CT Knee Post-Processing Tool](../ctkneePostProcess/README.md).
+### Post-processed CT scan data
 
-Run that tool first if the post-processed CT MAT file is not available yet.
+Provide a MAT file containing variables named `bones` and `bonepins`. This file is produced by the sibling [Knee Phantom Processing tool](../ctkneePostProcess/README.md) in `tools/ctkneePostProcess/`.
 
-### 4. Snapshot configuration
+Run the CT knee post-processing tool first if this MAT file is not available. Its output supplies:
 
-Edit `config/extra_snapshotProcess_config.json` and check these settings:
+- The femur and tibia CT meshes.
+- The anatomical coordinate system of each bone.
+- The CT-side coordinate system of each femur and tibia bone pin.
 
-- `snapshotDirectory`: Snapshot-group root directory.
-- `fcalConfigFile`: fCal XML calibration file.
-- `ctPostProcessedMatFile`: Post-processed CT MAT file.
-- `pinSelection.F`: Femur pin location used in the experiment.
-- `pinSelection.T`: Tibia pin location used in the experiment.
-- `rigidBodyNamesToAverage`: Qualisys rigid bodies used for registration.
-  This list must include `B_N_REF` and the selected femur and tibia pin
-  names, such as `C_F_PRO` and `C_T_DIS`.
-- `displayMode`: Use `display` to browse results only, or `review` to select
-  snapshots and export them.
+Use CT data from the same physical pin and marker setup as the ultrasound experiment. The selected femur and tibia pins must exist in both the CT output and the Qualisys tracking data.
 
-Paths may be absolute or relative. A relative path is resolved from the
-directory containing the JSON configuration file.
+### Snapshot configuration
+
+Edit `config/extra_snapshotProcess_config.json`. It contains these settings:
+
+| Setting | Meaning |
+| --- | --- |
+| `snapshotDirectory` | Root directory containing the femur and tibia snapshot-group folders. |
+| `fcalConfigFile` | Path to the fCal XML calibration file. |
+| `ctPostProcessedMatFile` | Path to the MAT file produced by `tools/ctkneePostProcess/`. |
+| `pinSelection.F` | Femur pin location used in the experiment, such as `PRO`. |
+| `pinSelection.T` | Tibia pin location used in the experiment, such as `DIS`. |
+| `rigidBodyNamesToAverage` | Qualisys rigid bodies used to register the CT data to the experiment. |
+| `displayMode` | Browser mode: `display` or `review`. |
+
+`rigidBodyNamesToAverage` must include the fixed reference rigid body `B_N_REF` and the selected femur and tibia pin names. For example, femur pin `PRO` and tibia pin `DIS` require:
+
+```json
+"rigidBodyNamesToAverage": [
+  "B_N_REF",
+  "C_F_PRO",
+  "C_T_DIS"
+]
+```
+
+Configuration paths may be absolute or relative. Relative paths are resolved from the directory containing `extra_snapshotProcess_config.json`, not from MATLAB's current folder.
 
 ## Processing workflow
 
-The script performs these main steps:
+1. **Read and pair the snapshot files.** The script finds the femur and tibia snapshot-group folders, sorts their MHA and CSV files, checks that each MHA file has one CSV partner, and reads the ultrasound images and tracking data.
 
-1. It reads and pairs the MHA ultrasound snapshots and Qualisys CSV files.
-2. It reads the `ImageToProbe` calibration from the fCal XML file.
-3. It transforms every valid ultrasound image into the tracked reference
-   coordinate system.
-4. It loads the post-processed CT bone and bone-pin data.
-5. It averages the configured Qualisys rigid-body measurements and uses the
-   selected bone pins to place the femur and tibia in the same reference
-   coordinate system as the ultrasound images.
-6. It calculates the intersection between the appropriate CT mesh and each
-   ultrasound image plane. It also keeps mesh segments that face the probe.
-7. It opens an interactive browser showing the ultrasound image, the
-   intersection overlay, and the related 3D scene.
+2. **Calibrate and place the ultrasound images.** The `ImageToProbe` transform from the fCal XML file connects each image to the tracked probe. The tracked probe and reference poses are then used to place every valid image plane in the reference coordinate system.
 
-## How to run
+3. **Load the processed CT data.** The script loads the `bones` and `bonepins` structures created by the CT knee post-processing tool and selects the configured femur and tibia pins.
 
-1. Prepare the required snapshot, calibration, and post-processed CT data.
-2. Open `config/extra_snapshotProcess_config.json` and update its paths and
-   settings for the experiment.
-3. Start MATLAB and change to the repository root.
-4. Run:
+4. **Register the CT bones to the reference frame.** The configured Qualisys rigid-body measurements are averaged. The tracked bone-pin poses are matched with their CT-side pin poses so the femur and tibia meshes can be transformed from CT coordinates into the same reference frame as the ultrasound images.
 
-```matlab
-run('tools/snapshotProcess/extra_snapshotProcess_from_config.m')
-```
+5. **Calculate mesh-image intersections.** For each snapshot, the script intersects the correct bone mesh with the finite ultrasound image plane. It records the intersection pixels and keeps the mesh segments whose surface orientation faces the ultrasound probe.
 
-The script prints progress in the MATLAB Command Window and opens figures
-while it processes the data.
+6. **Display and review the results.** An interactive browser shows each ultrasound image, its intersection overlay, and the related 3D geometry. Review mode allows accepted snapshots to be selected and exported.
 
-If `displayMode` is `review`, mark the acceptable rows in the final browser
-and click **Export Selected**. Choose a destination when MATLAB asks where
-to save the MAT file. The saved file contains a `validSnapshots` structure
-with the selected image planes and their intersection results.
+## Running the project
 
-If `displayMode` is `display`, the browser is read-only and no MAT file is
-exported.
+1. Prepare the ultrasound snapshot folders, fCal XML file, and post-processed CT MAT file.
+2. Edit `config/extra_snapshotProcess_config.json` and set the paths, selected pins, rigid-body names, and display mode.
+3. Start MATLAB. The script can be launched from any current folder because it locates the project and its `functions` directory from its own file path.
+4. Run the recommended script:
+
+   ```matlab
+   run('tools/snapshotProcess/extra_snapshotProcess_from_config.m')
+   ```
+
+   If MATLAB is not currently in the project root, pass the absolute script path to `run` instead.
+
+5. Follow the progress messages in the MATLAB Command Window and inspect the figures and final snapshot browser.
+
+Set `displayMode` to `display` when the results only need to be inspected. Set it to `review` to mark acceptable snapshots and export them. In review mode, click **Export Selected** and choose an output filename when MATLAB asks. The exported MAT file contains a `validSnapshots` structure with the selected image planes and their mesh-intersection results.
+
+The script adds the project `functions` directory and its subdirectories to the MATLAB path automatically.
 
 ## Common input problems
 
-- A snapshot folder has a different number of MHA and CSV files.
-- Sorted MHA and CSV filenames do not represent the same acquisition order.
-- A CSV file is missing a configured rigid body or contains more than one
-  data row.
+- A snapshot folder contains different numbers of MHA and CSV files.
+- The sorted MHA and CSV filenames do not represent the same acquisition order.
+- A CSV file contains more than one row or is missing a configured rigid body.
 - A snapshot-group folder name does not contain `femur` or `tibia`.
-- The selected pin names do not match the CT `bonepins` data and the
-  Qualisys rigid-body names.
+- A selected pin name does not match the CT `bonepins` data or the Qualisys rigid-body name.
 - The fCal XML file does not contain exactly one `ImageToProbe` transform.
 - The CT MAT file does not contain both `bones` and `bonepins`.
