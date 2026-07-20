@@ -1,36 +1,24 @@
 clear; clc; close all;
 
-%% LOAD AND VALIDATE THE CONFIGURATION
-% Find this script instead of relying on MATLAB's current folder. This makes
-% the config-driven workflow behave the same when it is launched elsewhere.
+% Locate this script so project files do not depend on MATLAB's current folder.
 scriptFullPath = mfilename('fullpath');
 if isempty(scriptFullPath)
-    error('extra_snapshotProcess_from_config:ScriptPathUnavailable', ...
-          'Run extra_snapshotProcess_from_config.m as a complete script so its configuration file can be located.');
+    error('extra_snapshotProcess:ScriptPathUnavailable', ...
+          'Run extra_snapshotProcess.m as a complete script so the project root can be located.');
 end
 scriptDirectory = fileparts(scriptFullPath);
 
-% Add the project helpers through an absolute path beside this script.
-functionsDirectory = fullfile(scriptDirectory, 'functions');
+% This script lives in tools/snapshotProcess, two folders below the project root.
+projectRoot = fileparts(fileparts(scriptDirectory));
+
+% Add every project function folder through an absolute path so the readers
+% and display helpers remain available when this script is run from elsewhere.
+functionsDirectory = fullfile(projectRoot, 'functions');
 if ~isfolder(functionsDirectory)
-    error('extra_snapshotProcess_from_config:FunctionsDirectoryNotFound', ...
+    error('extra_snapshotProcess:FunctionsDirectoryNotFound', ...
           'Required functions directory not found: %s', functionsDirectory);
 end
 addpath(genpath(functionsDirectory));
-
-% Keep one fixed config filename so experiment inputs can be changed without
-% editing this MATLAB script.
-configurationPath = fullfile(scriptDirectory, 'config', 'extra_snapshotProcess_config.json');
-configuration     = readSnapshotProcessConfiguration(configurationPath);
-
-% Use short workflow variable names below so the copied processing sections
-% remain easy to compare with the original quick-check script.
-filepath_snapshots          = configuration.snapshotDirectory;
-fullfile_fcalconfig         = configuration.fcalConfigFile;
-fullfile_bonectpostprocess  = configuration.ctPostProcessedMatFile;
-pinSelection                = configuration.pinSelection;
-rigidBodyNamesToAverage     = configuration.rigidBodyNamesToAverage;
-displayMode                 = configuration.displayMode;
 
 %% READ THE SNAPSHOT DATA
 % Load each ultrasound snapshot group together with its tracking data.
@@ -42,7 +30,8 @@ displayMode                 = configuration.displayMode;
 
 fprintf('Reading the snapshot data...\n');
 
-% The validated snapshot root was loaded from snapshotDirectory in JSON.
+% Define the filepath to the snapshot
+filepath_snapshots = 'D:\Documents\BELANDA\SonoSkin\data\dennis_data\2026-07-15_phantomflexion\measurement_02';
 
 % Stop early with a clear message when the configured snapshot root is missing.
 if ~isfolder(filepath_snapshots)
@@ -51,16 +40,18 @@ end
 
 % Read the snapshot root and keep only its immediate child directories.
 % These directories represent the anatomical snapshot groups.
-directoryEntries    = dir(filepath_snapshots);
-isSnapshotDirectory = [directoryEntries.isdir] & ~ismember({directoryEntries.name}, {'.', '..'});
+directoryEntries = dir(filepath_snapshots);
+isSnapshotDirectory = [directoryEntries.isdir] & ...
+    ~ismember({directoryEntries.name}, {'.', '..'});
 snapshotDirectories = directoryEntries(isSnapshotDirectory);
 
 % Sort directory names so repeated runs create the same struct ordering.
 [~, snapshotSortOrder] = sort({snapshotDirectories.name});
-snapshotDirectories    = snapshotDirectories(snapshotSortOrder);
+snapshotDirectories = snapshotDirectories(snapshotSortOrder);
 
 % Define an empty reader-output array for snapshot groups with no MHA files.
-emptySequences   = struct('header', {}, 'packets', {});
+emptySequences = struct('header', {}, 'packets', {});
+
 % Define the matching empty table for snapshot groups with no CSV files.
 emptyRigidBodies = table();
 
@@ -97,7 +88,7 @@ for snapshotIndex = 1:numel(snapshotDirectories)
 
     % Sort file names so the sequence order is predictable across runs.
     [~, fileSortOrder] = sort({mhaFiles.name});
-    mhaFiles           = mhaFiles(fileSortOrder);
+    mhaFiles = mhaFiles(fileSortOrder);
 
     % Select and sort the CSV files separately because their names use a
     % different prefix from the MHA files. Both sorted lists remain in the
@@ -135,18 +126,6 @@ for snapshotIndex = 1:numel(snapshotDirectories)
         if height(currentRigidBodies) ~= 1
             error('Expected one rigid-body row in "%s", but found %d.', csvPath, height(currentRigidBodies));
         end
-
-        % Every configured rigid body is needed by the later averaging loop.
-        % Check each CSV here so the error identifies the exact bad snapshot.
-        missingRigidBodyNames = setdiff( ...
-            rigidBodyNamesToAverage, ...
-            currentRigidBodies.Properties.VariableNames, ...
-            'stable');
-        if ~isempty(missingRigidBodyNames)
-            error('extra_snapshotProcess_from_config:MissingCsvRigidBody', ...
-                'CSV file "%s" does not contain configured rigid body "%s".', ...
-                csvPath, missingRigidBodyNames{1});
-        end
         snapshotRigidBodyTables{fileIndex} = currentRigidBodies;
     end
 
@@ -159,10 +138,10 @@ for snapshotIndex = 1:numel(snapshotDirectories)
     end
 
     % Store the metadata, images, and combined rigid-body table together.
-    snapshotData(snapshotIndex).name        = snapshotName;
-    snapshotData(snapshotIndex).bone        = boneCode;
-    snapshotData(snapshotIndex).path        = snapshotPath;
-    snapshotData(snapshotIndex).sequences   = snapshotSequences;
+    snapshotData(snapshotIndex).name = snapshotName;
+    snapshotData(snapshotIndex).bone = boneCode;
+    snapshotData(snapshotIndex).path = snapshotPath;
+    snapshotData(snapshotIndex).sequences = snapshotSequences;
     snapshotData(snapshotIndex).rigidbodies = snapshotRigidBodies;
 end
 
@@ -173,23 +152,15 @@ end
 % - Correct the rotation part so it can be used as a proper rigid transformation.
 % - Keep the calibration scale for converting image pixels into physical image-plane dimensions.
 
-% The validated calibration path was loaded from fcalConfigFile in JSON.
+% Build the calibration path from the project root instead of pwd so moving
+% the script or starting MATLAB in another folder does not change the input.
+filename_fcalconfig = 'PlusDeviceSet_fCal_Epiphan_NDIPolaris_UTNML__20260713_143746.xml';
+fullfile_fcalconfig = fullfile(projectRoot, 'data', filename_fcalconfig);
 
 % Parse all <Transform> entries under <CoordinateDefinitions>.
 transformations = read_fcal_transforms(fullfile_fcalconfig);
-
-% Select the calibration by frame name instead of assuming it is always the
-% first XML transform. Exactly one match keeps the frame mapping unambiguous.
-imageToProbeTransformIndex = find(strcmp( ...
-    {transformations.Name}, 'ImageToProbe'));
-if numel(imageToProbeTransformIndex) ~= 1
-    error('extra_snapshotProcess_from_config:InvalidFcalImageToProbeTransform', ...
-        ['Expected exactly one ImageToProbe transform in "%s", but found ' ...
-         '%d.'], ...
-        fullfile_fcalconfig, numel(imageToProbeTransformIndex));
-end
-T_image_probecalib = ...
-    transformations(imageToProbeTransformIndex).Matrix;
+% get the transformation of the image in the probe coordinate frame
+T_image_probecalib = transformations(1).Matrix;
 
 % The original T_image_probe contains
 % Extract the original 3x3 rotation block from Image->Probe transform.
@@ -359,12 +330,12 @@ for snapshotIndex = 1:numel(snapshotData)
 
             % Packet images use [width, height] storage, so width follows
             % the first dimension and rows follow the second dimension.
-            snapshotPlanes(snapshotPlaneCount).W             = (size(current_packet.Image, 1) - 1) * S_image_probecalib(1);
-            snapshotPlanes(snapshotPlaneCount).H             = (size(current_packet.Image, 2) - 1) * S_image_probecalib(2);
-            snapshotPlanes(snapshotPlaneCount).nRows         = size(current_packet.Image, 2);
-            snapshotPlanes(snapshotPlaneCount).nCols         = size(current_packet.Image, 1);
-            snapshotPlanes(snapshotPlaneCount).image         = current_packet.Image;
-            snapshotPlanes(snapshotPlaneCount).timestamp     = current_packet.Timestamp;
+            snapshotPlanes(snapshotPlaneCount).W     = (size(current_packet.Image, 1) - 1) * S_image_probecalib(1);
+            snapshotPlanes(snapshotPlaneCount).H     = (size(current_packet.Image, 2) - 1) * S_image_probecalib(2);
+            snapshotPlanes(snapshotPlaneCount).nRows = size(current_packet.Image, 2);
+            snapshotPlanes(snapshotPlaneCount).nCols = size(current_packet.Image, 1);
+            snapshotPlanes(snapshotPlaneCount).image = current_packet.Image;
+            snapshotPlanes(snapshotPlaneCount).timestamp = current_packet.Timestamp;
 
             % Preserve source identifiers because a sortable table cannot
             % rely on its visible row number to identify the original data.
@@ -395,18 +366,20 @@ snapshotPlanes = snapshotPlanes(1:snapshotPlaneCount);
 
 fprintf('Reading the CT bones and selected bone pins...\n');
 
-% The validated CT MAT path was loaded from ctPostProcessedMatFile in JSON.
+filepath_bonectpostprocess = 'D:\Documents\BELANDA\SonoSkin\codes\matlab\ctknee_postprocessing\outputs\kneephantom';
+filename_bonectpostprocess = 'kneephantom_bones_and_bonepins.mat';
+fullfile_bonectpostprocess = fullfile(filepath_bonectpostprocess, filename_bonectpostprocess);
 
 % Stop with a direct message when the configured coordinate-system file is missing.
 if ~isfile(fullfile_bonectpostprocess)
     error('Knee CT post-processed MAT file not found: %s', fullfile_bonectpostprocess);
 end
 
-% Pseudo-declare the expected CT structs before loading them so readers can
-% see the two named variables required from the MAT file.
-% These empty values are replaced by the checked MAT-file values below.
-bonepins = struct(); % This placeholder documents the expected MAT variable.
-bones    = struct(); % This placeholder documents the expected MAT variable.
+% Pseudo-declare the expected coordinate-system struct before loading it, so
+% readers can see that this script expects a struct named acs from the MAT file.
+% This empty value is intentionally replaced by the checked MAT-file value below.
+bonepins = struct(); 
+bones    = struct();
 
 % Load only the expected variable into a temporary struct to avoid silently
 % adding unrelated MAT-file variables to the script workspace.
@@ -434,14 +407,16 @@ bones    = loaded_ctmat.bones;
 
 fprintf('Displaying the CT bones and selected bone pins...\n');
 
-% Average every rigid body requested by the JSON configuration over all
-% acquisition places. Pooling all rows gives each sample the same weight.
+% Average the reference and selected pin poses over every acquisition place.
+% Pooling all rows gives each recorded rigid-body sample the same weight.
+rigidBodyNamesToAverage = {'B_N_REF', 'C_F_PRO', 'C_T_DIS'};
 averagedRigidBodyTransforms = struct();
 
 % Count all rows once so the collection arrays have their final size.
 totalRigidBodySampleCount = 0;
 for snapshotIndex = 1:numel(snapshotData)
-    totalRigidBodySampleCount = totalRigidBodySampleCount + height(snapshotData(snapshotIndex).rigidbodies);
+    totalRigidBodySampleCount = totalRigidBodySampleCount + ...
+        height(snapshotData(snapshotIndex).rigidbodies);
 end
 
 % Loop for all selected rigid bodies
@@ -478,7 +453,7 @@ for rigidBodyIndex = 1:numel(rigidBodyNamesToAverage)
 
     % Give a direct error when the input contains no rows for this body.
     if sampleIndex == 0
-        error('extra_snapshotProcess_from_config:NoValidRigidBodySamples', ...
+        error('extra_snapshotProcess:NoValidRigidBodySamples', ...
             'No rigid-body samples are available for %s.', ...
             rigidBodyName);
     end
@@ -502,7 +477,11 @@ end
 T_ref_global = averagedRigidBodyTransforms.B_N_REF;
 validateattributes(T_ref_global, {'numeric'}, {'size', [4, 4], 'finite'}, mfilename, 'T_ref_global');
 
-% Use the validated pin place for each bone code from the JSON configuration.
+% Choose one pin place for each bone code. Change only these values when a
+% different redundant pin should drive the processing and display.
+pinSelection = struct( ...
+    'F', 'PRO', ...
+    'T', 'DIS');
 
 % Group each bone with all pins that share its bone code. The helper also
 % validates that every requested place identifies exactly one pin.
@@ -524,27 +503,30 @@ for boneIndex = 1:numel(boneUnits)
 
     % Build the motion-capture name from the same bone code and pin place
     % used by pinSelection, for example C_F_PRO or C_T_DIS.
-    pinRigidBodyName = sprintf('C_%s_%s', currentUnit.bone, currentUnit.selectedPinPlace);
+    pinRigidBodyName = sprintf('C_%s_%s', ...
+        currentUnit.bone, currentUnit.selectedPinPlace);
     if ~isfield(averagedRigidBodyTransforms, pinRigidBodyName)
-        error('extra_snapshotProcess_from_config:MissingAveragedPinRigidBody', ...
-              'No averaged rigid-body transform was prepared for %s.', pinRigidBodyName);
+        error('extra_snapshotProcess:MissingAveragedPinRigidBody', ...
+            'No averaged rigid-body transform was prepared for %s.', ...
+            pinRigidBodyName);
     end
 
     % Use the pooled pin pose that was averaged in the same global frame as
     % the pooled reference pose above.
     T_pin_global = averagedRigidBodyTransforms.(pinRigidBodyName);
-    validateattributes(T_pin_global, {'numeric'}, {'size', [4, 4], 'finite'}, mfilename, 'T_pin_global');
+    validateattributes(T_pin_global, {'numeric'}, {'size', [4, 4], 'finite'}, ...
+        mfilename, 'T_pin_global');
 
     % Express the tracked pin in ref. Left division is the numerically safer
     % equivalent of inv(T_ref_global) * T_pin_global from the frame rule.
-    T_pin_ref   = T_ref_global \ T_pin_global;
+    T_pin_ref = T_ref_global \ T_pin_global;
 
     % Build the common CT-to-ref transform from the pin correspondence.
     % Right division is equivalent to T_pin_ref * inv(T_pin_CT).
-    T_CT_ref    = T_pin_ref / currentPin.T_pin_CT;
+    T_CT_ref = T_pin_ref / currentPin.T_pin_CT;
 
     % Propagate the stored bone ACS from CT into ref using the shared CT map.
-    T_bone_ref  = T_CT_ref * currentBone.T_bone_CT;
+    T_bone_ref = T_CT_ref * currentBone.T_bone_CT;
 
     % Mesh vertices are already CT-frame points, so transform them with
     % T_CT_ref rather than with the bone ACS transform itself.
@@ -571,7 +553,8 @@ for boneIndex = 1:numel(boneUnits)
     boneOrigin   = T_bone_ref(1:3, 4);
     boneBaseAxes = T_bone_ref(1:3, 1:3);
     boneAxisName = sprintf('%s Bone ACS', char(currentUnit.name));
-    display_axis_v2(ax1, boneOrigin, boneBaseAxes, quiverscale, boneAxisName, 'Tag', 'plot_ct_bone_acs_axes', 'Mode', 'default');
+    display_axis_v2(ax1, boneOrigin, boneBaseAxes, quiverscale, boneAxisName, ...
+        'Tag', 'plot_ct_bone_acs_axes', 'Mode', 'default');
 
     % The marker centroids are CT-frame columns in a 3-by-N matrix. Transpose
     % them for the shared point helper so the displayed markers also use ref.
@@ -593,8 +576,10 @@ for boneIndex = 1:numel(boneUnits)
     % label to show which pin supplied the CT-to-ref correspondence.
     pinOrigin   = T_pin_ref(1:3, 4);
     pinBaseAxes = T_pin_ref(1:3, 1:3);
-    pinAxisName = sprintf('%s %s Pin', char(currentUnit.name), char(currentUnit.selectedPinPlace));
-    display_axis_v2(ax1, pinOrigin, pinBaseAxes, quiverscale, pinAxisName, 'Tag', 'plot_ct_pin_axes', 'Mode', 'default');
+    pinAxisName = sprintf('%s %s Pin', ...
+        char(currentUnit.name), char(currentUnit.selectedPinPlace));
+    display_axis_v2(ax1, pinOrigin, pinBaseAxes, quiverscale, pinAxisName, ...
+        'Tag', 'plot_ct_pin_axes', 'Mode', 'default');
 end
 
 % Render the completed scene immediately after both coupled units are drawn.
@@ -693,419 +678,9 @@ for planeIndex = 1:numel(snapshotPlanes)
         numel(probeFacingSegments3D), size(probeFacingPixels, 1));
 end
 
-% Open the existing results-first browser in the configured mode after all
-% intersection records are ready. Review mode provides MAT-file export.
+% Open the existing results-first browser in review mode after all intersection
+% records are ready. The Export selected button performs the MAT-file save.
 [figIntersectionBrowser, validSnapshots, outputFilePath] = ...
     displaySnapshotIntersectionBrowser( ...
         snapshotPlanes, intersections, boneMeshesRefByCode, ...
-        'Mode', displayMode);
-
-
-
-
-%% HELPER: READ SNAPSHOT PROCESS CONFIGURATION
-
-function configuration = readSnapshotProcessConfiguration(configurationPath)
-%READSNAPSHOTPROCESSCONFIGURATION Load and validate snapshot workflow settings.
-% This function reads the user-editable JSON file and prepares the paths and
-% options needed by the snapshot workflow. Keeping this work here prevents
-% experiment-specific values from being hardcoded in the processing script.
-%
-% Input:
-%   configurationPath - Path to the JSON configuration file.
-%
-% Output:
-%   configuration - Scalar struct containing validated absolute input paths,
-%                   normalized pin selections and rigid-body names, and the
-%                   normalized browser mode.
-
-% Check the file first so a missing config is reported separately from bad
-% JSON syntax.
-if ~isfile(configurationPath)
-    error('extra_snapshotProcess_from_config:ConfigurationNotFound', ...
-        'Configuration file not found: %s', configurationPath);
-end
-
-% Include the config path in parsing errors because that is the file the user
-% needs to correct.
-try
-    configurationText = fileread(configurationPath);
-    rawConfiguration = jsondecode(configurationText);
-catch configurationError
-    error('extra_snapshotProcess_from_config:InvalidConfigurationJson', ...
-        'Could not read configuration JSON "%s". Reason: %s', ...
-        configurationPath, configurationError.message);
-end
-
-% One top-level JSON object gives every required setting one unambiguous
-% location.
-if ~isstruct(rawConfiguration) || ~isscalar(rawConfiguration)
-    error('extra_snapshotProcess_from_config:InvalidConfigurationRoot', ...
-        'Configuration JSON must contain one object at its top level: %s', ...
-        configurationPath);
-end
-configurationDirectory = fileparts(configurationPath);
-
-% Read path text before resolving it so missing fields and path failures have
-% separate, useful messages.
-snapshotDirectorySetting = requireConfigurationText( ...
-    rawConfiguration, 'snapshotDirectory', 'snapshotDirectory');
-fcalConfigFileSetting = requireConfigurationText( ...
-    rawConfiguration, 'fcalConfigFile', 'fcalConfigFile');
-ctPostProcessedMatFileSetting = requireConfigurationText( ...
-    rawConfiguration, ...
-    'ctPostProcessedMatFile', ...
-    'ctPostProcessedMatFile');
-
-% Relative settings start beside the JSON file. Existing absolute paths are
-% preserved, which supports both portable and machine-specific configs.
-snapshotDirectory = resolveConfiguredInputPath( ...
-    snapshotDirectorySetting, ...
-    configurationDirectory, ...
-    'snapshotDirectory', ...
-    'directory', ...
-    '');
-fcalConfigFile = resolveConfiguredInputPath( ...
-    fcalConfigFileSetting, ...
-    configurationDirectory, ...
-    'fcalConfigFile', ...
-    'file', ...
-    '.xml');
-ctPostProcessedMatFile = resolveConfiguredInputPath( ...
-    ctPostProcessedMatFileSetting, ...
-    configurationDirectory, ...
-    'ctPostProcessedMatFile', ...
-    'file', ...
-    '.mat');
-
-% Read the two required pin places and normalize them before they are used to
-% build motion-capture rigid-body names.
-rawPinSelection = requireConfigurationObject( ...
-    rawConfiguration, 'pinSelection', 'pinSelection');
-femurPinPlace = normalizePinPlace( ...
-    requireConfigurationText(rawPinSelection, 'F', 'pinSelection.F'), ...
-    'F', ...
-    'pinSelection.F');
-tibiaPinPlace = normalizePinPlace( ...
-    requireConfigurationText(rawPinSelection, 'T', 'pinSelection.T'), ...
-    'T', ...
-    'pinSelection.T');
-pinSelection = struct('F', femurPinPlace, 'T', tibiaPinPlace);
-
-% Preserve the configured averaging order while normalizing the names to the
-% table-field spelling used by the processing loop.
-rigidBodyNamesToAverage = requireConfigurationTextArray( ...
-    rawConfiguration, ...
-    'rigidBodyNamesToAverage', ...
-    'rigidBodyNamesToAverage');
-rigidBodyNamesToAverage = cellfun( ...
-    @(name) upper(strtrim(name)), ...
-    rigidBodyNamesToAverage, ...
-    'UniformOutput', false);
-
-% Reject invalid or duplicate names before any CSV files are opened.
-for rigidBodyIndex = 1:numel(rigidBodyNamesToAverage)
-    currentRigidBodyName = rigidBodyNamesToAverage{rigidBodyIndex};
-    if isempty(currentRigidBodyName) || ~isvarname(currentRigidBodyName)
-        error('extra_snapshotProcess_from_config:InvalidRigidBodyName', ...
-            ['Configuration field "rigidBodyNamesToAverage" contains an ' ...
-             'invalid MATLAB table variable name: "%s".'], ...
-            currentRigidBodyName);
-    end
-end
-if numel(unique(rigidBodyNamesToAverage, 'stable')) ...
-        ~= numel(rigidBodyNamesToAverage)
-    error('extra_snapshotProcess_from_config:DuplicateRigidBodyName', ...
-        ['Configuration field "rigidBodyNamesToAverage" must not contain ' ...
-         'duplicate names.']);
-end
-
-% Registration always needs the reference and both selected bone pins.
-% Enforcing this relationship here prevents a later missing-field failure.
-requiredRigidBodyNames = { ...
-    'B_N_REF', ...
-    sprintf('C_F_%s', femurPinPlace), ...
-    sprintf('C_T_%s', tibiaPinPlace)};
-missingRequiredRigidBodyNames = requiredRigidBodyNames( ...
-    ~ismember(requiredRigidBodyNames, rigidBodyNamesToAverage));
-if ~isempty(missingRequiredRigidBodyNames)
-    error('extra_snapshotProcess_from_config:MissingRequiredRigidBodyName', ...
-        ['Configuration field "rigidBodyNamesToAverage" must include "%s" ' ...
-         'for the selected reference and pin configuration.'], ...
-        missingRequiredRigidBodyNames{1});
-end
-
-% Normalize the browser option once so the main workflow can pass it directly
-% to displaySnapshotIntersectionBrowser.
-displayMode = lower(requireConfigurationText( ...
-    rawConfiguration, 'displayMode', 'displayMode'));
-if ~ismember(displayMode, {'display', 'review'})
-    error('extra_snapshotProcess_from_config:InvalidDisplayMode', ...
-        'Configuration field "displayMode" must be "display" or "review".');
-end
-
-% Return only checked values so the processing sections never need to access
-% raw JSON data.
-configuration = struct();
-configuration.snapshotDirectory = snapshotDirectory;
-configuration.fcalConfigFile = fcalConfigFile;
-configuration.ctPostProcessedMatFile = ctPostProcessedMatFile;
-configuration.pinSelection = pinSelection;
-configuration.rigidBodyNamesToAverage = rigidBodyNamesToAverage;
-configuration.displayMode = displayMode;
-end
-
-
-%% HELPER: REQUIRE CONFIGURATION OBJECT
-
-function requiredObject = requireConfigurationObject(parentObject, fieldName, fieldLabel)
-%REQUIRECONFIGURATIONOBJECT Return one required scalar JSON object.
-% This helper gives missing and incorrectly typed config sections a direct
-% error instead of allowing an unclear field-access failure later.
-%
-% Inputs:
-%   parentObject - Scalar MATLAB struct decoded from a JSON object.
-%   fieldName    - Field name to read from parentObject.
-%   fieldLabel   - User-facing field path included in error messages.
-%
-% Output:
-%   requiredObject - Required scalar struct stored in the named field.
-
-% Check both presence and type because nested config code assumes one object.
-if ~isstruct(parentObject) ...
-        || ~isscalar(parentObject) ...
-        || ~isfield(parentObject, fieldName)
-    error('extra_snapshotProcess_from_config:MissingConfigurationField', ...
-        'Required configuration object "%s" is missing.', fieldLabel);
-end
-requiredObject = parentObject.(fieldName);
-if ~isstruct(requiredObject) || ~isscalar(requiredObject)
-    error('extra_snapshotProcess_from_config:InvalidConfigurationField', ...
-        'Configuration field "%s" must contain one JSON object.', ...
-        fieldLabel);
-end
-end
-
-
-%% HELPER: REQUIRE CONFIGURATION TEXT
-
-function textValue = requireConfigurationText(parentObject, fieldName, fieldLabel)
-%REQUIRECONFIGURATIONTEXT Return one required nonempty JSON text value.
-% This helper normalizes JSON text to a MATLAB character vector so later
-% path and option checks use one predictable representation.
-%
-% Inputs:
-%   parentObject - Scalar MATLAB struct decoded from a JSON object.
-%   fieldName    - Field name to read from parentObject.
-%   fieldLabel   - User-facing field path included in error messages.
-%
-% Output:
-%   textValue - Trimmed, nonempty character vector from the named field.
-
-% Report a missing value before trying to inspect its type.
-if ~isstruct(parentObject) ...
-        || ~isscalar(parentObject) ...
-        || ~isfield(parentObject, fieldName)
-    error('extra_snapshotProcess_from_config:MissingConfigurationField', ...
-        'Required configuration field "%s" is missing.', fieldLabel);
-end
-rawValue = parentObject.(fieldName);
-
-% Accept either MATLAB text type because jsondecode behavior can differ by
-% release and JSON shape.
-if isstring(rawValue) && isscalar(rawValue)
-    textValue = char(rawValue);
-elseif ischar(rawValue) && isrow(rawValue)
-    textValue = rawValue;
-else
-    error('extra_snapshotProcess_from_config:InvalidConfigurationField', ...
-        'Configuration field "%s" must contain one text value.', ...
-        fieldLabel);
-end
-textValue = strtrim(textValue);
-if isempty(textValue)
-    error('extra_snapshotProcess_from_config:InvalidConfigurationField', ...
-        'Configuration field "%s" cannot be empty.', fieldLabel);
-end
-end
-
-
-%% HELPER: REQUIRE CONFIGURATION TEXT ARRAY
-
-function textValues = requireConfigurationTextArray(parentObject, fieldName, fieldLabel)
-%REQUIRECONFIGURATIONTEXTARRAY Return a required nonempty JSON string array.
-% This helper preserves the JSON element order because the averaging loop
-% should follow the order chosen in the configuration.
-%
-% Inputs:
-%   parentObject - Scalar MATLAB struct decoded from the top-level JSON object.
-%   fieldName    - Field name of the JSON string array.
-%   fieldLabel   - User-facing field path included in error messages.
-%
-% Output:
-%   textValues - Row cell array of trimmed, nonempty character vectors.
-
-% Check field presence before converting the decoded array.
-if ~isstruct(parentObject) ...
-        || ~isscalar(parentObject) ...
-        || ~isfield(parentObject, fieldName)
-    error('extra_snapshotProcess_from_config:MissingConfigurationField', ...
-        'Required configuration field "%s" is missing.', fieldLabel);
-end
-rawValues = parentObject.(fieldName);
-
-% JSON string arrays normally decode as cell arrays of char vectors. Also
-% accept MATLAB string vectors for compatibility with prepared structs.
-if iscell(rawValues) && isvector(rawValues)
-    textValues = rawValues(:).';
-elseif isstring(rawValues) && isvector(rawValues)
-    textValues = cellstr(rawValues(:).');
-else
-    error('extra_snapshotProcess_from_config:InvalidConfigurationField', ...
-        'Configuration field "%s" must be a JSON string array.', ...
-        fieldLabel);
-end
-if isempty(textValues)
-    error('extra_snapshotProcess_from_config:InvalidConfigurationField', ...
-        'Configuration field "%s" cannot be empty.', fieldLabel);
-end
-
-% Normalize every entry separately so one invalid item identifies its array
-% index in the error.
-for valueIndex = 1:numel(textValues)
-    currentValue = textValues{valueIndex};
-    if isstring(currentValue) && isscalar(currentValue)
-        currentValue = char(currentValue);
-    end
-    if ~ischar(currentValue) || ~isrow(currentValue)
-        error('extra_snapshotProcess_from_config:InvalidConfigurationField', ...
-            ['Configuration field "%s" item %d must contain one text ' ...
-             'value.'], ...
-            fieldLabel, valueIndex);
-    end
-
-    currentValue = strtrim(currentValue);
-    if isempty(currentValue)
-        error('extra_snapshotProcess_from_config:InvalidConfigurationField', ...
-            'Configuration field "%s" item %d cannot be empty.', ...
-            fieldLabel, valueIndex);
-    end
-    textValues{valueIndex} = currentValue;
-end
-end
-
-
-%% HELPER: NORMALIZE PLACE
-
-function normalizedPlace = normalizePinPlace(rawPlace, boneCode, fieldLabel)
-%NORMALIZEPINPLACE Normalize and validate one configured bone-pin location.
-% The normalized place is used both for CT pin selection and for building the
-% matching motion-capture table variable, so both systems stay consistent.
-%
-% Inputs:
-%   rawPlace   - Nonempty configured pin-location text.
-%   boneCode   - Bone code used in the rigid-body name, such as F or T.
-%   fieldLabel - User-facing configuration field path for error messages.
-%
-% Output:
-%   normalizedPlace - Uppercase pin-location character vector.
-
-% Uppercase the place because CT and motion-capture identifiers use the same
-% case-insensitive convention.
-normalizedPlace = upper(strtrim(rawPlace));
-candidateRigidBodyName = sprintf('C_%s_%s', boneCode, normalizedPlace);
-
-% The CSV reader stores rigid bodies as table variable names, so the generated
-% name must be valid for dynamic table access.
-if ~isvarname(candidateRigidBodyName)
-    error('extra_snapshotProcess_from_config:InvalidPinSelection', ...
-        ['Configuration field "%s" creates invalid rigid-body name ' ...
-         '"%s".'], ...
-        fieldLabel, candidateRigidBodyName);
-end
-end
-
-
-%% HELPER: RESOLVE PATH
-
-function resolvedPath = resolveConfiguredInputPath( ...
-        configuredPath, configurationDirectory, fieldLabel, ...
-        expectedKind, expectedExtension)
-%RESOLVECONFIGUREDINPUTPATH Resolve and validate one configured input path.
-% Relative paths are anchored beside the JSON file so configuration behavior
-% does not depend on MATLAB's current working directory.
-%
-% Inputs:
-%   configuredPath        - Absolute path or path relative to the JSON file.
-%   configurationDirectory - Directory containing the JSON configuration.
-%   fieldLabel            - User-facing field name for error messages.
-%   expectedKind          - Expected path kind: 'file' or 'directory'.
-%   expectedExtension     - Required file extension, or empty for a directory.
-%
-% Output:
-%   resolvedPath - Canonical absolute path to the existing input.
-
-% Build the candidate path without changing already absolute settings.
-if isAbsolutePath(configuredPath)
-    candidatePath = configuredPath;
-else
-    candidatePath = fullfile(configurationDirectory, configuredPath);
-end
-
-% File settings include an extension check so selecting the wrong input type
-% is reported before the workflow calls a specialized reader.
-if strcmp(expectedKind, 'file')
-    [~, ~, actualExtension] = fileparts(candidatePath);
-    if ~strcmpi(actualExtension, expectedExtension)
-        error('extra_snapshotProcess_from_config:InvalidInputExtension', ...
-            'Configuration field "%s" must identify a %s file.', ...
-            fieldLabel, expectedExtension);
-    end
-    inputExists = isfile(candidatePath);
-elseif strcmp(expectedKind, 'directory')
-    inputExists = isfolder(candidatePath);
-else
-    error('extra_snapshotProcess_from_config:InvalidExpectedPathKind', ...
-        'Internal path kind "%s" is not supported.', expectedKind);
-end
-if ~inputExists
-    error('extra_snapshotProcess_from_config:ConfiguredInputNotFound', ...
-        'Configured input "%s" was not found: %s', ...
-        fieldLabel, candidatePath);
-end
-
-% Canonicalize the existing path for stable error messages and provenance.
-[pathFound, pathAttributes] = fileattrib(candidatePath);
-if ~pathFound
-    error('extra_snapshotProcess_from_config:PathResolutionFailed', ...
-        'Could not resolve configured input "%s": %s', ...
-        fieldLabel, candidatePath);
-end
-resolvedPath = pathAttributes.Name;
-end
-
-
-%% HELPER: IS ABSOLUTE PATH
-function isAbsolute = isAbsolutePath(pathValue)
-%ISABSOLUTEPATH Identify absolute Windows, UNC, and Unix-style paths.
-% This helper is needed so relative configuration paths can be anchored
-% beside the JSON file without changing paths that are already absolute.
-%
-% Input:
-%   pathValue - Path stored as a character vector.
-%
-% Output:
-%   isAbsolute - Logical true when pathValue is an absolute path.
-
-% Windows accepts drive-rooted, UNC, and separator-rooted paths. Other
-% platforms use a leading forward slash.
-if ispc
-    hasDriveRoot = ~isempty(regexp( ...
-        pathValue, '^[A-Za-z]:[\\/]', 'once'));
-    hasSeparatorRoot = startsWith(pathValue, filesep) ...
-        || startsWith(pathValue, '/');
-    isAbsolute = hasDriveRoot || hasSeparatorRoot;
-else
-    isAbsolute = startsWith(pathValue, '/');
-end
-end
+        'Mode', 'review');
