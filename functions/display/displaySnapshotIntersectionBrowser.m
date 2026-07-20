@@ -239,7 +239,6 @@ sceneRotationStartPointer = [NaN, NaN];
 sceneRotationStartView = [NaN, NaN];
 sceneRotationAxesSize = [1, 1];
 scenePointerBeforeRotation = 'arrow';
-resultsTableEnableBeforeRotation = 'on';
 sceneHeadlight = gobjects(0);
 
 %% CONNECT TABLE SELECTION TO THE TWO DISPLAYS
@@ -297,10 +296,10 @@ renderSnapshot(resultIndex(1));
         sceneRotationAxesSize = max(sceneAxes.Position(3:4), 1);
         scenePointerBeforeRotation = figBrowser.Pointer;
 
-        % Keep a release over the table routed to the figure-level callback.
-        % The inactive state keeps the table appearance without accepting input.
-        resultsTableEnableBeforeRotation = resultsTable.Enable;
-        resultsTable.Enable = 'inactive';
+        % Keep the table enabled during rotation. Changing its Enable state
+        % rebuilds MATLAB's table view and resets a scrolled table to the top.
+        % The figure-level mouse callbacks already own the active drag, so the
+        % table does not need to be disabled while the 3D view is rotating.
         figBrowser.Pointer = 'fleur';
     end
 
@@ -360,8 +359,7 @@ renderSnapshot(resultIndex(1));
         sceneRotationStartPointer = [NaN, NaN];
         sceneRotationStartView = [NaN, NaN];
 
-        % Restore controls changed only for the duration of the drag.
-        resultsTable.Enable = resultsTableEnableBeforeRotation;
+        % Restore the pointer changed only for the duration of the drag.
         figBrowser.Pointer = scenePointerBeforeRotation;
     end
 
