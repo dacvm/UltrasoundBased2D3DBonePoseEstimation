@@ -4,6 +4,12 @@ clear; clc; close all;
 addpath(genpath('functions'));
 
 %% READ THE SNAPSHOT DATA
+% Load each ultrasound snapshot group together with its tracking data.
+% Summary:
+% - Find and sort the snapshot folders, then identify each folder as femur, tibia, or unknown.
+% - Pair the ultrasound MHA files with their tracking CSV files and check that the pairs are complete.
+% - Read the paired files and combine the tracking rows for each snapshot group.
+% - Store the images, tracking data, folder information, and bone labels in snapshotData.
 
 fprintf('Reading the snapshot data...\n');
 
@@ -123,6 +129,11 @@ for snapshotIndex = 1:numel(snapshotDirectories)
 end
 
 %% READ THE ULTRASOUND PROBE CALIBRATION DATA FROM FCAL SOFTWARE
+% Obtain the ultrasound image-to-probe calibration and image pixel scale.
+% Summary:
+% - Read the fCal XML file and obtain the transform from ultrasound image coordinates to probe coordinates.
+% - Correct the rotation part so it can be used as a proper rigid transformation.
+% - Keep the calibration scale for converting image pixels into physical image-plane dimensions.
 
 % Build the absolute path to the sample fCal XML file containing
 % calibration matrix for ultrasound
@@ -153,6 +164,12 @@ T_image_probecalib(1:3, 1:3) = R_image_probe_orth;
 S_image_probecalib = vecnorm(R_image_probe_raw,2,1);
 
 %% DISPLAY THE IMAGE IN 3D SPACE
+% Display tracked ultrasound images in a common reference coordinate system.
+% Summary:
+% - Set up the 3D scene and prepare storage for the valid ultrasound image planes.
+% - Process the tracked packets, skip packets with unusable poses, and transform each image into the reference frame.
+% - Display the probe frames and ultrasound images in 3D using the calibration data.
+% - Cache each valid plane's geometry, image, timestamp, and source information for the intersection step.
 
 fprintf('Displaying the snapshot data...\n');
 
@@ -195,21 +212,21 @@ end
 % meshPlaneIntersectionPixels, while the metadata keeps each result linked
 % to the source snapshot after the browser table is sorted.
 snapshotPlaneTemplate = struct( ...
-    'p0', [], ...
-    'ex', [], ...
-    'ey', [], ...
-    'n', [], ...
-    'W', 0, ...
-    'H', 0, ...
-    'nRows', 0, ...
-    'nCols', 0, ...
-    'image', [], ...
-    'timestamp', 0, ...
-    'bone', 'U', ...
-    'snapshotName', '', ...
-    'snapshotIndex', 0, ...
-    'sequenceIndex', 0, ...
-    'packetIndex', 0);
+    'p0', [], ...               % 3D position of the image plane's top-left corner.
+    'ex', [], ...               % 3D direction of increasing image columns.
+    'ey', [], ...               % 3D direction of increasing image rows.
+    'n', [], ...                % 3D normal direction of the image plane.
+    'W', 0, ...                 % Physical width of the image plane.
+    'H', 0, ...                 % Physical height of the image plane.
+    'nRows', 0, ...             % Number of rows in the ultrasound image.
+    'nCols', 0, ...             % Number of columns in the ultrasound image.
+    'image', [], ...            % Ultrasound image pixels for this plane.
+    'timestamp', 0, ...         % Acquisition time of the ultrasound image.
+    'bone', 'U', ...            % Bone label associated with this snapshot.
+    'snapshotName', '', ...     % Name of the source snapshot group.
+    'snapshotIndex', 0, ...     % Index of the source snapshot group.
+    'sequenceIndex', 0, ...     % Index of the source sequence within the snapshot.
+    'packetIndex', 0);          % Index of the source packet within the sequence.
 snapshotPlanes = repmat(snapshotPlaneTemplate, 1, maximumSnapshotPlaneCount);
 snapshotPlaneCount = 0;
 
@@ -324,6 +341,11 @@ snapshotPlanes = snapshotPlanes(1:snapshotPlaneCount);
 
 
 %% READ THE POST-PROCESS CT-SCAN DATA (BONES AND PINS)
+% Load the post-processed CT meshes and the selected bone-pin data.
+% Summary:
+% - Locate the MAT file produced by the CT post-processing workflow and check that it exists.
+% - Load and validate the expected bones and bonepins data.
+% - Make the CT meshes, anatomical coordinate systems, and pin information available for registration.
 
 fprintf('Reading the CT bones and selected bone pins...\n');
 
@@ -359,6 +381,12 @@ bonepins = loaded_ctmat.bonepins;
 bones    = loaded_ctmat.bones;
 
 %% GATHERING ALL THE TRANFORMATION TO BE IN ONE COORDINATE SYSTEM (REF) AND DISPLAYING THE BONES AND PINS
+% Put motion-capture data, CT anatomy, and pin markers into the shared reference frame.
+% Summary:
+% - Average the reference and selected bone-pin tracking poses to obtain stable transforms.
+% - Use the tracked pin correspondences to calculate how the CT data maps into the reference frame.
+% - Transform the bone meshes, bone coordinate systems, and pin markers into that common frame.
+% - Display the registered bones and pins together with the ultrasound scene.
 
 fprintf('Displaying the CT bones and selected bone pins...\n');
 
@@ -541,6 +569,12 @@ end
 drawnow;
 
 %% COMPUTE AND SHOW THE INTERSECTION
+% Find where each cached ultrasound plane intersects its matching reference-frame bone mesh.
+% Summary:
+% - Match each cached ultrasound plane with the corresponding femur or tibia mesh in the reference frame.
+% - Calculate the raw mesh-plane intersections and identify the portions facing the ultrasound probe.
+% - Store the intersection masks, pixels, segments, scores, timestamps, and status information.
+% - Open the results browser so the images and intersection overlays can be inspected interactively.
 
 fprintf('Computing snapshot mesh-plane intersections...\n');
 
@@ -551,18 +585,18 @@ normalFacingToleranceDeg = 25;
 % Keep every raw and probe-facing output because the results browser shows
 % counts and overlays without recomputing geometry during row selection.
 intersectionTemplate = struct( ...
-    'mask', [], ...
-    'pixelList', [], ...
-    'segments3D', {{}}, ...
-    'segmentsUV', {{}}, ...
-    'segmentFaceIdx', [], ...
-    'probeFacingSegmentMask', [], ...
-    'probeFacingSegments3D', {{}}, ...
-    'probeFacingSegmentsUV', {{}}, ...
-    'probeFacingPixels', [], ...
-    'segmentFacingScore', [], ...
-    'timestamp', [], ...
-    'status', 'Not computed');
+    'mask', [], ...                     % Binary image mask of all mesh-plane hit pixels.
+    'pixelList', [], ...                % [row, col] coordinates of all hit pixels.
+    'segments3D', {{}}, ...             % Raw intersection segments in 3D space.
+    'segmentsUV', {{}}, ...             % The same clipped segments in plane coordinates.
+    'segmentFaceIdx', [], ...           % Mesh-face index that produced each segment.
+    'probeFacingSegmentMask', [], ...   % Mask marking segments from probe-facing faces.
+    'probeFacingSegments3D', {{}}, ...  % Probe-facing intersection segments in 3D.
+    'probeFacingSegmentsUV', {{}}, ...  % Probe-facing segments in plane coordinates.
+    'probeFacingPixels', [], ...        % Image pixels from the probe-facing segments.
+    'segmentFacingScore', [], ...       % How strongly each segment's face faces the probe.
+    'timestamp', [], ...                % Timestamp of the source ultrasound image.
+    'status', 'Not computed');          % Text describing the calculation state.
 intersections = repmat(intersectionTemplate, 1, numel(snapshotPlanes));
 
 % Compute every result once so table browsing only redraws the selected
