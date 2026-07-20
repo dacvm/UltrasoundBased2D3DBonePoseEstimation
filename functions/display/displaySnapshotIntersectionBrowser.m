@@ -239,7 +239,6 @@ sceneRotationStartPointer = [NaN, NaN];
 sceneRotationStartView = [NaN, NaN];
 sceneRotationAxesSize = [1, 1];
 scenePointerBeforeRotation = 'arrow';
-resultsTableEnableBeforeRotation = 'on';
 sceneHeadlight = gobjects(0);
 
 %% CONNECT TABLE SELECTION TO THE TWO DISPLAYS
@@ -297,10 +296,10 @@ renderSnapshot(resultIndex(1));
         sceneRotationAxesSize = max(sceneAxes.Position(3:4), 1);
         scenePointerBeforeRotation = figBrowser.Pointer;
 
-        % Keep a release over the table routed to the figure-level callback.
-        % The inactive state keeps the table appearance without accepting input.
-        resultsTableEnableBeforeRotation = resultsTable.Enable;
-        resultsTable.Enable = 'inactive';
+        % Keep the table enabled during rotation. Changing its Enable state
+        % rebuilds MATLAB's table view and resets a scrolled table to the top.
+        % The figure-level mouse callbacks already own the active drag, so the
+        % table does not need to be disabled while the 3D view is rotating.
         figBrowser.Pointer = 'fleur';
     end
 
@@ -360,8 +359,7 @@ renderSnapshot(resultIndex(1));
         sceneRotationStartPointer = [NaN, NaN];
         sceneRotationStartView = [NaN, NaN];
 
-        % Restore controls changed only for the duration of the drag.
-        resultsTable.Enable = resultsTableEnableBeforeRotation;
+        % Restore the pointer changed only for the duration of the drag.
         figBrowser.Pointer = scenePointerBeforeRotation;
     end
 
@@ -574,6 +572,28 @@ renderSnapshot(resultIndex(1));
         % Send clicks through the textured plane to the 3D axes callback.
         selectedImageSurface.HitTest = 'off';
         selectedImageSurface.PickableParts = 'none';
+
+        % Scale the coordinate arrows from the physical image dimensions so
+        % the frame remains readable for both small and large image planes.
+        imageAxisScale = 0.20 * max([currentPlane.W, currentPlane.H]);
+
+        % Draw the image origin and its local X, Y, and Z directions. The
+        % red and green arrows lie in the image plane, while blue shows the
+        % plane normal used by the mesh-intersection calculation.
+        display_axis_v2( ...
+            sceneAxes, ...
+            currentPlane.p0, ...
+            [currentPlane.ex, currentPlane.ey, currentPlane.n], ...
+            imageAxisScale, ...
+            'Image origin', ...
+            'Tag', 'plot_browser_usimage_axis', ...
+            'Mode', 'default');
+
+        % Keep the new triad from intercepting mouse input intended for the
+        % browser's custom 3D rotation controls.
+        imageAxisGraphics = findobj(sceneAxes, ...
+            'Tag', 'plot_browser_usimage_axis');
+        set(imageAxisGraphics, 'HitTest', 'off', 'PickableParts', 'none');
 
         % Match the previous interaction by highlighting only probe-facing 3D
         % segments. A zero-hit row simply leaves this object group empty.
