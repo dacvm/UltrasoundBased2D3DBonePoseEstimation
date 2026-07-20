@@ -661,6 +661,9 @@ for planeIndex = 1:numel(snapshotPlanes)
         numel(probeFacingSegments3D), size(probeFacingPixels, 1));
 end
 
-% Open one results-first browser with its own 3D axes. The separate ax1 scene
-% remains a static overview and is never changed by browser row selection.
-figIntersectionBrowser = displaySnapshotIntersectionBrowser(snapshotPlanes, intersections, boneMeshesRefByCode);
+% Open the existing results-first browser in review mode after all intersection
+% records are ready. The Export selected button performs the MAT-file save.
+[figIntersectionBrowser, validSnapshots, outputFilePath] = ...
+    displaySnapshotIntersectionBrowser( ...
+        snapshotPlanes, intersections, boneMeshesRefByCode, ...
+        'Mode', 'review');

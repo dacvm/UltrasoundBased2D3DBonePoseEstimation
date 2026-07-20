@@ -1,9 +1,11 @@
-function figBrowser = displaySnapshotIntersectionBrowser(snapshotPlanes, intersections, boneMeshesRefByCode)
-%DISPLAYSNAPSHOTINTERSECTIONBROWSER Browse precomputed snapshot intersections.
-% This display-only function builds a results-first browser so many
-% ultrasound snapshots can be inspected without drawing every 2D image at
-% once. Selecting a table row updates one large 2D overlay and rebuilds a
-% matching bone, image plane, and intersection in the browser's own 3D axes.
+function [figBrowser, validSnapshots, outputFilePath] = displaySnapshotIntersectionBrowser( ...
+        snapshotPlanes, intersections, boneMeshesRefByCode, varargin)
+%DISPLAYSNAPSHOTINTERSECTIONBROWSER Browse or review snapshot intersections.
+% This function builds one results-first browser so many ultrasound
+% snapshots can be inspected without drawing every 2D image at once.
+% Selecting a table row updates one large 2D overlay and rebuilds a matching
+% bone, image plane, and intersection in the browser's own 3D axes. Optional
+% review mode adds snapshot approval and export controls to the same browser.
 %
 % Inputs:
 %   snapshotPlanes : Struct array containing finite image-plane geometry,
@@ -16,18 +18,57 @@ function figBrowser = displaySnapshotIntersectionBrowser(snapshotPlanes, interse
 %                         F and T. Each value is a reference-frame mesh struct
 %                         with exact fields V for vertices and F for faces.
 %
-% Output:
+% Name-Value Input:
+%   'Mode'          : Browser behavior, specified as 'display' or 'review'.
+%                     The default 'display' mode is non-blocking and keeps
+%                     the original read-only behavior. Review mode waits for
+%                     the first successful export or window cancellation.
+%
+% Outputs:
 %   figBrowser      : Handle to the new uifigure that contains the sortable
 %                    results table, selected 2D image, and selected 3D scene.
+%   validSnapshots  : Struct array exported from review mode. Each element
+%                    contains sourceIndex, plane, and intersection. This is
+%                    empty in display mode or when review mode is cancelled.
+%   outputFilePath  : Full path of the first successful review export. This
+%                    is empty in display mode or after review cancellation.
 
 %% VALIDATE THE DISPLAY INPUTS
 
-% Require the complete public interface so a missing mesh lookup does not
-% silently disable the selected 3D anatomy display.
-if nargin ~= 3
+% Require the three data inputs before parsing the optional mode setting.
+% This preserves the original direct error for incomplete public calls.
+if nargin < 3
     error('displaySnapshotIntersectionBrowser:InvalidInputCount', ...
-        'Expected snapshotPlanes, intersections, and boneMeshesRefByCode.');
+        ['Expected snapshotPlanes, intersections, boneMeshesRefByCode, ' ...
+        'and optional name-value inputs.']);
 end
+
+% Parse the optional mode without allowing abbreviated parameter names.
+% Exact mode values keep accidental misspellings from changing GUI behavior.
+browserInputParser = inputParser;
+browserInputParser.FunctionName = mfilename;
+browserInputParser.PartialMatching = false;
+addParameter(browserInputParser, 'Mode', 'display', ...
+    @(value) (ischar(value) && isrow(value)) || ...
+    (isstring(value) && isscalar(value)));
+parse(browserInputParser, varargin{:});
+
+% Normalize text once so all later branches use one simple mode flag.
+browserMode = lower(string(browserInputParser.Results.Mode));
+if ~any(browserMode == ["display", "review"])
+    error('displaySnapshotIntersectionBrowser:InvalidMode', ...
+        'Mode must be either ''display'' or ''review''.');
+end
+isReviewMode = browserMode == "review";
+
+% Initialize optional outputs before any GUI callback can run. The empty
+% struct keeps the review output fields clear even when no export is made.
+validSnapshots = struct( ...
+    'sourceIndex', {}, ...
+    'plane', {}, ...
+    'intersection', {});
+outputFilePath = '';
+hasSuccessfulExport = false;
 
 % Check the two aligned result containers before inspecting their fields.
 validateattributes(snapshotPlanes, {'struct'}, {'vector'}, ...
@@ -153,6 +194,18 @@ resultsData = table( ...
         'Timestamp', 'RawSegments', 'RawPixels', 'FacingSegments', ...
         'FacingPixels', 'Status'});
 
+% Keep review decisions outside the sortable table because visible row
+% positions are temporary. ResultIndex is the permanent key into this vector.
+reviewDecisions = false(nResults, 1);
+
+% Add the logical column only in review mode so the default display table
+% keeps the same columns and read-only behavior as existing calls.
+if isReviewMode
+    resultsData = addvars(resultsData, reviewDecisions, ...
+        'Before', 'ResultIndex', ...
+        'NewVariableNames', 'Valid');
+end
+
 %% CREATE THE RESULTS-FIRST USER INTERFACE
 
 % Use a wide responsive figure so the table, 2D image, and 3D scene can remain
@@ -169,22 +222,101 @@ mainGrid = uigridlayout(figBrowser, [1, 3], ...
     'Padding', [10, 10, 10, 10], ...
     'ColumnSpacing', 10);
 
-% Keep all rows visible and make every column sortable. Row selection makes
-% it clear that all columns describe one shared snapshot result.
-resultsTable = uitable(mainGrid, ...
-    'Data', resultsData, ...
-    'ColumnName', { ...
+% Define empty handles before the review-only branch so the later empty-data
+% state can disable controls without needing separate browser implementations.
+selectAllButton = gobjects(0);
+clearAllButton = gobjects(0);
+selectionCountLabel = gobjects(0);
+exportSelectedButton = gobjects(0);
+
+% Review mode uses a small second row under the existing table. Display mode
+% continues to place that same table directly in the main three-column grid.
+if isReviewMode
+    tableGrid = uigridlayout(mainGrid, [2, 1], ...
+        'RowHeight', {'1x', 34}, ...
+        'Padding', [0, 0, 0, 0], ...
+        'RowSpacing', 6);
+    tableGrid.Layout.Row = 1;
+    tableGrid.Layout.Column = 1;
+    resultsTableParent = tableGrid;
+else
+    resultsTableParent = mainGrid;
+end
+
+% Configure column labels and edit permissions from the selected mode. Only
+% the review checkbox can ever write table data.
+if isReviewMode
+    resultsColumnNames = { ...
+        'Valid', 'Index', 'Bone', 'Snapshot group', 'Sequence', 'Packet', ...
+        'Timestamp', 'Raw segments', 'Raw pixels', 'Facing segments', ...
+        'Facing pixels', 'Status'};
+    resultsColumnWidths = {55, 65, 50, 135, 70, 60, 90, 90, 75, 100, 90, 'auto'};
+    resultsColumnEditable = [true, false(1, width(resultsData) - 1)];
+else
+    resultsColumnNames = { ...
         'Index', 'Bone', 'Snapshot group', 'Sequence', 'Packet', ...
         'Timestamp', 'Raw segments', 'Raw pixels', 'Facing segments', ...
-        'Facing pixels', 'Status'}, ...
-    'ColumnWidth', {65, 50, 135, 70, 60, 90, 90, 75, 100, 90, 'auto'}, ...
-    'ColumnEditable', false(1, width(resultsData)), ...
+        'Facing pixels', 'Status'};
+    resultsColumnWidths = {65, 50, 135, 70, 60, 90, 90, 75, 100, 90, 'auto'};
+    resultsColumnEditable = false(1, width(resultsData));
+end
+
+% Keep all rows visible and make every column sortable. Row selection makes
+% it clear that all columns describe one shared snapshot result.
+resultsTable = uitable(resultsTableParent, ...
+    'Data', resultsData, ...
+    'ColumnName', resultsColumnNames, ...
+    'ColumnWidth', resultsColumnWidths, ...
+    'ColumnEditable', resultsColumnEditable, ...
     'ColumnSortable', true(1, width(resultsData)), ...
     'SelectionType', 'row', ...
     'Multiselect', 'off', ...
     'Tag', 'snapshot_intersection_results_table');
 resultsTable.Layout.Row = 1;
 resultsTable.Layout.Column = 1;
+
+% Add compact review actions below the table without reducing either image
+% axes. The buttons all operate on stable ResultIndex values, not visible rows.
+if isReviewMode
+    reviewControlGrid = uigridlayout(tableGrid, [1, 4], ...
+        'ColumnWidth', {85, 85, '1x', 120}, ...
+        'Padding', [0, 0, 0, 0], ...
+        'ColumnSpacing', 6);
+    reviewControlGrid.Layout.Row = 2;
+    reviewControlGrid.Layout.Column = 1;
+
+    selectAllButton = uibutton(reviewControlGrid, 'push', ...
+        'Text', 'Select all', ...
+        'ButtonPushedFcn', @selectAllSnapshots, ...
+        'Tag', 'snapshot_intersection_select_all_button');
+    selectAllButton.Layout.Row = 1;
+    selectAllButton.Layout.Column = 1;
+
+    clearAllButton = uibutton(reviewControlGrid, 'push', ...
+        'Text', 'Clear all', ...
+        'ButtonPushedFcn', @clearAllSnapshots, ...
+        'Tag', 'snapshot_intersection_clear_all_button');
+    clearAllButton.Layout.Row = 1;
+    clearAllButton.Layout.Column = 2;
+
+    selectionCountLabel = uilabel(reviewControlGrid, ...
+        'Text', sprintf('Selected: 0 / %d', nResults), ...
+        'HorizontalAlignment', 'center', ...
+        'Tag', 'snapshot_intersection_selection_count_label');
+    selectionCountLabel.Layout.Row = 1;
+    selectionCountLabel.Layout.Column = 3;
+
+    exportSelectedButton = uibutton(reviewControlGrid, 'push', ...
+        'Text', 'Export selected', ...
+        'FontWeight', 'bold', ...
+        'ButtonPushedFcn', @exportSelectedSnapshots, ...
+        'Tag', 'snapshot_intersection_export_button');
+    exportSelectedButton.Layout.Row = 1;
+    exportSelectedButton.Layout.Column = 4;
+
+    % Listen only for review edits because display mode has no writable cells.
+    resultsTable.CellEditCallback = @handleValidEdit;
+end
 
 % Create one large image axes because only the selected row should be drawn.
 imageAxes = uiaxes(mainGrid, 'Tag', 'snapshot_intersection_image_axes');
@@ -247,6 +379,15 @@ sceneHeadlight = gobjects(0);
 % not exist when every packet was rejected by the tracking checks.
 if nResults == 0
     resultsTable.Enable = 'off';
+
+    % No review action is meaningful without results. Keep the controls
+    % visible so the layout remains understandable, but prevent empty exports.
+    if isReviewMode
+        selectAllButton.Enable = 'off';
+        clearAllButton.Enable = 'off';
+        exportSelectedButton.Enable = 'off';
+    end
+
     axis(imageAxes, 'off');
     text(imageAxes, 0.5, 0.5, ...
         'No valid tracked snapshots are available for intersection display.', ...
@@ -264,14 +405,246 @@ if nResults == 0
         'HorizontalAlignment', 'center', ...
         'VerticalAlignment', 'middle', ...
         'Interpreter', 'none');
-    return;
+else
+    % Select and render the first acquisition without changing the requested
+    % acquisition-order default. ResultIndex remains stable after later sorting.
+    resultsTable.Selection = 1;
+    resultsTable.SelectionChangedFcn = @handleSelectionChanged;
+    renderSnapshot(resultIndex(1));
 end
 
-% Select and render the first acquisition without changing the requested
-% acquisition-order default. Later sorting is resolved through DisplayData.
-resultsTable.Selection = 1;
-resultsTable.SelectionChangedFcn = @handleSelectionChanged;
-renderSnapshot(resultIndex(1));
+% Review mode returns its data only after the first completed export or a
+% close cancellation. Display mode skips this wait and remains non-blocking.
+if isReviewMode && isvalid(figBrowser)
+    uiwait(figBrowser);
+end
+
+    function handleValidEdit(~, eventData)
+        %HANDLEVALIDEDIT Store one checkbox decision by original result index.
+        % This callback is needed because sorted table rows can move while the
+        % review decision must stay attached to its original snapshot result.
+        %
+        % Inputs:
+        %   ~         : Unused source table handle supplied by MATLAB.
+        %   eventData : Cell edit event containing original data indices and
+        %               the logical value written to the Valid cell.
+        %
+        % Outputs:
+        %   None. The callback updates reviewDecisions and the count label.
+
+        % Ignore rejected edits. MATLAB leaves NewData empty when it cannot
+        % store the user's value in the logical checkbox column.
+        if ~isempty(eventData.Error) || isempty(eventData.NewData)
+            return;
+        end
+
+        % Cell edit indices refer to the original Data array even after the
+        % visible rows have been sorted, which makes this lookup stable.
+        editedDataRow = eventData.Indices(1);
+        editedDataColumn = eventData.Indices(2);
+        currentTableData = resultsTable.Data;
+
+        % Defend against stale UI events that refer to data no longer present.
+        if editedDataRow < 1 || editedDataRow > height(currentTableData) || ...
+                editedDataColumn < 1 || editedDataColumn > width(currentTableData)
+            return;
+        end
+
+        % Only the named Valid variable is allowed to modify review state.
+        % This remains correct if a future metadata column is inserted.
+        editedVariableName = ...
+            currentTableData.Properties.VariableNames{editedDataColumn};
+        if ~strcmp(editedVariableName, 'Valid')
+            return;
+        end
+
+        % Resolve the permanent result identity before updating the logical
+        % vector. No table refresh is needed because MATLAB already wrote the cell.
+        editedResultIndex = currentTableData.ResultIndex(editedDataRow);
+        reviewDecisions(editedResultIndex) = logical(eventData.NewData);
+        updateSelectionCount();
+    end
+
+    function selectAllSnapshots(~, ~)
+        %SELECTALLSNAPSHOTS Mark every original snapshot result as valid.
+        % This bulk action ignores the current visible sort order so every
+        % underlying result is selected exactly once.
+        %
+        % Inputs:
+        %   ~ : Unused button source and event inputs supplied by MATLAB.
+        %
+        % Outputs:
+        %   None. The callback updates review state and displayed checkboxes.
+
+        reviewDecisions(:) = true;
+        synchronizeValidColumn();
+    end
+
+    function clearAllSnapshots(~, ~)
+        %CLEARALLSNAPSHOTS Clear every original snapshot review decision.
+        % This provides a direct inverse of Select all without depending on
+        % the current table sorting or selection.
+        %
+        % Inputs:
+        %   ~ : Unused button source and event inputs supplied by MATLAB.
+        %
+        % Outputs:
+        %   None. The callback updates review state and displayed checkboxes.
+
+        reviewDecisions(:) = false;
+        synchronizeValidColumn();
+    end
+
+    function synchronizeValidColumn()
+        %SYNCHRONIZEVALIDCOLUMN Refresh checkboxes from stable review state.
+        % This helper is needed after bulk changes because programmatic vector
+        % updates do not automatically edit each logical table cell.
+        %
+        % Inputs:
+        %   None.
+        %
+        % Outputs:
+        %   None. The helper refreshes Valid cells and preserves selection.
+
+        currentTableData = resultsTable.Data;
+        selectedResultIndex = [];
+
+        % Remember the selected result identity before assigning refreshed
+        % table data, because a UI update must not switch the displayed snapshot.
+        selectedDataRows = resultsTable.Selection;
+        if ~isempty(selectedDataRows) && ...
+                selectedDataRows(1) >= 1 && ...
+                selectedDataRows(1) <= height(currentTableData)
+            selectedResultIndex = ...
+                currentTableData.ResultIndex(selectedDataRows(1));
+        end
+
+        % Populate each Data row by its permanent result identity. MATLAB then
+        % reapplies any active visual sorting to its read-only DisplayData view.
+        currentTableData.Valid = ...
+            reviewDecisions(currentTableData.ResultIndex);
+        resultsTable.Data = currentTableData;
+
+        % Restore the same result selection if MATLAB rebuilt the table view.
+        if ~isempty(selectedResultIndex)
+            refreshedTableData = resultsTable.Data;
+            selectedDataRow = find( ...
+                refreshedTableData.ResultIndex == selectedResultIndex, 1);
+            if ~isempty(selectedDataRow)
+                resultsTable.Selection = selectedDataRow;
+            end
+        end
+
+        updateSelectionCount();
+    end
+
+    function updateSelectionCount()
+        %UPDATESELECTIONCOUNT Show how many original results are selected.
+        % The count comes from reviewDecisions so sorting and scrolling cannot
+        % change the displayed review total.
+        %
+        % Inputs:
+        %   None.
+        %
+        % Outputs:
+        %   None. The helper updates the review count label text.
+
+        if ~isempty(selectionCountLabel) && isvalid(selectionCountLabel)
+            selectionCountLabel.Text = sprintf( ...
+                'Selected: %d / %d', nnz(reviewDecisions), nResults);
+        end
+    end
+
+    function exportSelectedSnapshots(~, ~)
+        %EXPORTSELECTEDSNAPSHOTS Save complete records chosen during review.
+        % This callback copies stored plane and intersection records without
+        % recalculating geometry, then saves the result using MAT-file v7.3.
+        %
+        % Inputs:
+        %   ~ : Unused button source and event inputs supplied by MATLAB.
+        %
+        % Outputs:
+        %   None. The callback updates the parent function outputs, writes the
+        %   MAT-file, reports success, and releases the first review wait.
+
+        % Export in original result order so file contents do not depend on
+        % whichever table column the reviewer most recently sorted.
+        selectedResultIndices = find(reviewDecisions);
+        if isempty(selectedResultIndices)
+            uialert(figBrowser, ...
+                ['No snapshots are selected. Check at least one Valid box ' ...
+                'before exporting.'], ...
+                'No snapshots selected', ...
+                'Icon', 'warning');
+            return;
+        end
+
+        % Build the default name when Export selected is pressed so its
+        % timestamp describes this export attempt rather than browser startup.
+        exportTimestamp = char(datetime('now', ...
+            'Format', 'yyyyMMdd_HHmmss'));
+        defaultExportFileName = sprintf( ...
+            'validSnapshots_%s.mat', exportTimestamp);
+
+        % Ask for a MAT-file destination only after confirming that the export
+        % has content. Cancelling this dialog intentionally leaves review state.
+        [selectedFileName, selectedDirectory] = uiputfile( ...
+            {'*.mat', 'MAT-files (*.mat)'}, ...
+            'Export selected snapshots', ...
+            defaultExportFileName);
+        if isequal(selectedFileName, 0) || isequal(selectedDirectory, 0)
+            return;
+        end
+
+        % Preserve the previous completed export so a later save failure does
+        % not replace good callback state while the open browser remains usable.
+        previousValidSnapshots = validSnapshots;
+        previousOutputFilePath = outputFilePath;
+
+        % Copy every complete source record into the requested output schema.
+        % Images and all precomputed geometry remain intact inside these structs.
+        validSnapshots = repmat(struct( ...
+            'sourceIndex', [], ...
+            'plane', [], ...
+            'intersection', []), ...
+            1, numel(selectedResultIndices));
+        for outputIndex = 1:numel(selectedResultIndices)
+            selectedResultIndex = selectedResultIndices(outputIndex);
+            validSnapshots(outputIndex).sourceIndex = selectedResultIndex;
+            validSnapshots(outputIndex).plane = ...
+                snapshotPlanes(selectedResultIndex);
+            validSnapshots(outputIndex).intersection = ...
+                intersections(selectedResultIndex);
+        end
+        outputFilePath = fullfile(selectedDirectory, selectedFileName);
+
+        % Keep the required variable name and v7.3 format because ultrasound
+        % image payloads can make the exported dataset larger than 2 GB.
+        try
+            save(outputFilePath, 'validSnapshots', '-v7.3');
+        catch saveError
+            validSnapshots = previousValidSnapshots;
+            outputFilePath = previousOutputFilePath;
+            uialert(figBrowser, ...
+                sprintf('Could not save the selected snapshots:\n\n%s', ...
+                saveError.message), ...
+                'Export failed', ...
+                'Icon', 'error');
+            return;
+        end
+
+        % Mark success before releasing uiwait so a later close is not treated
+        % as cancellation. The browser intentionally stays open and editable.
+        hasSuccessfulExport = true;
+        uialert(figBrowser, ...
+            sprintf('Exported %d snapshot(s).\n\nSaved to:\n%s', ...
+            numel(selectedResultIndices), outputFilePath), ...
+            'Export complete', ...
+            'Icon', 'success');
+        if strcmp(figBrowser.WaitStatus, 'waiting')
+            uiresume(figBrowser);
+        end
+    end
 
     function startSceneRotation(~, ~)
         %STARTSCENEROTATION Begin a custom left-button rotation gesture.
@@ -382,8 +755,8 @@ renderSnapshot(resultIndex(1));
     function handleSelectionChanged(~, eventData)
         %HANDLESELECTIONCHANGED Render the snapshot represented by a selected row.
         % This callback is needed because table sorting changes visible row
-        % positions. It reads ResultIndex from DisplayData so the image and
-        % intersection always remain paired after sorting.
+        % positions. The event reports the original Data row, whose immutable
+        % ResultIndex keeps the image and intersection paired after sorting.
         %
         % Inputs:
         %   ~         : Unused source table handle supplied by MATLAB.
@@ -398,16 +771,17 @@ renderSnapshot(resultIndex(1));
         end
 
         % Use the first row defensively even though Multiselect is disabled.
-        selectedDisplayRow = eventData.Selection(1);
-        displayedResults = resultsTable.DisplayData;
+        % Selection refers to the original Data array, not the sorted display.
+        selectedDataRow = eventData.Selection(1);
+        storedResults = resultsTable.Data;
 
-        % Stop if a stale UI event refers to a row outside the latest sorted view.
-        if selectedDisplayRow < 1 || selectedDisplayRow > height(displayedResults)
+        % Stop if a stale UI event refers to a row outside the stored data.
+        if selectedDataRow < 1 || selectedDataRow > height(storedResults)
             return;
         end
 
-        % Recover the immutable acquisition index from the selected visible row.
-        selectedResultIndex = displayedResults.ResultIndex(selectedDisplayRow);
+        % Recover the immutable acquisition index from the selected data row.
+        selectedResultIndex = storedResults.ResultIndex(selectedDataRow);
         renderSnapshot(selectedResultIndex);
     end
 
@@ -665,17 +1039,34 @@ renderSnapshot(resultIndex(1));
     end
 
     function closeBrowser(sourceFigure, ~)
-        %CLOSEBROWSER Close the self-contained snapshot browser.
-        % All selected 3D graphics now belong to sourceFigure, so deleting the
-        % browser also cleans its mesh, plane, and intersection without ever
-        % changing the separate static overview figure.
+        %CLOSEBROWSER Close the browser and cancel an unfinished review.
+        % All selected graphics belong to sourceFigure, so deleting the browser
+        % cleans its scene. Review cancellation also releases uiwait so MATLAB
+        % cannot remain blocked after the user closes the window.
         %
         % Inputs:
         %   sourceFigure : Browser uifigure supplied by its CloseRequestFcn.
         %   ~            : Unused close event supplied by MATLAB.
         %
         % Outputs:
-        %   None. The function deletes the browser and all child graphics.
+        %   None. The function updates cancellation outputs when needed,
+        %   releases an active review wait, and deletes the browser.
+
+        % Closing before the first successful review export is an explicit
+        % cancellation, so return the documented empty values to the caller.
+        if isReviewMode && ~hasSuccessfulExport
+            validSnapshots = struct( ...
+                'sourceIndex', {}, ...
+                'plane', {}, ...
+                'intersection', {});
+            outputFilePath = '';
+        end
+
+        % Resume before deletion because uiwait otherwise has no remaining
+        % figure callback that could return control to the calling script.
+        if strcmp(sourceFigure.WaitStatus, 'waiting')
+            uiresume(sourceFigure);
+        end
 
         % Delete only the browser; ax1 is intentionally outside this ownership boundary.
         delete(sourceFigure);
