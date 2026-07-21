@@ -39,4 +39,4 @@ addpath(functionsDirectory);
 
 % Open the non-blocking browser. Its callbacks keep the processing state
 % alive after this script finishes running.
-segmentationFigure = launchBoneSegmentationTools(ultrasoundSequence, segmentationOutputDirectory);
+[segmentationFigure, segmentationResults] = launchBoneSegmentationTools(ultrasoundSequence, segmentationOutputDirectory);

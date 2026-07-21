@@ -1,4 +1,5 @@
-function segmentationFigure = launchBoneSegmentationTools( ...
+function [segmentationFigure, segmentationResults] = ...
+        launchBoneSegmentationTools( ...
         ultrasoundSequence, outputDirectory)
 %LAUNCHBONESEGMENTATIONTOOLS Open the ultrasound segmentation mock-up.
 % This function builds an interactive tool for reviewing an ultrasound
@@ -15,9 +16,18 @@ function segmentationFigure = launchBoneSegmentationTools( ...
 %   outputDirectory    : Existing directory suggested by the MAT-file export
 %                        dialog when the user presses Export.
 %
-% Output:
+% Outputs:
 %   segmentationFigure : Handle to the non-blocking uifigure that owns the
 %                        table, image preview, controls, and callback state.
+%   segmentationResults: Final 1-by-N result struct array returned after the
+%                        first successful export when this second output is
+%                        requested. Closing before export returns an empty
+%                        struct array. With one output, the UI stays non-blocking.
+
+% Preserve the existing non-blocking API unless the caller explicitly requests
+% final results as a second output.
+shouldWaitForSegmentationResults = nargout >= 2;
+segmentationResults = struct.empty(1, 0);
 
 %% VALIDATE AND PREPARE THE INPUT DATA
 
@@ -463,6 +473,12 @@ exportButton.Layout.Column = [1, 2];
 sequenceTable.Selection = 1;
 loadCurrentImage();
 sequenceTable.SelectionChangedFcn = @handleTableSelection;
+
+% A caller requesting results waits for either a successful export or a close.
+% One-output callers return immediately and retain the original UI behavior.
+if shouldWaitForSegmentationResults && isvalid(segmentationFigure)
+    uiwait(segmentationFigure);
+end
 
     function handleKeyboardShortcut(~, eventData)
         %HANDLEKEYBOARDSHORTCUT Route unmodified keys to workflow actions.
@@ -1339,10 +1355,10 @@ sequenceTable.SelectionChangedFcn = @handleTableSelection;
         end
 
         % Save the ordered per-image records directly without a metadata wrapper.
-        results = buildExportResults();
+        segmentationResults = buildSegmentationResults();
         outputFilePath = fullfile(selectedDirectory, selectedFileName);
         try
-            save(outputFilePath, 'results', '-v7.3');
+            save(outputFilePath, 'segmentationResults', '-v7.3');
         catch saveError
             uialert(segmentationFigure, ...
                 sprintf('Could not export segmentation results:\n\n%s', ...
@@ -1358,10 +1374,16 @@ sequenceTable.SelectionChangedFcn = @handleTableSelection;
                 numberOfImages, outputFilePath), ...
             'Export complete', ...
             'Icon', 'success');
+
+        % Release a two-output caller only after the saved results are complete.
+        if shouldWaitForSegmentationResults
+            shouldWaitForSegmentationResults = false;
+            uiresume(segmentationFigure);
+        end
     end
 
-    function results = buildExportResults()
-        %BUILDEXPORTRESULTS Package the ordered per-image result records.
+    function builtResults = buildSegmentationResults()
+        %BUILDSEGMENTATIONRESULTS Package ordered per-image result records.
         % This helper creates the direct 1-by-N struct array saved in the MAT-file
         % and guarantees alignment with the original ultrasound sequence.
         %
@@ -1369,8 +1391,8 @@ sequenceTable.SelectionChangedFcn = @handleTableSelection;
         %   None. Data is read from the nested committed state.
         %
         % Output:
-        %   results : 1-by-N struct array containing one ordered result record
-        %             for every ultrasound sequence image.
+        %   builtResults : 1-by-N struct array containing one ordered result
+        %                  record for every ultrasound sequence image.
 
         resultTemplate = struct( ...
             'sequencePosition', [], ...
@@ -1381,37 +1403,37 @@ sequenceTable.SelectionChangedFcn = @handleTableSelection;
             'usesCustomSegmentationArea', false, ...
             'processingParameters', defaultParameters, ...
             'status', 'unprocessed');
-        results = repmat(resultTemplate, 1, numberOfImages);
+        builtResults = repmat(resultTemplate, 1, numberOfImages);
 
         for resultIndex = 1:numberOfImages
             displayedImageSize = size( ...
                 ultrasoundSequence(resultIndex).plane.image.');
-            results(resultIndex).sequencePosition = resultIndex;
-            results(resultIndex).sourceIndex = ...
+            builtResults(resultIndex).sequencePosition = resultIndex;
+            builtResults(resultIndex).sourceIndex = ...
                 ultrasoundSequence(resultIndex).sourceIndex;
-            results(resultIndex).processingParameters = ...
+            builtResults(resultIndex).processingParameters = ...
                 committedParameters(resultIndex);
 
             if isImageProcessed(resultIndex)
-                results(resultIndex).pixelCoordinates = ...
+                builtResults(resultIndex).pixelCoordinates = ...
                     committedCoordinates{resultIndex};
-                results(resultIndex).segmentationMask = ...
+                builtResults(resultIndex).segmentationMask = ...
                     committedMasks{resultIndex};
-                results(resultIndex).segmentationAreaMask = ...
+                builtResults(resultIndex).segmentationAreaMask = ...
                     committedSegmentationAreaMasks{resultIndex};
-                results(resultIndex).usesCustomSegmentationArea = ...
+                builtResults(resultIndex).usesCustomSegmentationArea = ...
                     committedUsesCustomSegmentationArea(resultIndex);
-                results(resultIndex).status = 'processed';
+                builtResults(resultIndex).status = 'processed';
             else
                 % A correctly sized false mask preserves array conventions while
                 % status prevents it from being mistaken for an accepted empty result.
-                results(resultIndex).pixelCoordinates = zeros(0, 2);
-                results(resultIndex).segmentationMask = ...
+                builtResults(resultIndex).pixelCoordinates = zeros(0, 2);
+                builtResults(resultIndex).segmentationMask = ...
                     false(displayedImageSize);
-                results(resultIndex).segmentationAreaMask = ...
+                builtResults(resultIndex).segmentationAreaMask = ...
                     true(displayedImageSize);
-                results(resultIndex).usesCustomSegmentationArea = false;
-                results(resultIndex).status = 'unprocessed';
+                builtResults(resultIndex).usesCustomSegmentationArea = false;
+                builtResults(resultIndex).status = 'unprocessed';
             end
         end
     end
@@ -1459,6 +1481,13 @@ sequenceTable.SelectionChangedFcn = @handleTableSelection;
             if strcmp(confirmation, 'Cancel')
                 return;
             end
+        end
+
+        % A two-output caller closing before export receives the initialized
+        % empty struct array rather than a misleading partial result snapshot.
+        if shouldWaitForSegmentationResults
+            shouldWaitForSegmentationResults = false;
+            uiresume(sourceFigure);
         end
 
         % Delete only this tool figure; unrelated project figures stay open.
