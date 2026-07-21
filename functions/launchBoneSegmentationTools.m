@@ -95,6 +95,7 @@ tableData = table( ...
 segmentationFigure = uifigure( ...
     'Name', 'Semi-Automatic Bone Segmentation Tool', ...
     'Position', [20, 60, 1880, 900], ...
+    'WindowKeyPressFcn', @handleKeyboardShortcut, ...
     'CloseRequestFcn', @handleCloseRequest, ...
     'Tag', 'bone_segmentation_tool_figure');
 
@@ -285,6 +286,7 @@ areaButtonsGrid.Layout.Column = [1, 3];
 
 drawAreaButton = uibutton(areaButtonsGrid, 'push', ...
     'Text', 'Draw area', ...
+    'Tooltip', 'Draw or replace the segmentation area (D).', ...
     'ButtonPushedFcn', @handleDrawSegmentationArea, ...
     'Tag', 'bone_segmentation_draw_area_button');
 drawAreaButton.Layout.Row = 1;
@@ -432,12 +434,14 @@ resetButton.Layout.Column = [1, 2];
 
 previousButton = uibutton(workflowGrid, 'push', ...
     'Text', 'Previous', ...
+    'Tooltip', 'Show the previous image (A).', ...
     'ButtonPushedFcn', @handlePreviousImage, ...
     'Tag', 'bone_segmentation_previous_button');
 previousButton.Layout.Row = 3;
 previousButton.Layout.Column = 1;
 nextButton = uibutton(workflowGrid, 'push', ...
     'Text', 'Next', ...
+    'Tooltip', 'Show the next image (S).', ...
     'ButtonPushedFcn', @handleNextImage, ...
     'Tag', 'bone_segmentation_next_button');
 nextButton.Layout.Row = 3;
@@ -458,6 +462,34 @@ exportButton.Layout.Column = [1, 2];
 sequenceTable.Selection = 1;
 loadCurrentImage();
 sequenceTable.SelectionChangedFcn = @handleTableSelection;
+
+    function handleKeyboardShortcut(~, eventData)
+        %HANDLEKEYBOARDSHORTCUT Route unmodified keys to workflow actions.
+        % This figure-level callback makes sequence review and area selection
+        % available without moving focus away from the image or parameter panel.
+        %
+        % Inputs:
+        %   ~         : Unused figure source supplied by MATLAB.
+        %   eventData : Key event containing Key and Modifier values.
+        %
+        % Outputs:
+        %   None. Recognized keys invoke the existing guarded callbacks.
+
+        % Ignore shortcuts while an ROI is being drawn and preserve standard
+        % operating-system combinations such as Ctrl+A and Alt+D.
+        if isDrawingSegmentationArea || ~isempty(eventData.Modifier)
+            return;
+        end
+
+        switch lower(eventData.Key)
+            case 'a'
+                handlePreviousImage([], []);
+            case 's'
+                handleNextImage([], []);
+            case 'd'
+                handleDrawSegmentationArea([], []);
+        end
+    end
 
     function handleTableSelection(~, eventData)
         %HANDLETABLESELECTION Commit the old image and open the selected row.
