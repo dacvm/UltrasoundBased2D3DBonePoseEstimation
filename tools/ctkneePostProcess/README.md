@@ -4,7 +4,7 @@
 
 This MATLAB project preprocesses CT-derived 3D meshes from a cadaver-leg or knee-phantom experiment. It estimates the centers of optical markers, defines the rigid bodies attached to the femur and tibia bone pins, loads the anatomical coordinate systems (ACS), stores the results in MATLAB structures, and displays all geometry and coordinate systems in the CT coordinate frame.
 
-The recommended entry point is `preprocess_markerstls_from_config.m`. It reads the input paths and filenames from `config/preprocess_markerstls_config.json` and exports a MAT file, MATLAB FIG file, and PNG image. `preprocess_markerstls.m` is the older script with paths configured directly in the MATLAB file.
+The recommended entry point is `preprocess_markerstls_from_config.m`. It reads the input paths and filenames from `tools/ctkneePostProcess/configs/preprocess_markerstls_config.json` and exports a MAT file, MATLAB FIG file, and PNG image to `tools/ctkneePostProcess/outputs/` by default. `preprocess_markerstls.m` is the older script with paths configured directly in the MATLAB file.
 
 ## Experiment setup
 
@@ -36,7 +36,7 @@ The marker numbers have fixed meanings:
 | 3 | Reference marker for the local Y axis |
 | 4 | Additional marker retained for checking and diagnostics |
 
-The exact files and their roles are configured in `config/preprocess_markerstls_config.json`.
+The exact files and their roles are configured in `tools/ctkneePostProcess/configs/preprocess_markerstls_config.json`.
 
 ### Bone meshes
 
@@ -90,13 +90,13 @@ This definition must be identical in the user's motion-capture system. The marke
 
 ## Running the project
 
-1. Edit `config/preprocess_markerstls_config.json` and set the marker directory, bone directory, filenames, ACS MAT filename, and output directory.
+1. Edit `tools/ctkneePostProcess/configs/preprocess_markerstls_config.json` and set the marker directory, bone directory, filenames, ACS MAT filename, and output directory.
 2. Run the recommended script from MATLAB:
 
    ```matlab
-   run('preprocess_markerstls_from_config.m')
+   run('tools/ctkneePostProcess/preprocess_markerstls_from_config.m')
    ```
 
-3. Inspect the generated MAT, FIG, and PNG files. Relative paths in the JSON are resolved relative to the `config` directory; therefore, the example output directory `outputs` writes to `config/outputs`. Use `../outputs` if the output should be placed in the project-root `outputs` directory.
+3. Inspect the generated MAT, FIG, and PNG files in `tools/ctkneePostProcess/outputs/`. Relative paths in the JSON are resolved from `tools/ctkneePostProcess/configs/`; therefore, the default `../outputs` setting selects the tool-local output folder.
 
 The scripts add the `functions` directory and its subdirectories to the MATLAB path automatically. The workflow uses MATLAB mesh and point-cloud functionality, including `stlread`, `pointCloud`, and `pcfitsphere`.

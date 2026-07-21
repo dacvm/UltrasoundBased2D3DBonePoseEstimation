@@ -21,7 +21,7 @@
     "acs_mat_file": "ERC_CS_20260709-153426.mat"
   },
   "output": {
-    "directory": "../output/ctkneePostProcess",
+    "directory": "../outputs",
     "base_name": "kneephantom_bones_and_bonepins"
   }
 }

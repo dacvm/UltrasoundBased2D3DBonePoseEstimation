@@ -9,13 +9,13 @@ close all;
 script_full_path = mfilename('fullpath');
 if isempty(script_full_path)
     error('preprocess_markerstls:ScriptPathUnavailable', ...
-        'Run preprocess_markerstls_from_config.m as a complete script so its configuration file can be located.');
+          'Run preprocess_markerstls_from_config.m as a complete script so its configuration file can be located.');
 end
 tool_directory = fileparts(script_full_path);
 
 % Walk up from tools/ctkneePostProcess to the repository root. Keeping this
-% relationship explicit makes the migrated tool use the parent project as
-% its only source of shared functions and configuration.
+% relationship explicit lets the tool reuse the parent project's functions
+% while keeping its own configuration and outputs beside the tool.
 tools_directory = fileparts(tool_directory);
 project_directory = fileparts(tools_directory);
 
@@ -26,19 +26,19 @@ geometry_directory = fullfile(project_directory, 'functions', 'geometry');
 display_directory = fullfile(project_directory, 'functions', 'display');
 if ~isfolder(geometry_directory)
     error('preprocess_markerstls:GeometryDirectoryNotFound', ...
-        'Required geometry directory not found: %s', geometry_directory);
+          'Required geometry directory not found: %s', geometry_directory);
 end
 if ~isfolder(display_directory)
     error('preprocess_markerstls:DisplayDirectoryNotFound', ...
-        'Required display directory not found: %s', display_directory);
+          'Required display directory not found: %s', display_directory);
 end
 addpath(geometry_directory);
 addpath(display_directory);
 
-% Read the configuration from the parent project's standard config folder.
-% This keeps user-editable paths together with the other pipeline settings.
+% Read this workflow's configuration from its tool-local configs folder so
+% unrelated project tools do not share one configuration directory.
 configuration_path = fullfile( ...
-    project_directory, 'config', 'preprocess_markerstls_config.json');
+    tool_directory, 'configs', 'preprocess_markerstls_config.json');
 configuration = read_json_configuration(configuration_path);
 
 % Convert the user settings into checked, absolute input and output paths.

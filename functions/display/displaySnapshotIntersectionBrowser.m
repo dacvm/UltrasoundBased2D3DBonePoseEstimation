@@ -23,6 +23,9 @@ function [figBrowser, validSnapshots, outputFilePath] = displaySnapshotIntersect
 %                     The default 'display' mode is non-blocking and keeps
 %                     the original read-only behavior. Review mode waits for
 %                     the first successful export or window cancellation.
+%   'OutputDirectory' : Existing directory initially shown by the review
+%                       export dialog. The default empty value lets MATLAB
+%                       choose the dialog's initial directory.
 %
 % Outputs:
 %   figBrowser      : Handle to the new uifigure that contains the sortable
@@ -51,6 +54,9 @@ browserInputParser.PartialMatching = false;
 addParameter(browserInputParser, 'Mode', 'display', ...
     @(value) (ischar(value) && isrow(value)) || ...
     (isstring(value) && isscalar(value)));
+addParameter(browserInputParser, 'OutputDirectory', '', ...
+    @(value) (ischar(value) && isrow(value)) || ...
+    (isstring(value) && isscalar(value)));
 parse(browserInputParser, varargin{:});
 
 % Normalize text once so all later branches use one simple mode flag.
@@ -60,6 +66,14 @@ if ~any(browserMode == ["display", "review"])
         'Mode must be either ''display'' or ''review''.');
 end
 isReviewMode = browserMode == "review";
+
+% Keep an empty directory as MATLAB's normal dialog behavior, but require a
+% supplied directory to exist so the export dialog never starts at a bad path.
+outputDirectory = char(string(browserInputParser.Results.OutputDirectory));
+if ~isempty(outputDirectory) && ~isfolder(outputDirectory)
+    error('displaySnapshotIntersectionBrowser:OutputDirectoryNotFound', ...
+        'OutputDirectory was not found: %s', outputDirectory);
+end
 
 % Initialize optional outputs before any GUI callback can run. The empty
 % struct keeps the review output fields clear even when no export is made.
@@ -586,12 +600,21 @@ end
         defaultExportFileName = sprintf( ...
             'validSnapshots_%s.mat', exportTimestamp);
 
+        % Prefix the suggested file with the caller's output directory. An
+        % empty directory preserves MATLAB's default current-folder behavior.
+        if isempty(outputDirectory)
+            defaultExportPath = defaultExportFileName;
+        else
+            defaultExportPath = fullfile( ...
+                outputDirectory, defaultExportFileName);
+        end
+
         % Ask for a MAT-file destination only after confirming that the export
         % has content. Cancelling this dialog intentionally leaves review state.
         [selectedFileName, selectedDirectory] = uiputfile( ...
             {'*.mat', 'MAT-files (*.mat)'}, ...
             'Export selected snapshots', ...
-            defaultExportFileName);
+            defaultExportPath);
         if isequal(selectedFileName, 0) || isequal(selectedDirectory, 0)
             return;
         end
