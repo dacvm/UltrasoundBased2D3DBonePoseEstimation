@@ -75,7 +75,7 @@ The ACS implementation and its supporting documentation are in `functions/ERCkne
 4. **Store the processed data in structures.** The main structures are:
 
    - `markerstls`: one record per marker, containing its name, source path, STL mesh, point cloud, fitted sphere, radius, fitting error, and centroid. The config-driven script also stores the bone-pin index and marker number.
-   - `bonepins`: one record per bone pin, containing its identity, marker names and paths, marker centroids, rigid-body transform, origin, rotation axes, and `T_pin_CT`.
+   - `bonepins`: one record per bone pin, containing its identity, marker names and paths, marker centroids, origin, rotation axes, and `T_pin_CT`.
    - `bones`: one record per bone, containing its identity, source path, STL mesh, and `T_bone_CT`.
 
    The config-driven script saves `bones` and `bonepins` to the MAT output. Marker centroids and marker provenance remain available inside `bonepins`; the full `markerstls` mesh records are used during the run but are not exported by that script.
@@ -123,7 +123,6 @@ bonepins(1..M)
 +-- marker_names
 +-- marker_paths
 +-- marker_centroids
-+-- transform
 +-- origin
 +-- base_axes
 +-- T_pin_CT
@@ -163,7 +162,6 @@ Each element represents one bone-pin rigid body constructed from four spherical 
 | `marker_names` | 1-by-4 cell array containing the configured marker names in the fixed order marker 1 through marker 4. |
 | `marker_paths` | 1-by-4 cell array containing the absolute source STL path for each marker. |
 | `marker_centroids` | 3-by-4 matrix of fitted marker centers in CT coordinates. Each column corresponds to the same position in `marker_names` and `marker_paths`. |
-| `transform` | 4-by-4 bone-pin rigid-body transform calculated from markers 1, 2, and 3. This is the same matrix stored in `T_pin_CT` and is retained for compatibility with existing code. |
 | `origin` | 3-by-1 position of the bone-pin origin in CT coordinates. It is marker 1's fitted centroid and equals `T_pin_CT(1:3,4)`. |
 | `base_axes` | 3-by-3 rotation matrix whose columns are the bone-pin frame's local X, Y, and Z axes expressed in CT coordinates. It equals `T_pin_CT(1:3,1:3)`. |
 | `T_pin_CT` | 4-by-4 homogeneous transform describing the bone-pin frame in CT coordinates. It maps points from local pin coordinates into CT coordinates. |
