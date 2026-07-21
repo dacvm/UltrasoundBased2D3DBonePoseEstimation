@@ -387,7 +387,14 @@ fprintf('  MAT: %s\n', output_paths.mat_file);
 fprintf('  FIG: %s\n', output_paths.fig_file);
 fprintf('  PNG: %s\n', output_paths.png_file);
 
-%% LOCAL CONFIGURATION AND VALIDATION FUNCTIONS
+
+
+
+
+
+
+
+%% HELPER: READ JSON CONFIGURATION
 
 function configuration = read_json_configuration(configuration_path)
 %READ_JSON_CONFIGURATION Read the fixed JSON file with a useful error message.
@@ -416,6 +423,9 @@ function configuration = read_json_configuration(configuration_path)
             configuration_path);
     end
 end
+
+
+%% HELPER: PREPARE CONFIGURATION
 
 function [bonepin_specs, bone_specs, acs_mat_path, output_paths] = ...
         prepare_configuration(configuration, configuration_directory)
@@ -556,6 +566,9 @@ function [bonepin_specs, bone_specs, acs_mat_path, output_paths] = ...
     output_paths.png_file = fullfile(output_directory, [output_base_name '.png']);
 end
 
+
+%% HELPER: REQUIRE STRUCT FIELD
+
 function required_value = require_struct_field(parent_struct, field_name, field_label)
 %REQUIRE_STRUCT_FIELD Return one required scalar object from decoded JSON.
 
@@ -571,6 +584,9 @@ function required_value = require_struct_field(parent_struct, field_name, field_
             'Configuration field "%s" must be one JSON object.', field_label);
     end
 end
+
+
+%% HELPER: REQUIRE TEXT FIELD
 
 function text_value = require_text_field(parent_struct, field_name, field_label)
 %REQUIRE_TEXT_FIELD Return one required, nonempty text value from decoded JSON.
@@ -597,6 +613,9 @@ function text_value = require_text_field(parent_struct, field_name, field_label)
             'Configuration field "%s" cannot be empty.', field_label);
     end
 end
+
+
+%% HELPER: RESOLVE DIRECTORY PATH
 
 function resolved_directory = resolve_directory_path( ...
         configured_directory, configuration_directory, field_label, create_if_missing)
@@ -630,6 +649,9 @@ function resolved_directory = resolve_directory_path( ...
     resolved_directory = canonical_existing_path(candidate_directory, field_label);
 end
 
+
+%% HELPER: RESOLVE INPUT FILE
+
 function resolved_file = resolve_input_file(parent_directory, configured_file, field_label)
 %RESOLVE_INPUT_FILE Resolve and validate one file below its configured directory.
 
@@ -651,6 +673,9 @@ function resolved_file = resolve_input_file(parent_directory, configured_file, f
     resolved_file = canonical_existing_path(candidate_file, field_label);
 end
 
+
+%% HELPER: IS ABSOLUTE PATH
+
 function is_absolute = is_absolute_path(path_value)
 %IS_ABSOLUTE_PATH Recognize Windows, UNC, and Unix-style absolute paths.
 
@@ -665,6 +690,9 @@ function is_absolute = is_absolute_path(path_value)
     end
 end
 
+
+%% HELPER: CANONICAL EXISTING PATH
+
 function canonical_path = canonical_existing_path(candidate_path, field_label)
 %CANONICAL_EXISTING_PATH Return MATLAB's normalized full path for provenance.
 
@@ -677,6 +705,9 @@ function canonical_path = canonical_existing_path(candidate_path, field_label)
     canonical_path = path_attributes.Name;
 end
 
+
+%% HELPER: VALIDATE FILE EXTENSION
+
 function validate_file_extension(filename, expected_extension, field_label)
 %VALIDATE_FILE_EXTENSION Catch accidental file-type selections in the JSON.
 
@@ -687,6 +718,9 @@ function validate_file_extension(filename, expected_extension, field_label)
             field_label, expected_extension);
     end
 end
+
+
+%% HELPER: VALIDATE OUTPUT BASE NAME
 
 function validate_output_base_name(output_base_name)
 %VALIDATE_OUTPUT_BASE_NAME Ensure one base safely forms all three output names.
@@ -707,6 +741,9 @@ function validate_output_base_name(output_base_name)
              'without a directory, extension, trailing space, or special path characters.']);
     end
 end
+
+
+%% HELPER: LOAD AND VALIDATE ACS
 
 function acs = load_and_validate_acs(acs_mat_path)
 %LOAD_AND_VALIDATE_ACS Read and validate the fixed femur/tibia ACS contract.
@@ -731,6 +768,9 @@ function acs = load_and_validate_acs(acs_mat_path)
     validate_acs_frame(femur_acs, 'acs.f', acs_mat_path);
     validate_acs_frame(tibia_acs, 'acs.t', acs_mat_path);
 end
+
+
+%% HELPER: VALIDATE ACS FRAME
 
 function validate_acs_frame(acs_frame, frame_label, acs_mat_path)
 %VALIDATE_ACS_FRAME Check one row-wise rotation matrix and origin vector.
@@ -764,6 +804,9 @@ function validate_acs_frame(acs_frame, frame_label, acs_mat_path)
             frame_label);
     end
 end
+
+
+%% HELPER: VALIDATE STL MESH
 
 function validate_stl_mesh(mesh_object, mesh_path)
 %VALIDATE_STL_MESH Check the triangulation shape used by all later sections.

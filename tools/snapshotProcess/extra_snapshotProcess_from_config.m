@@ -275,6 +275,7 @@ end
 % meshPlaneIntersectionPixels, while the metadata keeps each result linked
 % to the source snapshot after the browser table is sorted.
 snapshotPlaneTemplate = struct( ...
+    'T_image_ref', [], ...      % 4x4 rigid transform from the image frame to the reference frame.
     'p0', [], ...               % 3D position of the image plane's top-left corner.
     'ex', [], ...               % 3D direction of increasing image columns.
     'ey', [], ...               % 3D direction of increasing image rows.
@@ -369,6 +370,7 @@ for snapshotIndex = 1:numel(snapshotData)
             % Store the valid packet as a finite image plane so the later
             % intersection section does not need to repeat pose propagation.
             snapshotPlaneCount = snapshotPlaneCount + 1;
+            snapshotPlanes(snapshotPlaneCount).T_image_ref = T_image_ref;
             snapshotPlanes(snapshotPlaneCount).p0 = T_image_ref(1:3, 4);
             snapshotPlanes(snapshotPlaneCount).ex = T_image_ref(1:3, 1);
             snapshotPlanes(snapshotPlaneCount).ey = T_image_ref(1:3, 2);

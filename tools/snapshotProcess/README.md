@@ -134,6 +134,7 @@ The file contains one variable named `validSnapshots`. It is a struct array with
 validSnapshots(1..N)
 +-- sourceIndex
 +-- plane
+|   +-- T_image_ref
 |   +-- p0, ex, ey, n, W, H
 |   +-- nRows, nCols, image
 |   +-- timestamp, bone, snapshotName
@@ -166,6 +167,7 @@ validSnapshots = loadedOutput.validSnapshots;
 
 | Field | Explanation |
 | --- | --- |
+| `T_image_ref` | 4-by-4 rigid-body transform that maps points from the ultrasound image frame into the common reference coordinate system. Its rotation columns and translation match `ex`, `ey`, `n`, and `p0`. |
 | `p0` | 3D position of the image plane's top-left corner in the common reference coordinate system. |
 | `ex` | 3D unit direction in which image column numbers increase. |
 | `ey` | 3D unit direction in which image row numbers increase. |
