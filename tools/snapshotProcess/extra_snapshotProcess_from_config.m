@@ -21,10 +21,24 @@ if ~isfolder(functionsDirectory)
 end
 addpath(genpath(functionsDirectory));
 
-% Keep the existing project-level config file after moving this script into
-% tools/snapshotProcess, so users do not need to maintain a duplicate config.
-configurationPath = fullfile(projectRoot, 'config', 'extra_snapshotProcess_config.json');
+% Keep this tool's settings beside the workflow so its configuration does
+% not get mixed with configuration files owned by other project tools.
+configurationPath = fullfile(scriptDirectory, 'configs', 'extra_snapshotProcess_config.json');
 configuration     = readSnapshotProcessConfiguration(configurationPath);
+
+% Use the tool-local outputs folder as the first save location shown by the
+% review browser, independent of MATLAB's current working directory.
+defaultOutputDirectory = fullfile(scriptDirectory, 'outputs');
+if ~isfolder(defaultOutputDirectory)
+    % Recreate the standard output folder when a fresh checkout does not yet
+    % contain it because empty directories are not retained by source control.
+    [outputDirectoryCreated, outputDirectoryMessage] = mkdir(defaultOutputDirectory);
+    if ~outputDirectoryCreated
+        error('extra_snapshotProcess_from_config:OutputDirectoryCreationFailed', ...
+              'Could not create the default output directory "%s". Reason: %s', ...
+              defaultOutputDirectory, outputDirectoryMessage);
+    end
+end
 
 % Use short workflow variable names below so the copied processing sections
 % remain easy to compare with the original quick-check script.
@@ -701,7 +715,8 @@ end
 [figIntersectionBrowser, validSnapshots, outputFilePath] = ...
     displaySnapshotIntersectionBrowser( ...
         snapshotPlanes, intersections, boneMeshesRefByCode, ...
-        'Mode', displayMode);
+        'Mode', displayMode, ...
+        'OutputDirectory', defaultOutputDirectory);
 
 
 
