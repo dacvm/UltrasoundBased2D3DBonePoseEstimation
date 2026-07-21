@@ -2,10 +2,11 @@ function segmentationFigure = launchBoneSegmentationTools( ...
         ultrasoundSequence, outputDirectory)
 %LAUNCHBONESEGMENTATIONTOOLS Open the ultrasound segmentation mock-up.
 % This function builds an interactive tool for reviewing an ultrasound
-% sequence, tuning a simple three-stage image-processing pipeline, and
-% exporting the resulting 2D bone-boundary pixel coordinates. It is needed
-% to test the intended user workflow before a validated bone-specific
-% segmentation method is available.
+% sequence, tuning a simple three-stage image-processing pipeline, optionally
+% limiting the final result with a per-image freehand area, and exporting the
+% resulting 2D bone-boundary pixel coordinates. It is needed to test the
+% intended user workflow before a validated bone-specific segmentation method
+% is available.
 %
 % Inputs:
 %   ultrasoundSequence : Struct vector whose elements contain sourceIndex
@@ -42,21 +43,28 @@ currentParameters = defaultParameters;
 committedParameters = repmat(defaultParameters, 1, numberOfImages);
 committedMasks = cell(1, numberOfImages);
 committedCoordinates = cell(1, numberOfImages);
+committedSegmentationAreaMasks = cell(1, numberOfImages);
+committedUsesCustomSegmentationArea = false(1, numberOfImages);
 isImageProcessed = false(1, numberOfImages);
 pointCounts = zeros(numberOfImages, 1);
 statusValues = repmat("Unprocessed", numberOfImages, 1);
+areaStatusValues = repmat("Full", numberOfImages, 1);
 
 % Start with the first image, matching the requested guided sequence workflow.
 currentImageIndex = 1;
 currentPreviewImage = uint8([]);
 currentPreviewMask = false(0, 0);
 currentPreviewCoordinates = zeros(0, 2);
+currentSegmentationAreaMask = true(size( ...
+    ultrasoundSequence(1).plane.image.'));
+currentUsesCustomSegmentationArea = false;
 
 % Track user work separately from successful exports so close warnings are
 % shown only when there is something that could be lost.
 currentImageHasUserEdits = false;
 hasUnexportedCommittedChanges = false;
 isSynchronizingTableSelection = false;
+isDrawingSegmentationArea = false;
 
 %% BUILD THE TABLE DATA
 
@@ -75,10 +83,10 @@ end
 % SequencePosition remains the permanent key after visual table sorting.
 tableData = table( ...
     sequencePositions, sourceIndices, boneCodes, snapshotGroups, ...
-    statusValues, pointCounts, ...
+    statusValues, areaStatusValues, pointCounts, ...
     'VariableNames', { ...
         'SequencePosition', 'SourceIndex', 'Bone', 'SnapshotGroup', ...
-        'Status', 'PointCount'});
+        'Status', 'Area', 'PointCount'});
 
 %% CREATE THE THREE-COLUMN USER INTERFACE
 
@@ -111,8 +119,8 @@ tableGrid = uigridlayout(tablePanel, [1, 1], ...
 sequenceTable = uitable(tableGrid, ...
     'Data', tableData, ...
     'ColumnName', { ...
-        'Position', 'Source', 'Bone', 'Snapshot group', 'Status', 'Points'}, ...
-    'ColumnWidth', {75, 65, 55, 125, 90, 60}, ...
+        'Position', 'Source', 'Bone', 'Snapshot group', 'Status', 'Area', 'Points'}, ...
+    'ColumnWidth', {65, 60, 45, 110, 80, 65, 55}, ...
     'ColumnEditable', false(1, width(tableData)), ...
     'ColumnSortable', true(1, width(tableData)), ...
     'SelectionType', 'row', ...
@@ -143,7 +151,7 @@ parametersPanel = uipanel(mainGrid, ...
 parametersPanel.Layout.Row = 1;
 parametersPanel.Layout.Column = 3;
 parametersGrid = uigridlayout(parametersPanel, [4, 1], ...
-    'RowHeight', {190, 140, '1x', 185}, ...
+    'RowHeight', {190, 220, '1x', 185}, ...
     'Padding', [5, 5, 5, 5], ...
     'RowSpacing', 6);
 
@@ -219,8 +227,8 @@ segmentationPanel = uipanel(parametersGrid, ...
     'Tag', 'bone_segmentation_threshold_panel');
 segmentationPanel.Layout.Row = 2;
 segmentationPanel.Layout.Column = 1;
-segmentationGrid = uigridlayout(segmentationPanel, [3, 3], ...
-    'RowHeight', {24, 42, 30}, ...
+segmentationGrid = uigridlayout(segmentationPanel, [5, 3], ...
+    'RowHeight', {24, 42, 30, 24, 30}, ...
     'ColumnWidth', {95, '1x', 75}, ...
     'Padding', [8, 8, 8, 8], ...
     'RowSpacing', 4);
@@ -256,6 +264,39 @@ autoThresholdButton = uibutton(segmentationGrid, 'push', ...
     'Tag', 'bone_segmentation_auto_threshold_button');
 autoThresholdButton.Layout.Row = 3;
 autoThresholdButton.Layout.Column = [1, 3];
+
+% Keep spatial filtering controls inside the segmentation stage while the
+% image axes remain dedicated to drawing and previewing the selected area.
+areaStatusLabel = uilabel(segmentationGrid, ...
+    'Text', 'Area: Full image', ...
+    'FontWeight', 'bold', ...
+    'VerticalAlignment', 'center', ...
+    'Tag', 'bone_segmentation_area_status_label');
+areaStatusLabel.Layout.Row = 4;
+areaStatusLabel.Layout.Column = [1, 3];
+
+areaButtonsGrid = uigridlayout(segmentationGrid, [1, 2], ...
+    'RowHeight', {'1x'}, ...
+    'ColumnWidth', {'1x', '1x'}, ...
+    'Padding', [0, 0, 0, 0], ...
+    'ColumnSpacing', 6);
+areaButtonsGrid.Layout.Row = 5;
+areaButtonsGrid.Layout.Column = [1, 3];
+
+drawAreaButton = uibutton(areaButtonsGrid, 'push', ...
+    'Text', 'Draw area', ...
+    'ButtonPushedFcn', @handleDrawSegmentationArea, ...
+    'Tag', 'bone_segmentation_draw_area_button');
+drawAreaButton.Layout.Row = 1;
+drawAreaButton.Layout.Column = 1;
+
+useFullImageButton = uibutton(areaButtonsGrid, 'push', ...
+    'Text', 'Use full image', ...
+    'Enable', 'off', ...
+    'ButtonPushedFcn', @handleUseFullImage, ...
+    'Tag', 'bone_segmentation_use_full_image_button');
+useFullImageButton.Layout.Row = 1;
+useFullImageButton.Layout.Column = 2;
 
 %% CREATE THE POST-PROCESSING CONTROLS
 
@@ -431,7 +472,8 @@ sequenceTable.SelectionChangedFcn = @handleTableSelection;
         %   None. The callback updates the current image and UI state.
 
         % Ignore programmatic selection updates made during navigation.
-        if isSynchronizingTableSelection || isempty(eventData.Selection)
+        if isSynchronizingTableSelection || isDrawingSegmentationArea || ...
+                isempty(eventData.Selection)
             return;
         end
 
@@ -445,6 +487,156 @@ sequenceTable.SelectionChangedFcn = @handleTableSelection;
         % Resolve the permanent sequence position stored in the selected row.
         targetImageIndex = currentTableData.SequencePosition(selectedDataRow);
         navigateToImage(targetImageIndex);
+    end
+
+    function handleDrawSegmentationArea(~, ~)
+        %HANDLEDRAWSEGMENTATIONAREA Draw and store one enclosed freehand area.
+        % This callback lets the user constrain only the final segmentation
+        % result while leaving every image-processing stage full-frame.
+        %
+        % Inputs:
+        %   ~ : Unused button source and event values supplied by MATLAB.
+        %
+        % Outputs:
+        %   None. The callback updates the current logical area mask and preview.
+
+        if isDrawingSegmentationArea
+            return;
+        end
+
+        % Disable state-changing controls until drawfreehand completes or is
+        % cancelled, preventing navigation to a different image mid-draw.
+        isDrawingSegmentationArea = true;
+        sequenceTable.Enable = 'off';
+        parametersPanel.Enable = 'off';
+        areaStatusLabel.Text = 'Area: Draw an enclosed region on the image';
+        drawnow;
+
+        freehandRoi = [];
+
+        try
+            numberOfRows = size(currentPreviewImage, 1);
+            numberOfColumns = size(currentPreviewImage, 2);
+
+            % Bound drawing to the displayed pixel edges and use cyan so the
+            % selected area remains distinct from the red result coordinates.
+            freehandRoi = drawfreehand(imageAxes, ...
+                'Closed', true, ...
+                'Color', [0.00, 0.75, 1.00], ...
+                'FaceAlpha', 0.10, ...
+                'LineWidth', 1.5, ...
+                'DrawingArea', [0.5, 0.5, numberOfColumns, numberOfRows], ...
+                'LabelVisible', 'off', ...
+                'Tag', 'bone_segmentation_freehand_area_roi');
+
+            % Escape can return no usable ROI. Do not change the active mask
+            % until a valid, nonempty replacement has been rasterized.
+            hasUsableRoi = ~isempty(freehandRoi) && ...
+                isvalid(freehandRoi) && size(freehandRoi.Position, 1) >= 3;
+            if hasUsableRoi
+                newAreaMask = createMask( ...
+                    freehandRoi, numberOfRows, numberOfColumns);
+                delete(freehandRoi);
+                freehandRoi = [];
+
+                if any(newAreaMask(:))
+                    currentSegmentationAreaMask = logical(newAreaMask);
+                    currentUsesCustomSegmentationArea = true;
+                    currentImageHasUserEdits = true;
+                    renderCurrentPreview();
+                    refreshCurrentTableRow();
+                else
+                    uialert(segmentationFigure, ...
+                        'The drawn area did not contain any image pixels.', ...
+                        'Empty segmentation area', ...
+                        'Icon', 'warning');
+                end
+            elseif ~isempty(freehandRoi) && isvalid(freehandRoi)
+                % Remove a cancelled or underspecified ROI while retaining the
+                % full-image or custom area that was active before drawing.
+                delete(freehandRoi);
+            end
+        catch drawError
+            % Remove any unfinished graphics object before reporting a failure.
+            if ~isempty(freehandRoi) && isvalid(freehandRoi)
+                delete(freehandRoi);
+            end
+            uialert(segmentationFigure, ...
+                sprintf('Could not create the segmentation area:\n\n%s', ...
+                    drawError.message), ...
+                'Area drawing failed', ...
+                'Icon', 'error');
+        end
+
+        % Restore controls after success, cancellation, or a handled error.
+        finishSegmentationAreaDrawing();
+    end
+
+    function finishSegmentationAreaDrawing()
+        %FINISHSEGMENTATIONAREADRAWING Restore controls after freehand drawing.
+        % This cleanup helper prevents cancellation or errors from leaving the
+        % table and processing controls disabled.
+        %
+        % Inputs:
+        %   None. The helper uses handles from the parent function workspace.
+        %
+        % Outputs:
+        %   None. It restores controls and refreshes area/navigation labels.
+
+        isDrawingSegmentationArea = false;
+        if isvalid(segmentationFigure)
+            sequenceTable.Enable = 'on';
+            parametersPanel.Enable = 'on';
+            refreshSegmentationAreaControls();
+            refreshProgressAndNavigation();
+        end
+    end
+
+    function handleUseFullImage(~, ~)
+        %HANDLEUSEFULLIMAGE Remove the custom area from the current image.
+        % This callback restores an all-true mask without changing processing
+        % parameters or area masks committed for other images.
+        %
+        % Inputs:
+        %   ~ : Unused button source and event values supplied by MATLAB.
+        %
+        % Outputs:
+        %   None. The callback updates the current area state and preview.
+
+        if isDrawingSegmentationArea || ~currentUsesCustomSegmentationArea
+            return;
+        end
+
+        currentSegmentationAreaMask = true(size(currentPreviewImage));
+        currentUsesCustomSegmentationArea = false;
+        currentImageHasUserEdits = true;
+        renderCurrentPreview();
+        refreshSegmentationAreaControls();
+        refreshCurrentTableRow();
+    end
+
+    function refreshSegmentationAreaControls()
+        %REFRESHSEGMENTATIONAREACONTROLS Show the current area mode and actions.
+        % This helper keeps the Segmentation-panel controls synchronized after
+        % drawing, clearing, navigation, or drawing cancellation.
+        %
+        % Inputs:
+        %   None. Values come from the current per-image area state.
+        %
+        % Outputs:
+        %   None. It updates the status label and area-action buttons.
+
+        if currentUsesCustomSegmentationArea
+            areaStatusLabel.Text = sprintf( ...
+                'Area: Custom (%d pixels)', nnz(currentSegmentationAreaMask));
+            drawAreaButton.Text = 'Replace area';
+            useFullImageButton.Enable = 'on';
+        else
+            areaStatusLabel.Text = 'Area: Full image';
+            drawAreaButton.Text = 'Draw area';
+            useFullImageButton.Enable = 'off';
+        end
+        drawAreaButton.Enable = 'on';
     end
 
     function updateContinuousParameter(parameterName, requestedValue)
@@ -635,7 +827,8 @@ sequenceTable.SelectionChangedFcn = @handleTableSelection;
 
         % Ignore invalid or no-op requests. Boundary buttons are disabled too,
         % but this check protects programmatic callback calls.
-        if targetImageIndex < 1 || targetImageIndex > numberOfImages || ...
+        if isDrawingSegmentationArea || ...
+                targetImageIndex < 1 || targetImageIndex > numberOfImages || ...
                 targetImageIndex == currentImageIndex
             return;
         end
@@ -658,7 +851,7 @@ sequenceTable.SelectionChangedFcn = @handleTableSelection;
     function commitCurrentImage()
         %COMMITCURRENTIMAGE Save the live preview as the current image result.
         % This helper makes navigation safe by storing the complete parameter
-        % set, cleaned mask, and boundary coordinates together.
+        % set, selected area, clipped mask, and boundary coordinates together.
         %
         % Inputs:
         %   None. Values are read from the current nested callback state.
@@ -674,14 +867,27 @@ sequenceTable.SelectionChangedFcn = @handleTableSelection;
             ~isequaln(committedParameters(currentImageIndex), currentParameters) || ...
             ~isequaln(committedMasks{currentImageIndex}, currentPreviewMask) || ...
             ~isequaln(committedCoordinates{currentImageIndex}, ...
-                currentPreviewCoordinates);
+                currentPreviewCoordinates) || ...
+            ~isequaln(committedSegmentationAreaMasks{currentImageIndex}, ...
+                currentSegmentationAreaMask) || ...
+            committedUsesCustomSegmentationArea(currentImageIndex) ~= ...
+                currentUsesCustomSegmentationArea;
 
         committedParameters(currentImageIndex) = currentParameters;
         committedMasks{currentImageIndex} = currentPreviewMask;
         committedCoordinates{currentImageIndex} = currentPreviewCoordinates;
+        committedSegmentationAreaMasks{currentImageIndex} = ...
+            currentSegmentationAreaMask;
+        committedUsesCustomSegmentationArea(currentImageIndex) = ...
+            currentUsesCustomSegmentationArea;
         isImageProcessed(currentImageIndex) = true;
         pointCounts(currentImageIndex) = size(currentPreviewCoordinates, 1);
         statusValues(currentImageIndex) = "Processed";
+        if currentUsesCustomSegmentationArea
+            areaStatusValues(currentImageIndex) = "Custom";
+        else
+            areaStatusValues(currentImageIndex) = "Full";
+        end
 
         % The most recently committed settings become the starting point for
         % the next image that has not yet been processed.
@@ -707,13 +913,21 @@ sequenceTable.SelectionChangedFcn = @handleTableSelection;
 
         if isImageProcessed(currentImageIndex)
             currentParameters = committedParameters(currentImageIndex);
+            currentSegmentationAreaMask = ...
+                committedSegmentationAreaMasks{currentImageIndex};
+            currentUsesCustomSegmentationArea = ...
+                committedUsesCustomSegmentationArea(currentImageIndex);
         else
             currentParameters = lastCommittedParameters;
+            currentSegmentationAreaMask = true(size( ...
+                ultrasoundSequence(currentImageIndex).plane.image.'));
+            currentUsesCustomSegmentationArea = false;
         end
         currentImageHasUserEdits = false;
 
         writeControlsFromCurrentParameters();
         renderCurrentPreview();
+        refreshSegmentationAreaControls();
         refreshCurrentTableRow();
         refreshProgressAndNavigation();
     end
@@ -756,28 +970,49 @@ sequenceTable.SelectionChangedFcn = @handleTableSelection;
         %   None. It updates preview arrays and graphics in imageAxes.
 
         currentPlane = ultrasoundSequence(currentImageIndex).plane;
-        [currentPreviewImage, currentPreviewMask, ...
-            currentPreviewCoordinates] = applyBoneSegmentationPipeline( ...
+        [currentPreviewImage, fullSegmentationMask, ...
+            fullBoundaryCoordinates] = applyBoneSegmentationPipeline( ...
             currentPlane.image, currentParameters);
+        [currentPreviewMask, currentPreviewCoordinates] = ...
+            applySegmentationAreaMask( ...
+                fullSegmentationMask, fullBoundaryCoordinates, ...
+                currentSegmentationAreaMask);
 
         % Replace the previous image and overlay while preserving fixed uint8
         % display limits so brightness and contrast changes remain visible.
         cla(imageAxes);
-        imagesc(imageAxes, currentPreviewImage, [0, 255]);
+        imageHandle = imagesc(imageAxes, currentPreviewImage, [0, 255]);
+        imageHandle.HitTest = 'off';
+        imageHandle.PickableParts = 'none';
         axis(imageAxes, 'image');
         xlim(imageAxes, [0.5, size(currentPreviewImage, 2) + 0.5]);
         ylim(imageAxes, [0.5, size(currentPreviewImage, 1) + 0.5]);
         colormap(imageAxes, gray(256));
         hold(imageAxes, 'on');
 
+        % Show the selected area separately from the result. Cyan marks the
+        % custom area, while red remains reserved for bone-boundary points.
+        if currentUsesCustomSegmentationArea
+            [~, areaContour] = contour(imageAxes, ...
+                double(currentSegmentationAreaMask), ...
+                [0.5, 0.5], ...
+                'Color', [0.00, 0.75, 1.00], ...
+                'LineWidth', 1.5);
+            areaContour.Tag = 'bone_segmentation_area_boundary_overlay';
+            areaContour.HitTest = 'off';
+            areaContour.PickableParts = 'none';
+        end
+
         % Draw boundary pixels last so they remain visible over bright echoes.
         if ~isempty(currentPreviewCoordinates)
-            plot(imageAxes, ...
+            segmentationOverlay = plot(imageAxes, ...
                 currentPreviewCoordinates(:, 2), ...
                 currentPreviewCoordinates(:, 1), ...
                 'r.', ...
                 'MarkerSize', 7, ...
                 'Tag', 'bone_segmentation_boundary_overlay');
+            segmentationOverlay.HitTest = 'off';
+            segmentationOverlay.PickableParts = 'none';
         end
         hold(imageAxes, 'off');
 
@@ -819,7 +1054,14 @@ sequenceTable.SelectionChangedFcn = @handleTableSelection;
         end
 
         statusValues(currentImageIndex) = displayedStatus;
+        if currentUsesCustomSegmentationArea
+            displayedAreaStatus = "Custom";
+        else
+            displayedAreaStatus = "Full";
+        end
+        areaStatusValues(currentImageIndex) = displayedAreaStatus;
         currentTableData.Status(currentImageIndex) = displayedStatus;
+        currentTableData.Area(currentImageIndex) = displayedAreaStatus;
         currentTableData.PointCount(currentImageIndex) = ...
             size(currentPreviewCoordinates, 1);
         sequenceTable.Data = currentTableData;
@@ -869,6 +1111,10 @@ sequenceTable.SelectionChangedFcn = @handleTableSelection;
         %
         % Outputs:
         %   None. It writes a selected MAT-file and updates export state.
+
+        if isDrawingSegmentationArea
+            return;
+        end
 
         % Include the preview currently visible to the user before building the file.
         commitCurrentImage();
@@ -943,6 +1189,8 @@ sequenceTable.SelectionChangedFcn = @handleTableSelection;
             'sourceIndex', [], ...
             'pixelCoordinates', zeros(0, 2), ...
             'segmentationMask', false(0, 0), ...
+            'segmentationAreaMask', true(0, 0), ...
+            'usesCustomSegmentationArea', false, ...
             'processingParameters', defaultParameters, ...
             'status', 'unprocessed');
         exportResults = repmat(resultTemplate, 1, numberOfImages);
@@ -961,6 +1209,10 @@ sequenceTable.SelectionChangedFcn = @handleTableSelection;
                     committedCoordinates{resultIndex};
                 exportResults(resultIndex).segmentationMask = ...
                     committedMasks{resultIndex};
+                exportResults(resultIndex).segmentationAreaMask = ...
+                    committedSegmentationAreaMasks{resultIndex};
+                exportResults(resultIndex).usesCustomSegmentationArea = ...
+                    committedUsesCustomSegmentationArea(resultIndex);
                 exportResults(resultIndex).status = 'processed';
             else
                 % A correctly sized false mask preserves array conventions while
@@ -968,18 +1220,23 @@ sequenceTable.SelectionChangedFcn = @handleTableSelection;
                 exportResults(resultIndex).pixelCoordinates = zeros(0, 2);
                 exportResults(resultIndex).segmentationMask = ...
                     false(displayedImageSize);
+                exportResults(resultIndex).segmentationAreaMask = ...
+                    true(displayedImageSize);
+                exportResults(resultIndex).usesCustomSegmentationArea = false;
                 exportResults(resultIndex).status = 'unprocessed';
             end
         end
 
         boneSegmentationExport = struct();
-        boneSegmentationExport.schemaVersion = 1;
+        boneSegmentationExport.schemaVersion = 2;
         boneSegmentationExport.createdAt = char(datetime( ...
             'now', 'Format', "yyyy-MM-dd'T'HH:mm:ssXXX"));
         boneSegmentationExport.coordinateConvention = [ ...
             'pixelCoordinates is an N-by-2 [row, column] array indexing ' ...
-            'the displayed plane.image transpose; segmentationMask uses ' ...
-            'the same row and column layout.'];
+            'the displayed plane.image transpose. segmentationMask and ' ...
+            'segmentationAreaMask use the same layout. Coordinates are the ' ...
+            'original full-image segmentation boundary filtered by the area ' ...
+            'mask, so freehand cut edges are intentionally excluded.'];
         boneSegmentationExport.results = exportResults;
     end
 
@@ -994,6 +1251,15 @@ sequenceTable.SelectionChangedFcn = @handleTableSelection;
         %
         % Outputs:
         %   None. The callback either keeps the UI open or deletes it.
+
+        % Keep the axes alive until drawfreehand returns or is cancelled.
+        if isDrawingSegmentationArea
+            uialert(sourceFigure, ...
+                'Finish or cancel the freehand area before closing the tool.', ...
+                'Area drawing in progress', ...
+                'Icon', 'warning');
+            return;
+        end
 
         hasWorkToProtect = hasUnexportedCommittedChanges || ...
             currentImageHasUserEdits;
