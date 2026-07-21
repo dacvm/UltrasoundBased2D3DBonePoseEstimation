@@ -65,6 +65,7 @@ currentImageHasUserEdits = false;
 hasUnexportedCommittedChanges = false;
 isSynchronizingTableSelection = false;
 isDrawingSegmentationArea = false;
+isApplyingParametersToAll = false;
 
 %% BUILD THE TABLE DATA
 
@@ -307,8 +308,8 @@ postprocessingPanel = uipanel(parametersGrid, ...
     'Tag', 'bone_segmentation_postprocessing_panel');
 postprocessingPanel.Layout.Row = 3;
 postprocessingPanel.Layout.Column = 1;
-postprocessingGrid = uigridlayout(postprocessingPanel, [7, 3], ...
-    'RowHeight', {24, '1x', 24, '1x', 26, 24, '1x'}, ...
+postprocessingGrid = uigridlayout(postprocessingPanel, [6, 3], ...
+    'RowHeight', {24, '1x', 24, '1x', 24, '1x'}, ...
     'ColumnWidth', {150, '1x', 85}, ...
     'Padding', [8, 8, 8, 8], ...
     'RowSpacing', 4);
@@ -369,18 +370,10 @@ closingRadiusSlider = uislider(postprocessingGrid, ...
 closingRadiusSlider.Layout.Row = 4;
 closingRadiusSlider.Layout.Column = [1, 3];
 
-fillHolesCheckBox = uicheckbox(postprocessingGrid, ...
-    'Text', 'Fill enclosed holes', ...
-    'Value', currentParameters.fillHoles, ...
-    'ValueChangedFcn', @(source, ~) updateFillHoles(source.Value), ...
-    'Tag', 'bone_segmentation_fill_holes_checkbox');
-fillHolesCheckBox.Layout.Row = 5;
-fillHolesCheckBox.Layout.Column = [1, 3];
-
 minimumAreaLabel = uilabel(postprocessingGrid, ...
     'Text', 'Minimum region area (px)', ...
     'Tooltip', 'Remove connected foreground regions smaller than this area.');
-minimumAreaLabel.Layout.Row = 6;
+minimumAreaLabel.Layout.Row = 5;
 minimumAreaLabel.Layout.Column = [1, 2];
 minimumAreaField = uieditfield(postprocessingGrid, 'numeric', ...
     'Limits', [0, minimumRegionAreaSliderMaximum], ...
@@ -389,7 +382,7 @@ minimumAreaField = uieditfield(postprocessingGrid, 'numeric', ...
     'ValueChangedFcn', @(source, ~) updateDiscreteParameter( ...
         'minimumRegionArea', source.Value), ...
     'Tag', 'bone_segmentation_minimum_area_field');
-minimumAreaField.Layout.Row = 6;
+minimumAreaField.Layout.Row = 5;
 minimumAreaField.Layout.Column = 3;
 minimumAreaSlider = uislider(postprocessingGrid, ...
     'Limits', [0, minimumRegionAreaSliderMaximum], ...
@@ -400,7 +393,7 @@ minimumAreaSlider = uislider(postprocessingGrid, ...
     'ValueChangedFcn', @(source, ~) updateDiscreteParameter( ...
         'minimumRegionArea', source.Value), ...
     'Tag', 'bone_segmentation_minimum_area_slider');
-minimumAreaSlider.Layout.Row = 7;
+minimumAreaSlider.Layout.Row = 6;
 minimumAreaSlider.Layout.Column = [1, 3];
 
 %% CREATE THE NAVIGATION AND EXPORT CONTROLS
@@ -430,7 +423,15 @@ resetButton = uibutton(workflowGrid, 'push', ...
     'ButtonPushedFcn', @handleResetCurrent, ...
     'Tag', 'bone_segmentation_reset_button');
 resetButton.Layout.Row = 2;
-resetButton.Layout.Column = [1, 2];
+resetButton.Layout.Column = 1;
+
+applyParametersToAllButton = uibutton(workflowGrid, 'push', ...
+    'Text', 'Apply Parameters to All', ...
+    'Tooltip', 'Reprocess every image using the current parameter values.', ...
+    'ButtonPushedFcn', @handleApplyParametersToAll, ...
+    'Tag', 'bone_segmentation_apply_parameters_all_button');
+applyParametersToAllButton.Layout.Row = 2;
+applyParametersToAllButton.Layout.Column = 2;
 
 previousButton = uibutton(workflowGrid, 'push', ...
     'Text', 'Previous', ...
@@ -477,7 +478,8 @@ sequenceTable.SelectionChangedFcn = @handleTableSelection;
 
         % Ignore shortcuts while an ROI is being drawn and preserve standard
         % operating-system combinations such as Ctrl+A and Alt+D.
-        if isDrawingSegmentationArea || ~isempty(eventData.Modifier)
+        if isDrawingSegmentationArea || isApplyingParametersToAll || ...
+                ~isempty(eventData.Modifier)
             return;
         end
 
@@ -505,6 +507,7 @@ sequenceTable.SelectionChangedFcn = @handleTableSelection;
 
         % Ignore programmatic selection updates made during navigation.
         if isSynchronizingTableSelection || isDrawingSegmentationArea || ...
+                isApplyingParametersToAll || ...
                 isempty(eventData.Selection)
             return;
         end
@@ -532,7 +535,7 @@ sequenceTable.SelectionChangedFcn = @handleTableSelection;
         % Outputs:
         %   None. The callback updates the current logical area mask and preview.
 
-        if isDrawingSegmentationArea
+        if isDrawingSegmentationArea || isApplyingParametersToAll
             return;
         end
 
@@ -635,7 +638,8 @@ sequenceTable.SelectionChangedFcn = @handleTableSelection;
         % Outputs:
         %   None. The callback updates the current area state and preview.
 
-        if isDrawingSegmentationArea || ~currentUsesCustomSegmentationArea
+        if isDrawingSegmentationArea || isApplyingParametersToAll || ...
+                ~currentUsesCustomSegmentationArea
             return;
         end
 
@@ -761,24 +765,6 @@ sequenceTable.SelectionChangedFcn = @handleTableSelection;
         refreshCurrentTableRow();
     end
 
-    function updateFillHoles(requestedValue)
-        %UPDATEFILLHOLES Enable or disable filling enclosed mask holes.
-        % This callback is needed to connect the checkbox to the fixed
-        % post-processing pipeline and immediate preview.
-        %
-        % Input:
-        %   requestedValue : Logical-like checkbox value supplied by MATLAB.
-        %
-        % Outputs:
-        %   None. The callback updates currentParameters and the preview.
-
-        currentParameters.fillHoles = logical(requestedValue);
-        fillHolesCheckBox.Value = currentParameters.fillHoles;
-        currentImageHasUserEdits = true;
-        renderCurrentPreview();
-        refreshCurrentTableRow();
-    end
-
     function handleAutoThreshold(~, ~)
         %HANDLEAUTOTHRESHOLD Calculate an Otsu threshold for the current image.
         % The explicit button prevents brightness or contrast changes from
@@ -816,6 +802,178 @@ sequenceTable.SelectionChangedFcn = @handleTableSelection;
         writeControlsFromCurrentParameters();
         renderCurrentPreview();
         refreshCurrentTableRow();
+    end
+
+    function handleApplyParametersToAll(~, ~)
+        %HANDLEAPPLYPARAMETERSTOALL Reprocess every image with current settings.
+        % This callback applies one parameter set across the sequence while
+        % preserving every image's own segmentation area. Replacement results
+        % are calculated first so a processing error cannot partially update
+        % committed state.
+        %
+        % Inputs:
+        %   ~ : Unused button source and event values supplied by MATLAB.
+        %
+        % Outputs:
+        %   None. Confirmed operations replace all committed per-image results.
+
+        if isDrawingSegmentationArea || isApplyingParametersToAll
+            return;
+        end
+
+        confirmation = uiconfirm(segmentationFigure, ...
+            sprintf([ ...
+                'Apply the current processing parameters to all %d images?\n\n' ...
+                'This will replace every existing parameter set and ' ...
+                'recompute every segmentation result. Per-image custom ' ...
+                'segmentation areas will be preserved.'], numberOfImages), ...
+            'Apply parameters to all images?', ...
+            'Options', {'Apply to all', 'Cancel'}, ...
+            'DefaultOption', 2, ...
+            'CancelOption', 2, ...
+            'Icon', 'warning');
+        if strcmp(confirmation, 'Cancel')
+            return;
+        end
+
+        parametersToApply = currentParameters;
+        replacementParameters = repmat( ...
+            parametersToApply, 1, numberOfImages);
+        replacementMasks = cell(1, numberOfImages);
+        replacementCoordinates = cell(1, numberOfImages);
+        replacementAreaMasks = cell(1, numberOfImages);
+        replacementUsesCustomArea = false(1, numberOfImages);
+        replacementPointCounts = zeros(numberOfImages, 1);
+        replacementAreaStatus = repmat("Full", numberOfImages, 1);
+
+        % Resolve every image's area before processing. Only the selected image
+        % can contain uncommitted area edits; other custom areas are committed
+        % automatically when navigation leaves their image.
+        for applyIndex = 1:numberOfImages
+            displayedImageSize = size( ...
+                ultrasoundSequence(applyIndex).plane.image.');
+            if applyIndex == currentImageIndex
+                replacementAreaMasks{applyIndex} = ...
+                    currentSegmentationAreaMask;
+                replacementUsesCustomArea(applyIndex) = ...
+                    currentUsesCustomSegmentationArea;
+            elseif isImageProcessed(applyIndex)
+                replacementAreaMasks{applyIndex} = ...
+                    committedSegmentationAreaMasks{applyIndex};
+                replacementUsesCustomArea(applyIndex) = ...
+                    committedUsesCustomSegmentationArea(applyIndex);
+            else
+                replacementAreaMasks{applyIndex} = true(displayedImageSize);
+            end
+
+            if replacementUsesCustomArea(applyIndex)
+                replacementAreaStatus(applyIndex) = "Custom";
+            end
+        end
+
+        % Block state-changing controls and window actions until the transaction
+        % either finishes or rolls back without touching committed data.
+        isApplyingParametersToAll = true;
+        sequenceTable.Enable = 'off';
+        parametersPanel.Enable = 'off';
+        drawnow;
+
+        progressDialog = [];
+        try
+            progressDialog = uiprogressdlg(segmentationFigure, ...
+                'Title', 'Applying Parameters to All Images', ...
+                'Message', sprintf( ...
+                    'Processing image 1 of %d...', numberOfImages), ...
+                'Value', 0, ...
+                'Cancelable', 'off', ...
+                'Indeterminate', 'off');
+
+            for applyIndex = 1:numberOfImages
+                progressDialog.Message = sprintf( ...
+                    'Processing image %d of %d...', ...
+                    applyIndex, numberOfImages);
+
+                [~, fullSegmentationMask, fullBoundaryCoordinates] = ...
+                    applyBoneSegmentationPipeline( ...
+                        ultrasoundSequence(applyIndex).plane.image, ...
+                        parametersToApply);
+                [replacementMasks{applyIndex}, ...
+                    replacementCoordinates{applyIndex}] = ...
+                    applySegmentationAreaMask( ...
+                        fullSegmentationMask, fullBoundaryCoordinates, ...
+                        replacementAreaMasks{applyIndex});
+                replacementPointCounts(applyIndex) = size( ...
+                    replacementCoordinates{applyIndex}, 1);
+                progressDialog.Value = applyIndex / numberOfImages;
+                drawnow limitrate;
+            end
+        catch processingError
+            if ~isempty(progressDialog) && isvalid(progressDialog)
+                close(progressDialog);
+            end
+            isApplyingParametersToAll = false;
+            if isvalid(segmentationFigure)
+                sequenceTable.Enable = 'on';
+                parametersPanel.Enable = 'on';
+                refreshSegmentationAreaControls();
+                refreshProgressAndNavigation();
+                uialert(segmentationFigure, ...
+                    sprintf( ...
+                        'No images were updated because processing failed:\n\n%s', ...
+                        processingError.message), ...
+                    'Could not apply parameters', ...
+                    'Icon', 'error');
+            end
+            return;
+        end
+
+        if ~isempty(progressDialog) && isvalid(progressDialog)
+            close(progressDialog);
+        end
+
+        % Commit the fully calculated replacement containers as one state change.
+        committedParameters = replacementParameters;
+        committedMasks = replacementMasks;
+        committedCoordinates = replacementCoordinates;
+        committedSegmentationAreaMasks = replacementAreaMasks;
+        committedUsesCustomSegmentationArea = replacementUsesCustomArea;
+        isImageProcessed(:) = true;
+        pointCounts = replacementPointCounts;
+        statusValues(:) = "Processed";
+        areaStatusValues = replacementAreaStatus;
+        lastCommittedParameters = parametersToApply;
+        currentParameters = parametersToApply;
+        currentSegmentationAreaMask = ...
+            replacementAreaMasks{currentImageIndex};
+        currentUsesCustomSegmentationArea = ...
+            replacementUsesCustomArea(currentImageIndex);
+        currentImageHasUserEdits = false;
+        hasUnexportedCommittedChanges = true;
+
+        % Update every visible row together so table state cannot temporarily
+        % disagree with the committed result arrays.
+        currentTableData = sequenceTable.Data;
+        currentTableData.Status = statusValues;
+        currentTableData.Area = areaStatusValues;
+        currentTableData.PointCount = pointCounts;
+        sequenceTable.Data = currentTableData;
+        sequenceTable.Selection = currentImageIndex;
+
+        writeControlsFromCurrentParameters();
+        renderCurrentPreview();
+
+        isApplyingParametersToAll = false;
+        sequenceTable.Enable = 'on';
+        parametersPanel.Enable = 'on';
+        refreshSegmentationAreaControls();
+        refreshProgressAndNavigation();
+
+        uialert(segmentationFigure, ...
+            sprintf( ...
+                'Applied the current processing parameters to all %d images.', ...
+                numberOfImages), ...
+            'Parameters applied', ...
+            'Icon', 'success');
     end
 
     function handlePreviousImage(~, ~)
@@ -859,7 +1017,7 @@ sequenceTable.SelectionChangedFcn = @handleTableSelection;
 
         % Ignore invalid or no-op requests. Boundary buttons are disabled too,
         % but this check protects programmatic callback calls.
-        if isDrawingSegmentationArea || ...
+        if isDrawingSegmentationArea || isApplyingParametersToAll || ...
                 targetImageIndex < 1 || targetImageIndex > numberOfImages || ...
                 targetImageIndex == currentImageIndex
             return;
@@ -973,7 +1131,7 @@ sequenceTable.SelectionChangedFcn = @handleTableSelection;
         %   None. Values are read from currentParameters.
         %
         % Outputs:
-        %   None. The helper writes values to sliders, fields, and checkbox.
+        %   None. The helper writes values to sliders and numeric fields.
 
         brightnessSlider.Value = currentParameters.brightness;
         brightnessField.Value = currentParameters.brightness;
@@ -985,7 +1143,6 @@ sequenceTable.SelectionChangedFcn = @handleTableSelection;
         openingRadiusField.Value = currentParameters.openingRadius;
         closingRadiusSlider.Value = currentParameters.closingRadius;
         closingRadiusField.Value = currentParameters.closingRadius;
-        fillHolesCheckBox.Value = currentParameters.fillHoles;
         minimumAreaSlider.Value = currentParameters.minimumRegionArea;
         minimumAreaField.Value = currentParameters.minimumRegionArea;
     end
@@ -1144,7 +1301,7 @@ sequenceTable.SelectionChangedFcn = @handleTableSelection;
         % Outputs:
         %   None. It writes a selected MAT-file and updates export state.
 
-        if isDrawingSegmentationArea
+        if isDrawingSegmentationArea || isApplyingParametersToAll
             return;
         end
 
@@ -1293,6 +1450,14 @@ sequenceTable.SelectionChangedFcn = @handleTableSelection;
             return;
         end
 
+        if isApplyingParametersToAll
+            uialert(sourceFigure, ...
+                'Wait for the all-image parameter update to finish.', ...
+                'Applying parameters', ...
+                'Icon', 'warning');
+            return;
+        end
+
         hasWorkToProtect = hasUnexportedCommittedChanges || ...
             currentImageHasUserEdits;
         if hasWorkToProtect
@@ -1394,7 +1559,8 @@ end
 function parameters = createDefaultProcessingParameters(storedImage)
 %CREATEDEFAULTPROCESSINGPARAMETERS Build neutral defaults for one image.
 % This function centralizes the reset state and calculates an image-specific
-% Otsu threshold while leaving brightness, contrast, and morphology neutral.
+% Otsu threshold while leaving adjustable brightness, contrast, and morphology
+% controls neutral. Enclosed-hole filling is a fixed active processing step.
 %
 % Input:
 %   storedImage : Numeric ultrasound packet stored as [width, height].
@@ -1408,7 +1574,7 @@ parameters = struct( ...
     'threshold', 0, ...
     'openingRadius', 0, ...
     'closingRadius', 0, ...
-    'fillHoles', false, ...
+    'fillHoles', true, ...
     'minimumRegionArea', 25);
 
 % Calculate the threshold from the correctly oriented neutral image.
@@ -1455,11 +1621,9 @@ if parameters.closingRadius > 0
     segmentationMask = imclose(segmentationMask, closingElement);
 end
 
-% Hole filling is optional because not every bright bone echo should become a
-% solid region during this early workflow mock-up.
-if parameters.fillHoles
-    segmentationMask = imfill(segmentationMask, 'holes');
-end
+% Always fill enclosed foreground holes before removing small regions. The
+% exported fillHoles parameter remains true to document this fixed step.
+segmentationMask = imfill(segmentationMask, 'holes');
 
 % Treat zero as a documented no-op and otherwise remove eight-connected regions.
 if parameters.minimumRegionArea > 0
