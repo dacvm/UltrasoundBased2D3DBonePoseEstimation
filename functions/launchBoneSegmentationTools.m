@@ -1338,12 +1338,11 @@ sequenceTable.SelectionChangedFcn = @handleTableSelection;
             return;
         end
 
-        % Save one wrapper variable so schema metadata and per-image records
-        % always travel together.
-        boneSegmentationExport = buildExportStructure();
+        % Save the ordered per-image records directly without a metadata wrapper.
+        results = buildExportResults();
         outputFilePath = fullfile(selectedDirectory, selectedFileName);
         try
-            save(outputFilePath, 'boneSegmentationExport', '-v7.3');
+            save(outputFilePath, 'results', '-v7.3');
         catch saveError
             uialert(segmentationFigure, ...
                 sprintf('Could not export segmentation results:\n\n%s', ...
@@ -1361,17 +1360,17 @@ sequenceTable.SelectionChangedFcn = @handleTableSelection;
             'Icon', 'success');
     end
 
-    function boneSegmentationExport = buildExportStructure()
-        %BUILDEXPORTSTRUCTURE Package metadata and all per-image results.
-        % This helper gives the MAT-file one documented schema and guarantees
-        % that results remain aligned with the original ultrasound sequence.
+    function results = buildExportResults()
+        %BUILDEXPORTRESULTS Package the ordered per-image result records.
+        % This helper creates the direct 1-by-N struct array saved in the MAT-file
+        % and guarantees alignment with the original ultrasound sequence.
         %
         % Inputs:
         %   None. Data is read from the nested committed state.
         %
         % Output:
-        %   boneSegmentationExport : Scalar struct containing schema metadata
-        %                            and an ordered result struct array.
+        %   results : 1-by-N struct array containing one ordered result record
+        %             for every ultrasound sequence image.
 
         resultTemplate = struct( ...
             'sequencePosition', [], ...
@@ -1382,51 +1381,39 @@ sequenceTable.SelectionChangedFcn = @handleTableSelection;
             'usesCustomSegmentationArea', false, ...
             'processingParameters', defaultParameters, ...
             'status', 'unprocessed');
-        exportResults = repmat(resultTemplate, 1, numberOfImages);
+        results = repmat(resultTemplate, 1, numberOfImages);
 
         for resultIndex = 1:numberOfImages
             displayedImageSize = size( ...
                 ultrasoundSequence(resultIndex).plane.image.');
-            exportResults(resultIndex).sequencePosition = resultIndex;
-            exportResults(resultIndex).sourceIndex = ...
+            results(resultIndex).sequencePosition = resultIndex;
+            results(resultIndex).sourceIndex = ...
                 ultrasoundSequence(resultIndex).sourceIndex;
-            exportResults(resultIndex).processingParameters = ...
+            results(resultIndex).processingParameters = ...
                 committedParameters(resultIndex);
 
             if isImageProcessed(resultIndex)
-                exportResults(resultIndex).pixelCoordinates = ...
+                results(resultIndex).pixelCoordinates = ...
                     committedCoordinates{resultIndex};
-                exportResults(resultIndex).segmentationMask = ...
+                results(resultIndex).segmentationMask = ...
                     committedMasks{resultIndex};
-                exportResults(resultIndex).segmentationAreaMask = ...
+                results(resultIndex).segmentationAreaMask = ...
                     committedSegmentationAreaMasks{resultIndex};
-                exportResults(resultIndex).usesCustomSegmentationArea = ...
+                results(resultIndex).usesCustomSegmentationArea = ...
                     committedUsesCustomSegmentationArea(resultIndex);
-                exportResults(resultIndex).status = 'processed';
+                results(resultIndex).status = 'processed';
             else
                 % A correctly sized false mask preserves array conventions while
                 % status prevents it from being mistaken for an accepted empty result.
-                exportResults(resultIndex).pixelCoordinates = zeros(0, 2);
-                exportResults(resultIndex).segmentationMask = ...
+                results(resultIndex).pixelCoordinates = zeros(0, 2);
+                results(resultIndex).segmentationMask = ...
                     false(displayedImageSize);
-                exportResults(resultIndex).segmentationAreaMask = ...
+                results(resultIndex).segmentationAreaMask = ...
                     true(displayedImageSize);
-                exportResults(resultIndex).usesCustomSegmentationArea = false;
-                exportResults(resultIndex).status = 'unprocessed';
+                results(resultIndex).usesCustomSegmentationArea = false;
+                results(resultIndex).status = 'unprocessed';
             end
         end
-
-        boneSegmentationExport = struct();
-        boneSegmentationExport.schemaVersion = 2;
-        boneSegmentationExport.createdAt = char(datetime( ...
-            'now', 'Format', "yyyy-MM-dd'T'HH:mm:ssXXX"));
-        boneSegmentationExport.coordinateConvention = [ ...
-            'pixelCoordinates is an N-by-2 [row, column] array indexing ' ...
-            'the displayed plane.image transpose. segmentationMask and ' ...
-            'segmentationAreaMask use the same layout. Coordinates are the ' ...
-            'original full-image segmentation boundary filtered by the area ' ...
-            'mask, so freehand cut edges are intentionally excluded.'];
-        boneSegmentationExport.results = exportResults;
     end
 
     function handleCloseRequest(sourceFigure, ~)

@@ -29,8 +29,7 @@ clear ultrasoundFileData savedVariableNames;
 segmentationToolDirectory = fileparts(mfilename('fullpath'));
 projectDirectory = fileparts(fileparts(segmentationToolDirectory));
 functionsDirectory = fullfile(projectDirectory, 'functions');
-segmentationOutputDirectory = fullfile( ...
-    segmentationToolDirectory, 'outputs');
+segmentationOutputDirectory = fullfile(segmentationToolDirectory, 'outputs');
 
 % Add only the direct functions directory because launchBoneSegmentationTools
 % is a project function stored at that level.
