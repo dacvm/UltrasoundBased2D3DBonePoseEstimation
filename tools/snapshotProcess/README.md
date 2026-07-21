@@ -124,6 +124,85 @@ Set `displayMode` to `display` when the results only need to be inspected. Set i
 
 The script adds the project `functions` directory and its subdirectories to the MATLAB path automatically.
 
+## Output MAT-file structure
+
+In `review` mode, the **Export Selected** button writes a MATLAB v7.3 MAT-file to the chosen location. The suggested destination is `tools/snapshotProcess/outputs/`, and the default filename follows `validSnapshots_yyyyMMdd_HHmmss.mat`.
+
+The file contains one variable named `validSnapshots`. It is a struct array with one element for each snapshot selected as valid in the browser:
+
+```text
+validSnapshots(1..N)
++-- sourceIndex
++-- plane
+|   +-- p0, ex, ey, n, W, H
+|   +-- nRows, nCols, image
+|   +-- timestamp, bone, snapshotName
+|   +-- snapshotIndex, sequenceIndex, packetIndex
++-- intersection
+    +-- mask, pixelList
+    +-- segments3D, segmentsUV, segmentFaceIdx
+    +-- probeFacingSegmentMask
+    +-- probeFacingSegments3D, probeFacingSegmentsUV
+    +-- probeFacingPixels, segmentFacingScore
+    +-- timestamp, status
+```
+
+Load the output with:
+
+```matlab
+loadedOutput = load('validSnapshots_yyyyMMdd_HHmmss.mat', 'validSnapshots');
+validSnapshots = loadedOutput.validSnapshots;
+```
+
+### Fields in each selected snapshot
+
+| Field | Explanation |
+| --- | --- |
+| `sourceIndex` | Index of this result in the complete `snapshotPlanes` and `intersections` arrays before the browser selection is applied. It can be used to trace an exported item back to the original processing result. |
+| `plane` | Struct containing the ultrasound image, its finite-plane geometry, and source metadata. |
+| `intersection` | Struct containing the raw mesh-plane intersection and the subset produced by probe-facing mesh faces. |
+
+### Fields in `plane`
+
+| Field | Explanation |
+| --- | --- |
+| `p0` | 3D position of the image plane's top-left corner in the common reference coordinate system. |
+| `ex` | 3D unit direction in which image column numbers increase. |
+| `ey` | 3D unit direction in which image row numbers increase. |
+| `n` | 3D normal direction of the image plane. |
+| `W` | Physical width of the image plane. Its unit follows the calibration and mesh coordinate units. |
+| `H` | Physical height of the image plane. Its unit follows the calibration and mesh coordinate units. |
+| `nRows` | Number of rows in `image`. |
+| `nCols` | Number of columns in `image`. |
+| `image` | Ultrasound image pixel array for this plane. |
+| `timestamp` | Acquisition timestamp read from the source ultrasound packet. |
+| `bone` | Bone code assigned from the snapshot folder name: `F` for femur, `T` for tibia, or `U` when unknown. |
+| `snapshotName` | Name of the source snapshot-group folder. |
+| `snapshotIndex` | Position of that snapshot group in the script's sorted snapshot-directory list. |
+| `sequenceIndex` | Position of the source MHA sequence within its snapshot group. |
+| `packetIndex` | Position of the source image packet within its MHA sequence. |
+
+The plane uses the parameterization `x = p0 + u*ex + v*ey`, with `0 <= u <= W` and `0 <= v <= H`.
+
+### Fields in `intersection`
+
+| Field | Explanation |
+| --- | --- |
+| `mask` | `nRows`-by-`nCols` logical mask. A true pixel is touched by the rasterized raw mesh-plane intersection. |
+| `pixelList` | K-by-2 array of raw intersection pixels stored as `[row, column]`. |
+| `segments3D` | Cell array of raw intersection segments. Each cell contains a 2-by-3 array holding the two segment endpoints in the common 3D reference coordinate system. |
+| `segmentsUV` | Cell array aligned with `segments3D`. Each cell contains a 2-by-2 array of `[u, v]` endpoints clipped to the finite image plane. |
+| `segmentFaceIdx` | Numeric vector aligned with the raw segment arrays. Each value is the mesh-face index that produced that segment. |
+| `probeFacingSegmentMask` | Logical vector aligned with the raw segments. A true value marks a segment whose source mesh face passes the probe-facing angle test. |
+| `probeFacingSegments3D` | Subset of `segments3D` that passes the probe-facing test. |
+| `probeFacingSegmentsUV` | Corresponding subset of `segmentsUV` that passes the probe-facing test. |
+| `probeFacingPixels` | P-by-2 array of `[row, column]` pixels rasterized from the probe-facing segments. |
+| `segmentFacingScore` | Score for every raw segment, calculated as the dot product of its mesh-face normal with `-plane.ey`. Larger values point more strongly in the selected probe-facing direction. |
+| `timestamp` | Copy of the source ultrasound image timestamp, included to keep the intersection linked to its plane. |
+| `status` | Processing result text, normally `Computed`; skipped records contain a message explaining why no intersection was calculated. |
+
+The raw fields retain every finite mesh-plane intersection. The `probeFacing...` fields retain only the surface-facing subset used for the filtered overlay. Empty arrays or cell arrays mean that no matching intersection was found. The output does not include the complete bone mesh; it contains only the geometry needed for each selected snapshot.
+
 ## Common input problems
 
 - A snapshot folder contains different numbers of MHA and CSV files.

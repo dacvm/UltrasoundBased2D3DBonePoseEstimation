@@ -100,3 +100,74 @@ This definition must be identical in the user's motion-capture system. The marke
 3. Inspect the generated MAT, FIG, and PNG files in `tools/ctkneePostProcess/outputs/`. Relative paths in the JSON are resolved from `tools/ctkneePostProcess/configs/`; therefore, the default `../outputs` setting selects the tool-local output folder.
 
 The scripts add the `functions` directory and its subdirectories to the MATLAB path automatically. The workflow uses MATLAB mesh and point-cloud functionality, including `stlread`, `pointCloud`, and `pcfitsphere`.
+
+## Output MAT-file structure
+
+The script writes a MATLAB v7.3 MAT-file to the configured `output.directory`. With the supplied configuration, the output is `tools/ctkneePostProcess/outputs/kneephantom_bones_and_bonepins.mat`; the filename comes from `output.base_name`.
+
+The MAT-file contains two struct arrays:
+
+```text
+bones(1..N)
++-- name
++-- bone
++-- path
++-- mesh
++-- T_bone_CT
+
+bonepins(1..M)
++-- name
++-- bone
++-- place
++-- marker_indices
++-- marker_names
++-- marker_paths
++-- marker_centroids
++-- transform
++-- origin
++-- base_axes
++-- T_pin_CT
+```
+
+Load the output with:
+
+```matlab
+processedCT = load('kneephantom_bones_and_bonepins.mat', ...
+    'bones', 'bonepins');
+bones = processedCT.bones;
+bonepins = processedCT.bonepins;
+```
+
+### Fields in `bones`
+
+Each element represents one processed bone, normally the femur or tibia.
+
+| Field | Explanation |
+| --- | --- |
+| `name` | Human-readable bone name from the configuration, such as `Femur` or `Tibia`. |
+| `bone` | Short bone code: `F` for femur or `T` for tibia. This code is also used to match bones with bone pins in later processing. |
+| `path` | Absolute path of the source bone STL file. It is retained for provenance and input checks. |
+| `mesh` | MATLAB `triangulation` object loaded from the STL file. Its `Points` property contains the CT-space vertices, and `ConnectivityList` contains the triangular faces. |
+| `T_bone_CT` | 4-by-4 homogeneous transform describing the bone anatomical coordinate system in CT coordinates. The first three columns are the local bone axes expressed in CT coordinates, and the fourth column is the ACS origin. |
+
+### Fields in `bonepins`
+
+Each element represents one bone-pin rigid body constructed from four spherical marker centroids.
+
+| Field | Explanation |
+| --- | --- |
+| `name` | Rigid-body name, such as `C_F_PRO` or `C_T_DIS`. This should match the corresponding rigid-body name used by the motion-capture system. |
+| `bone` | Code of the attached bone: `F` for femur or `T` for tibia. |
+| `place` | Configured pin placement label, such as `PRO` for proximal or `DIS` for distal. |
+| `marker_indices` | Indices of the four markers in the processing-time `markerstls` array, in marker-number order. The `markerstls` array itself is not included in the MAT-file. |
+| `marker_names` | 1-by-4 cell array containing the configured marker names in the fixed order marker 1 through marker 4. |
+| `marker_paths` | 1-by-4 cell array containing the absolute source STL path for each marker. |
+| `marker_centroids` | 3-by-4 matrix of fitted marker centers in CT coordinates. Each column corresponds to the same position in `marker_names` and `marker_paths`. |
+| `transform` | 4-by-4 bone-pin rigid-body transform calculated from markers 1, 2, and 3. This is the same matrix stored in `T_pin_CT` and is retained for compatibility with existing code. |
+| `origin` | 3-by-1 position of the bone-pin origin in CT coordinates. It is marker 1's fitted centroid and equals `T_pin_CT(1:3,4)`. |
+| `base_axes` | 3-by-3 rotation matrix whose columns are the bone-pin frame's local X, Y, and Z axes expressed in CT coordinates. It equals `T_pin_CT(1:3,1:3)`. |
+| `T_pin_CT` | 4-by-4 homogeneous transform describing the bone-pin frame in CT coordinates. It maps points from local pin coordinates into CT coordinates. |
+
+For each bone pin, marker 1 defines the origin, marker 3 defines the Y direction, and the part of the marker 1-to-2 direction perpendicular to Y defines X. Z completes a right-handed frame. Marker 4 is retained as provenance and for consistency checks but does not define the exported transform.
+
+All mesh points, centroids, transform translations, and ACS origins use the coordinate unit of the source CT/STL data. The MAT-file does not contain the internal `markerstls` array, fitted sphere objects, or point clouds. Those values are used during processing and visualization; the exported `marker_names`, `marker_paths`, and `marker_centroids` preserve the marker information needed by later workflows.
