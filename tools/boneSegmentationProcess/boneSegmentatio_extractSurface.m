@@ -154,17 +154,14 @@ for pageIndex = 1:numberOfPages
         colormap(currentAxes, gray(256));
         hold(currentAxes, 'on');
 
-        % Match the extractor's effective mask exactly so blue outside-mask
-        % markers are judged against the same reviewed search region shown in
-        % yellow, including an optional segmentation-area restriction.
-        segmentationEntry = segmentationResults(frameIndex);
-        effectiveMask = logical(segmentationEntry.segmentationMask);
-        if isfield(segmentationEntry, 'segmentationAreaMask') && ...
-                ~isempty(segmentationEntry.segmentationAreaMask)
-            effectiveMask = effectiveMask & ...
-                logical(segmentationEntry.segmentationAreaMask);
+        % The segmentation boundary is optional documentation only. Invalid
+        % or unavailable masks are skipped so they can never block a review
+        % of otherwise valid pixel-coordinate surface results.
+        reviewSegmentationMask = getOptionalReviewSegmentationMask( ...
+            segmentationResults, frameIndex, size(displayedImage));
+        if ~isempty(reviewSegmentationMask)
+            plotMaskBoundary(currentAxes, reviewSegmentationMask);
         end
-        plotMaskBoundary(currentAxes, effectiveMask);
         plotSurfaceResult(currentAxes, surfaceResults(frameIndex));
 
         % Add one shared key to the page. Repeating the legend in every tile
@@ -187,10 +184,68 @@ end
 end
 
 
+function segmentationMask = getOptionalReviewSegmentationMask( ...
+        segmentationResults, frameIndex, expectedImageSize)
+%GETOPTIONALREVIEWSEGMENTATIONMASK Return a safe display-only mask if present.
+% The surface coordinates do not depend on segmentation during review. This
+% helper therefore accepts a segmentation mask only when it is a finite binary
+% 2-D array with the same size as the displayed image. Returning an empty array
+% tells the caller to omit the optional yellow boundary without failing.
+%
+% Inputs:
+%   segmentationResults : Segmentation result struct vector, which may be old
+%                         or may omit segmentationMask entirely.
+%   frameIndex          : Position of the surface frame on the review page.
+%   expectedImageSize   : Size vector of the displayed B-mode image.
+%
+% Outputs:
+%   segmentationMask   : Logical mask matching the image, or [] when no valid
+%                        optional documentation mask is available.
+
+segmentationMask = [];
+
+% Some historical or independently generated result sets may have no matching
+% segmentation entry. That must not prevent their surfaces from being shown.
+if ~isstruct(segmentationResults) || frameIndex > numel(segmentationResults)
+    return;
+end
+
+segmentationEntry = segmentationResults(frameIndex);
+if ~isfield(segmentationEntry, 'segmentationMask')
+    return;
+end
+
+candidateMask = segmentationEntry.segmentationMask;
+if isempty(candidateMask) || ~ismatrix(candidateMask) || ...
+        ~(islogical(candidateMask) || isnumeric(candidateMask)) || ...
+        ~isreal(candidateMask) || ...
+        ~isequal(size(candidateMask), expectedImageSize)
+    return;
+end
+
+% Numeric masks must contain only finite zeros and ones. Rejecting other
+% values avoids drawing a misleading boundary from corrupt or soft-mask data.
+if isnumeric(candidateMask) && ...
+        (~all(isfinite(candidateMask(:))) || ...
+        ~all(candidateMask(:) == 0 | candidateMask(:) == 1))
+    return;
+end
+
+segmentationMask = logical(candidateMask);
+if ~any(segmentationMask(:))
+    % An all-background mask has no boundary to document, so omit it just as
+    % an empty array would be omitted.
+    segmentationMask = [];
+end
+end
+
+
 function plotMaskBoundary(targetAxes, segmentationMask)
-%PLOTMASKBOUNDARY Draw every accepted mask component without joining them.
+%PLOTMASKBOUNDARY Draw an optional segmentation boundary for documentation.
 % Separate boundary traces avoid the misleading diagonal connections produced
-% by plotting an unordered perimeter point list directly.
+% by plotting an unordered perimeter point list directly. The caller validates
+% the mask first because this overlay must never affect surface extraction or
+% prevent older pixel-coordinate results from being reviewed.
 %
 % Inputs:
 %   targetAxes      : Axes that already display the source B-mode image.
@@ -212,10 +267,9 @@ function plotSurfaceResult(targetAxes, surfaceResult)
 %PLOTSURFACERESULT Draw raw and refined bone-surface review overlays.
 % The raw extraction is drawn as a thin magenta line so reviewers can see how
 % far regularization moved it. Red and cyan points distinguish final observed
-% and interpolated locations. Blue rings flag observed points that finished
-% outside the segmentation. Results saved before these audit fields existed
-% remain reviewable by treating their final curve as their raw curve and by
-% omitting the unavailable outside-mask markers.
+% and interpolated locations. Results saved before raw-path audit fields existed
+% remain reviewable by treating their final curve as their raw curve. Obsolete
+% mask-relative audit fields are intentionally ignored.
 %
 % Inputs:
 %   targetAxes   : Axes that already display the source B-mode image.
@@ -264,29 +318,14 @@ plot(targetAxes, interpolatedColumns, ...
     finalSurfaceRows(interpolatedColumns), ...
     '.', 'Color', [0.0, 0.90, 1.0], 'MarkerSize', 8, ...
     'HandleVisibility', 'off');
-
-% Older result files have no outside-mask audit field. An all-false fallback
-% preserves their original display while new results gain the blue warning.
-outsideSegmentationColumnMask = false(size(finalSurfaceRows));
-if isfield(surfaceResult, 'outsideSegmentationColumnMask') && ...
-        numel(surfaceResult.outsideSegmentationColumnMask) == ...
-        numel(finalSurfaceRows)
-    outsideSegmentationColumnMask = reshape(logical( ...
-        surfaceResult.outsideSegmentationColumnMask), 1, []);
-end
-outsideColumns = find(outsideSegmentationColumnMask & observedColumnMask);
-plot(targetAxes, outsideColumns, finalSurfaceRows(outsideColumns), ...
-    'o', 'Color', [0.10, 0.45, 1.0], 'MarkerSize', 4.5, ...
-    'LineWidth', 0.9, 'MarkerFaceColor', 'none', ...
-    'HandleVisibility', 'off');
 end
 
 
 function legendHandle = createBoneSurfaceReviewLegend(targetAxes)
 %CREATEBONESURFACEREVIEWLEGEND Add one compact key below a review page.
-% The key uses placeholder graphics so the five overlay meanings stay visible
-% even when the first frame has no interpolation or outside-mask points. It is
-% attached to the tiled layout below all panels to avoid covering image data.
+% The key uses placeholder graphics so the four overlay meanings stay visible
+% even when the first frame has no mask or interpolated points. It is attached
+% to the tiled layout below all panels to avoid covering image data.
 %
 % Inputs:
 %   targetAxes : Axes belonging to the tiled review layout.
@@ -304,14 +343,11 @@ observedKey = plot(targetAxes, NaN, NaN, '.', ...
     'Color', [1.0, 0.15, 0.10], 'MarkerSize', 8);
 interpolatedKey = plot(targetAxes, NaN, NaN, '.', ...
     'Color', [0.0, 0.90, 1.0], 'MarkerSize', 8);
-outsideKey = plot(targetAxes, NaN, NaN, 'o', ...
-    'Color', [0.10, 0.45, 1.0], 'MarkerSize', 4.5, ...
-    'LineWidth', 0.9, 'MarkerFaceColor', 'none');
 
 legendHandle = legend(targetAxes, ...
-    [maskKey, rawKey, observedKey, interpolatedKey, outsideKey], ...
+    [maskKey, rawKey, observedKey, interpolatedKey], ...
     {'Segmentation', 'Raw surface', 'Final observed', ...
-    'Final interpolated', 'Outside segmentation'}, ...
-    'Orientation', 'horizontal', 'NumColumns', 5, ...
+    'Final interpolated'}, ...
+    'Orientation', 'horizontal', 'NumColumns', 4, ...
     'Box', 'off', 'FontSize', 7);
 end

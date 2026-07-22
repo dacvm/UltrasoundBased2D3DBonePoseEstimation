@@ -1,15 +1,16 @@
 function [surfaceResults, extractionMetadata] = extractBoneSurfacesFromSegmentation( ...
         segmentationResults, ultrasoundSequence, options)
 %EXTRACTBONESURFACESFROMSEGMENTATION Estimate thin bone-surface curves.
-% This function converts each accepted thick bone-response mask into one or
-% more thin surface segments. It uses the matching raw B-mode image so the
-% selected curve follows the first strong tissue-to-bone response and the
-% acoustic shadow instead of following an arbitrary side of the mask.
+% This function converts cleaned boundary coordinates into one or more thin
+% surface segments. It scores only the supplied coordinates in the matching
+% raw B-mode image, then uses global continuity and bounded curvature to select
+% a stable probe-facing bone surface.
 %
 % Inputs:
 %   segmentationResults : Struct vector exported by the semi-automatic bone
-%                         segmentation tool. Each processed entry must contain
-%                         sourceIndex, segmentationMask, and status.
+%                         segmentation tool. Each entry must contain
+%                         sequencePosition, sourceIndex, pixelCoordinates, and
+%                         status. pixelCoordinates uses [row,column] order.
 %   ultrasoundSequence  : Struct vector containing sourceIndex and plane. The
 %                         plane must contain image, W, H, nRows, and nCols.
 %   options             : Optional scalar struct whose fields override the
@@ -31,7 +32,7 @@ end
 resolvedOptions = resolveExtractionOptions(options);
 
 % Match frames by sourceIndex so reordered ultrasound inputs cannot silently
-% attach a segmentation mask to the wrong B-mode image.
+% attach boundary coordinates to the wrong B-mode image.
 ultrasoundMatchIndices = validateAndMatchInputs( ...
     segmentationResults, ultrasoundSequence);
 
@@ -46,7 +47,7 @@ for resultIndex = 1:numberOfResults
 
     % Validate and align the stored packet before checking status. This keeps
     % skipped outputs correctly sized and catches corrupt source files early.
-    [displayedImage, effectiveMask, pixelSpacingXYMm] = prepareFrameData( ...
+    [displayedImage, candidateMask, pixelSpacingXYMm] = prepareFrameData( ...
         segmentationEntry, ultrasoundEntry, resultIndex);
 
     numberOfColumns = size(displayedImage, 2);
@@ -54,26 +55,27 @@ for resultIndex = 1:numberOfResults
         segmentationEntry, numberOfColumns, pixelSpacingXYMm);
 
     if ~strcmpi(char(string(segmentationEntry.status)), 'processed')
-        % An unprocessed mask is not evidence that no bone exists, so preserve
+        % Unprocessed coordinates are not evidence that no bone exists, so preserve
         % that distinction instead of reporting a successful empty extraction.
         currentResult.status = 'skippedUnprocessed';
         surfaceResults(resultIndex) = currentResult;
         continue;
     end
 
-    if ~any(effectiveMask(:))
-        % A reviewed, processed empty mask is a valid no-surface outcome.
+    if ~any(candidateMask(:))
+        % A processed record with no exported candidates is a valid no-surface
+        % outcome. A documentation mask must never override this decision.
         currentResult.status = 'noSurface';
         surfaceResults(resultIndex) = currentResult;
         continue;
     end
 
-    % Estimate image evidence and then choose a single globally consistent
-    % depth from all competing mask runs in each active scan line.
+    % Estimate evidence only at exported coordinates, then choose one globally
+    % consistent depth from the competing boundary points in each scan line.
     candidateConfidence = computeCandidateConfidence( ...
-        displayedImage, effectiveMask, pixelSpacingXYMm, resolvedOptions);
+        displayedImage, candidateMask, pixelSpacingXYMm, resolvedOptions);
     frameSurface = traceSurfacePaths( ...
-        candidateConfidence, effectiveMask, pixelSpacingXYMm, ...
+        candidateConfidence, candidateMask, pixelSpacingXYMm, ...
         resolvedOptions, segmentationEntry.sourceIndex);
 
     currentResult.surfaceRowByColumn = frameSurface.surfaceRowByColumn;
@@ -89,10 +91,6 @@ for resultIndex = 1:numberOfResults
         frameSurface.regularizationDisplacementMmByColumn;
     currentResult.regularizationBoundHitColumnMask = ...
         frameSurface.regularizationBoundHitColumnMask;
-    currentResult.outsideSegmentationColumnMask = ...
-        frameSurface.outsideSegmentationColumnMask;
-    currentResult.outsideSegmentationFraction = ...
-        frameSurface.outsideSegmentationFraction;
     currentResult.regularizationStatus = ...
         frameSurface.regularizationStatus;
     currentResult.roughnessBeforePerMm = ...
@@ -346,13 +344,13 @@ function ultrasoundMatchIndices = validateAndMatchInputs( ...
 %                            segmentationResults entry.
 
 requiredSegmentationFields = { ...
-    'sequencePosition', 'sourceIndex', 'segmentationMask', 'status'};
+    'sequencePosition', 'sourceIndex', 'pixelCoordinates', 'status'};
 if ~isstruct(segmentationResults) || ~isvector(segmentationResults) || ...
         isempty(segmentationResults) || ...
         ~all(isfield(segmentationResults, requiredSegmentationFields))
     error('extractBoneSurfacesFromSegmentation:InvalidSegmentationResults', ...
         ['segmentationResults must be a non-empty struct vector containing ' ...
-        'sequencePosition, sourceIndex, segmentationMask, and status.']);
+        'sequencePosition, sourceIndex, pixelCoordinates, and status.']);
 end
 
 if ~isstruct(ultrasoundSequence) || ~isvector(ultrasoundSequence) || ...
@@ -424,11 +422,13 @@ end
 end
 
 
-function [displayedImage, effectiveMask, pixelSpacingXYMm] = ...
+function [displayedImage, candidateMask, pixelSpacingXYMm] = ...
         prepareFrameData(segmentationEntry, ultrasoundEntry, resultIndex)
-%PREPAREFRAMEDATA Align and validate one B-mode image and segmentation mask.
+%PREPAREFRAMEDATA Align one B-mode image and rasterize coordinate candidates.
 % The acquisition stores image packets as [width,height], so one transpose is
 % required to reproduce the segmentation tool's [row,column] display space.
+% The candidate raster is built only from pixelCoordinates; documentation masks
+% are deliberately neither read nor validated by the extractor.
 %
 % Inputs:
 %   segmentationEntry : One segmentationResults record.
@@ -437,7 +437,7 @@ function [displayedImage, effectiveMask, pixelSpacingXYMm] = ...
 %
 % Outputs:
 %   displayedImage    : Double B-mode image normalized to [0,1].
-%   effectiveMask     : Logical mask after applying the segmentation-area mask.
+%   candidateMask     : Sparse logical mask containing only supplied candidates.
 %   pixelSpacingXYMm  : [xSpacing,ySpacing] in millimetres per pixel.
 
 plane = ultrasoundEntry.plane;
@@ -483,31 +483,9 @@ if ~isequal(displayedImageSize, [plane.nRows, plane.nCols])
         'plane.nCols for result %d.'], resultIndex);
 end
 
-segmentationMask = segmentationEntry.segmentationMask;
-if ~isValidBinaryMask(segmentationMask) || ...
-        ~isequal(size(segmentationMask), displayedImageSize)
-    error('extractBoneSurfacesFromSegmentation:ImageMaskSizeMismatch', ...
-        ['segmentationMask must be a binary array matching the displayed ' ...
-        'image size for result %d.'], resultIndex);
-end
-
-if isfield(segmentationEntry, 'segmentationAreaMask') && ...
-        ~isempty(segmentationEntry.segmentationAreaMask)
-    segmentationAreaMask = segmentationEntry.segmentationAreaMask;
-    if ~isValidBinaryMask(segmentationAreaMask) || ...
-            ~isequal(size(segmentationAreaMask), displayedImageSize)
-        error('extractBoneSurfacesFromSegmentation:ImageMaskSizeMismatch', ...
-            ['segmentationAreaMask must be a binary array matching the ' ...
-            'displayed image size for result %d.'], resultIndex);
-    end
-else
-    % Older result files may omit the optional reviewed-area mask. Treat the
-    % full image as reviewed while preserving the main accepted mask.
-    segmentationAreaMask = true(displayedImageSize);
-end
-
 displayedImage = double(storedImage.') / 255;
-effectiveMask = logical(segmentationMask) & logical(segmentationAreaMask);
+candidateMask = buildCandidateMask( ...
+    segmentationEntry.pixelCoordinates, displayedImageSize, resultIndex);
 
 % Use pixel-centre endpoint spacing so physical gap and error thresholds use
 % the same plane extent as current project visualization code.
@@ -517,28 +495,57 @@ pixelSpacingXYMm = [ ...
 end
 
 
-function isValid = isValidBinaryMask(candidateMask)
-%ISVALIDBINARYMASK Check whether an array safely represents a logical mask.
-% Numeric zero/one masks are accepted for compatibility with MAT files that
-% did not preserve logical class information.
+function candidateMask = buildCandidateMask( ...
+        pixelCoordinates, imageSize, resultIndex)
+%BUILDCANDIDATEMASK Validate and rasterize authoritative boundary coordinates.
+% The sparse raster lets existing image and dynamic-programming operations work
+% efficiently without treating filled segmentation pixels as surface choices.
 %
-% Input:
-%   candidateMask : Candidate logical or numeric mask array.
+% Inputs:
+%   pixelCoordinates : N-by-2 numeric [row,column] candidate coordinates.
+%   imageSize        : [numberOfRows,numberOfColumns] of the displayed image.
+%   resultIndex      : One-based result position used in validation messages.
 %
 % Output:
-%   isValid       : True when the input is a finite real 2D binary array.
+%   candidateMask : Image-sized logical raster containing unique candidates.
 
-isValid = ismatrix(candidateMask) && ~isempty(candidateMask) && ...
-    (islogical(candidateMask) || isnumeric(candidateMask));
-if ~isValid
+% Require the exported coordinate convention exactly. In particular, a plain
+% empty array is ambiguous; exporters should preserve the documented 0-by-2
+% shape when a processed frame has no candidate surface pixels.
+if ~isnumeric(pixelCoordinates) || ~isreal(pixelCoordinates) || ...
+        ~ismatrix(pixelCoordinates) || size(pixelCoordinates, 2) ~= 2
+    error('extractBoneSurfacesFromSegmentation:InvalidPixelCoordinates', ...
+        ['pixelCoordinates at result %d must be a numeric N-by-2 ' ...
+        '[row,column] array.'], resultIndex);
+end
+
+coordinateValues = double(pixelCoordinates);
+if any(~isfinite(coordinateValues(:))) || ...
+        any(coordinateValues(:) ~= round(coordinateValues(:)))
+    error('extractBoneSurfacesFromSegmentation:InvalidPixelCoordinates', ...
+        ['pixelCoordinates at result %d must contain finite integer ' ...
+        '[row,column] values.'], resultIndex);
+end
+
+if any(coordinateValues(:, 1) < 1) || ...
+        any(coordinateValues(:, 1) > imageSize(1)) || ...
+        any(coordinateValues(:, 2) < 1) || ...
+        any(coordinateValues(:, 2) > imageSize(2))
+    error('extractBoneSurfacesFromSegmentation:InvalidPixelCoordinates', ...
+        ['pixelCoordinates at result %d must lie inside the displayed ' ...
+        'image bounds.'], resultIndex);
+end
+
+candidateMask = false(imageSize);
+if isempty(coordinateValues)
     return;
 end
 
-if isnumeric(candidateMask)
-    isValid = isreal(candidateMask) && ...
-        all(isfinite(candidateMask(:))) && ...
-        all(candidateMask(:) == 0 | candidateMask(:) == 1);
-end
+% Raster assignment naturally removes duplicates and makes extraction
+% independent of the order in which boundary points were exported.
+linearIndices = sub2ind(imageSize, ...
+    coordinateValues(:, 1), coordinateValues(:, 2));
+candidateMask(linearIndices) = true;
 end
 
 
@@ -567,8 +574,6 @@ resultTemplate = struct( ...
     'rawConfidenceByColumn', nan(1, 0), ...
     'regularizationDisplacementMmByColumn', nan(1, 0), ...
     'regularizationBoundHitColumnMask', false(1, 0), ...
-    'outsideSegmentationColumnMask', false(1, 0), ...
-    'outsideSegmentationFraction', nan, ...
     'regularizationStatus', 'notApplicable', ...
     'roughnessBeforePerMm', nan, ...
     'roughnessAfterPerMm', nan, ...
@@ -610,26 +615,24 @@ currentResult.regularizationDisplacementMmByColumn = ...
     nan(1, numberOfColumns);
 currentResult.regularizationBoundHitColumnMask = ...
     false(1, numberOfColumns);
-currentResult.outsideSegmentationColumnMask = ...
-    false(1, numberOfColumns);
 currentResult.pixelSpacingXYMm = pixelSpacingXYMm;
 end
 
 
 function candidateConfidence = computeCandidateConfidence( ...
-        displayedImage, effectiveMask, pixelSpacingXYMm, options)
-%COMPUTECANDIDATECONFIDENCE Score every mask pixel as a bone-surface point.
-% The score combines the gradient-to-first-peak position, bright ridge, and
-% distal acoustic shadow as a weighted geometric mean in [0,1].
+        displayedImage, candidateMask, pixelSpacingXYMm, options)
+%COMPUTECANDIDATECONFIDENCE Score only exported bone-boundary coordinates.
+% The score combines coordinate-local gradient-to-first-peak position, bright
+% ridge, and distal acoustic shadow as a weighted geometric mean in [0,1].
 %
 % Inputs:
 %   displayedImage   : Double B-mode image normalized to [0,1].
-%   effectiveMask    : Logical accepted search region.
+%   candidateMask    : Sparse logical raster of exported coordinates.
 %   pixelSpacingXYMm : [xSpacing,ySpacing] in millimetres.
 %   options          : Validated extraction configuration.
 %
 % Output:
-%   candidateConfidence : Image-sized confidence map, zero outside the mask.
+%   candidateConfidence : Image-sized map, zero outside listed coordinates.
 
 xSpacingMm = pixelSpacingXYMm(1);
 ySpacingMm = pixelSpacingXYMm(2);
@@ -652,15 +655,15 @@ secondDerivativeColumns = imfilter(ridgeSmoothedImage, ...
 positiveRidge = max(0, -(secondDerivativeRows + secondDerivativeColumns));
 
 normalizedIntensity = robustNormalizeFeature( ...
-    smoothedImage, effectiveMask, options.normalizationPercentiles);
+    smoothedImage, candidateMask, options.normalizationPercentiles);
 normalizedRidge = robustNormalizeFeature( ...
-    positiveRidge, effectiveMask, options.normalizationPercentiles);
+    positiveRidge, candidateMask, options.normalizationPercentiles);
 reflectionLikelihood = 0.5 * (normalizedIntensity + normalizedRidge);
 
 shadowLikelihood = computeShadowLikelihood( ...
-    smoothedImage, effectiveMask, ySpacingMm, options);
+    smoothedImage, candidateMask, ySpacingMm, options);
 positionLikelihood = computePositionLikelihood( ...
-    smoothedImage, effectiveMask, ySpacingMm, options);
+    smoothedImage, candidateMask, ySpacingMm, options);
 
 % Use a geometric mean so configuration weights change feature importance
 % without changing confidence scale or the meaning of evidenceThreshold.
@@ -672,20 +675,20 @@ weightedLogEvidence = ...
     options.reflectionWeight * log(max(reflectionLikelihood, smallValue)) + ...
     options.shadowWeight * log(max(shadowLikelihood, smallValue));
 candidateConfidence = exp(weightedLogEvidence / totalWeight);
-candidateConfidence(~effectiveMask) = 0;
+candidateConfidence(~candidateMask) = 0;
 candidateConfidence = min(max(candidateConfidence, 0), 1);
 end
 
 
 function shadowLikelihood = computeShadowLikelihood( ...
-        smoothedImage, effectiveMask, ySpacingMm, options)
+        smoothedImage, candidateMask, ySpacingMm, options)
 %COMPUTESHADOWLIKELIHOOD Measure darkness distal to every possible surface.
 % Gaussian weighting emphasizes the near shadow, while coverage blending makes
 % candidates near the image bottom less certain instead of falsely perfect.
 %
 % Inputs:
 %   smoothedImage : Smoothed normalized B-mode image.
-%   effectiveMask : Logical candidate-region mask.
+%   candidateMask : Sparse logical raster of exported coordinates.
 %   ySpacingMm    : Axial pixel spacing in millimetres.
 %   options       : Validated extraction configuration.
 %
@@ -732,24 +735,25 @@ weightedMean(hasShadowSamples) = ...
 coverage = min(availableWeight / max(fullWeight, eps), 1);
 rawShadow = coverage .* (1 - weightedMean) + (1 - coverage) * 0.5;
 shadowLikelihood = robustNormalizeFeature( ...
-    rawShadow, effectiveMask, options.normalizationPercentiles);
+    rawShadow, candidateMask, options.normalizationPercentiles);
 end
 
 
 function positionLikelihood = computePositionLikelihood( ...
-        smoothedImage, effectiveMask, ySpacingMm, options)
-%COMPUTEPOSITIONLIKELIHOOD Locate the gradient-to-first-peak surface estimate.
-% Every contiguous mask run receives its own preferred depth so multiple tissue
-% or reverberation responses remain available for the global path optimizer.
+        smoothedImage, candidateMask, ySpacingMm, options)
+%COMPUTEPOSITIONLIKELIHOOD Score each coordinate near a probe-facing first echo.
+% Each exported point receives an independent local gradient-to-first-peak
+% estimate. This preserves first-echo evidence without reconstructing, reading,
+% or depending on a filled segmentation region.
 %
 % Inputs:
 %   smoothedImage : Smoothed normalized B-mode image.
-%   effectiveMask : Logical candidate-region mask.
+%   candidateMask : Sparse logical raster of exported coordinates.
 %   ySpacingMm    : Axial pixel spacing in millimetres.
 %   options       : Validated extraction configuration.
 %
 % Output:
-%   positionLikelihood : Image-sized likelihood centred within every mask run.
+%   positionLikelihood : Image-sized likelihood, nonzero only at candidates.
 
 % Positive values mean brightness increases while travelling away from the
 % probe along increasing rows.
@@ -758,53 +762,60 @@ depthGradient = imfilter(smoothedImage, ...
 marginRows = max(1, round(options.gradientSearchMarginMm / ySpacingMm));
 positionLikelihood = zeros(size(smoothedImage));
 
-for columnIndex = 1:size(effectiveMask, 2)
-    columnMask = effectiveMask(:, columnIndex);
-    runChanges = diff([false; columnMask; false]);
-    runStarts = find(runChanges == 1);
-    runEnds = find(runChanges == -1) - 1;
+for columnIndex = 1:size(candidateMask, 2)
+    candidateRows = find(candidateMask(:, columnIndex));
+    numberOfCandidates = numel(candidateRows);
+    gradientStrength = zeros(numberOfCandidates, 1);
+    distanceLikelihood = ones(numberOfCandidates, 1);
+    hasValidGradient = false(numberOfCandidates, 1);
 
-    for runIndex = 1:numel(runStarts)
-        runStart = runStarts(runIndex);
-        runEnd = runEnds(runIndex);
+    for candidateIndex = 1:numel(candidateRows)
+        candidateRow = candidateRows(candidateIndex);
 
-        % Search near the probe-facing entrance only. Searching the full run
-        % could select a deeper reverberation edge instead of the first echo.
-        gradientSearchStart = max(1, runStart - marginRows);
-        gradientSearchEnd = min(runEnd, runStart + marginRows);
+        % Only inspect gradients on the probe-facing side through the candidate
+        % itself. A deeper boundary therefore cannot borrow a positive gradient
+        % that occurs below it, while the true entrance remains available.
+        gradientSearchStart = max(1, candidateRow - marginRows);
         gradientValues = depthGradient( ...
-            gradientSearchStart:gradientSearchEnd, columnIndex);
+            gradientSearchStart:candidateRow, columnIndex);
         [strongestGradient, gradientOffset] = max(gradientValues);
-        hasValidGradient = isfinite(strongestGradient) && strongestGradient > 0;
+        hasValidGradient(candidateIndex) = ...
+            isfinite(strongestGradient) && strongestGradient > 0;
 
-        if hasValidGradient
+        if hasValidGradient(candidateIndex)
             gradientRow = gradientSearchStart + gradientOffset - 1;
-            peakSearchStart = max(runStart, gradientRow);
+            peakSearchEnd = min(size(smoothedImage, 1), ...
+                candidateRow + marginRows);
             peakValues = smoothedImage( ...
-                peakSearchStart:runEnd, columnIndex);
+                gradientRow:peakSearchEnd, columnIndex);
             peakOffset = findFirstPeak(peakValues);
-            peakRow = peakSearchStart + peakOffset - 1;
+            peakRow = gradientRow + peakOffset - 1;
             preferredRow = 0.5 * (gradientRow + peakRow);
-            confidenceScale = 1;
-        else
-            % A flat or noisy response has no defensible gradient-to-peak
-            % estimate. Keep the run available but lower its confidence.
-            preferredRow = 0.5 * (runStart + runEnd);
-            peakRow = preferredRow;
-            gradientRow = preferredRow;
-            confidenceScale = options.fallbackConfidenceScale;
+            positionSigmaRows = max( ...
+                options.ridgeSigmaMm / ySpacingMm, ...
+                max(1, 0.5 * abs(peakRow - gradientRow)));
+            gradientStrength(candidateIndex) = strongestGradient;
+            distanceLikelihood(candidateIndex) = exp(-0.5 * ( ...
+                (candidateRow - preferredRow) / positionSigmaRows) ^ 2);
         end
-
-        preferredRow = min(max(preferredRow, runStart), runEnd);
-        positionSigmaRows = max( ...
-            options.ridgeSigmaMm / ySpacingMm, ...
-            max(1, 0.5 * abs(peakRow - gradientRow)));
-        candidateRows = (runStart:runEnd).';
-        runLikelihood = exp(-0.5 * ( ...
-            (candidateRows - preferredRow) / positionSigmaRows) .^ 2);
-        positionLikelihood(candidateRows, columnIndex) = ...
-            confidenceScale * runLikelihood;
     end
+
+    if any(hasValidGradient)
+        % Relative gradient strength suppresses small positive fluctuations on
+        % distal or side boundaries. Only candidates with genuine positive-rise
+        % evidence compete when the column contains at least one such point.
+        maximumGradient = max(gradientStrength);
+        relativeGradientStrength = gradientStrength / maximumGradient;
+        candidateLikelihood = ...
+            relativeGradientStrength .* distanceLikelihood;
+    else
+        % When the entire column lacks a positive rise, retain all exported
+        % coordinates with reduced evidence so geometry can provide a fallback.
+        candidateLikelihood = options.fallbackConfidenceScale * ...
+            ones(numberOfCandidates, 1);
+    end
+
+    positionLikelihood(candidateRows, columnIndex) = candidateLikelihood;
 end
 end
 
@@ -849,40 +860,40 @@ end
 
 
 function normalizedFeature = robustNormalizeFeature( ...
-        featureImage, effectiveMask, percentiles)
-%ROBUSTNORMALIZEFEATURE Scale one image feature using mask percentiles.
+        featureImage, sampleMask, percentiles)
+%ROBUSTNORMALIZEFEATURE Scale one image feature using candidate percentiles.
 % Percentile clipping avoids a few extreme speckle values controlling all
 % confidences, while a constant feature becomes neutral evidence rather than
 % producing NaN or forcing rejection.
 %
 % Inputs:
 %   featureImage  : Numeric feature image.
-%   effectiveMask : Logical region used to estimate the robust range.
+%   sampleMask   : Logical coordinates used to estimate the robust range.
 %   percentiles   : [lower,upper] percentile values.
 %
 % Output:
 %   normalizedFeature : Image-sized feature in [0,1], zero outside the mask.
 
-maskValues = double(featureImage(effectiveMask));
+maskValues = double(featureImage(sampleMask));
 lowerValue = prctile(maskValues, percentiles(1));
 upperValue = prctile(maskValues, percentiles(2));
 normalizedFeature = zeros(size(featureImage));
 
 if upperValue <= lowerValue + eps(max(abs([lowerValue, upperValue, 1])))
     % A constant feature carries no preference, so use neutral evidence.
-    normalizedFeature(effectiveMask) = 0.5;
+    normalizedFeature(sampleMask) = 0.5;
     return;
 end
 
 normalizedFeature = (double(featureImage) - lowerValue) / ...
     (upperValue - lowerValue);
 normalizedFeature = min(max(normalizedFeature, 0), 1);
-normalizedFeature(~effectiveMask) = 0;
+normalizedFeature(~sampleMask) = 0;
 end
 
 
 function frameSurface = traceSurfacePaths( ...
-        candidateConfidence, effectiveMask, pixelSpacingXYMm, options, ...
+        candidateConfidence, candidateMask, pixelSpacingXYMm, options, ...
         sourceIndex)
 %TRACESURFACEPATHS Select, interpolate, and curvature-refine surface paths.
 % Active columns separated by at most the configured physical gap remain in
@@ -892,7 +903,7 @@ function frameSurface = traceSurfacePaths( ...
 %
 % Inputs:
 %   candidateConfidence : Image-sized candidate confidence in [0,1].
-%   effectiveMask       : Logical candidate-region mask.
+%   candidateMask       : Sparse raster of authoritative boundary candidates.
 %   pixelSpacingXYMm    : [xSpacing,ySpacing] in millimetres.
 %   options             : Validated extraction configuration.
 %   sourceIndex         : Source-frame identifier used in fallback warnings.
@@ -900,14 +911,21 @@ function frameSurface = traceSurfacePaths( ...
 % Output:
 %   frameSurface        : Scalar struct containing column-wise surface data.
 
-numberOfRows = size(effectiveMask, 1);
-numberOfColumns = size(effectiveMask, 2);
+numberOfRows = size(candidateMask, 1);
+numberOfColumns = size(candidateMask, 2);
 xSpacingMm = pixelSpacingXYMm(1);
 ySpacingMm = pixelSpacingXYMm(2);
 
-columnMaximumConfidence = max(candidateConfidence, [], 1);
-activeColumns = find(any(effectiveMask, 1) & ...
-    columnMaximumConfidence >= options.evidenceThreshold);
+% The exported coordinates are authoritative, so a low image score must not
+% create a new gap. Retain every listed point but apply the existing threshold
+% as a soft confidence penalty. DP can still use global continuity to recover a
+% weak local echo, while consistently weak segments remain rejectable below.
+belowThresholdMask = candidateMask & ...
+    candidateConfidence < options.evidenceThreshold;
+candidateConfidence(belowThresholdMask) = ...
+    options.fallbackConfidenceScale ^ 2 * ...
+    candidateConfidence(belowThresholdMask);
+activeColumns = find(any(candidateMask, 1));
 
 observedRows = nan(1, numberOfColumns);
 observedConfidence = nan(1, numberOfColumns);
@@ -922,7 +940,7 @@ if ~isempty(activeColumns)
         groupColumns = activeColumns( ...
             groupStarts(groupIndex):groupEnds(groupIndex));
         [groupRows, groupConfidence] = traceOneActiveGroup( ...
-            groupColumns, candidateConfidence, effectiveMask, ...
+            groupColumns, candidateConfidence, candidateMask, ...
             xSpacingMm, ySpacingMm, options);
 
         % Gate on actual observed support rather than endpoint span, because a
@@ -944,11 +962,19 @@ end
     numberOfRows, xSpacingMm, options);
 observedMask = isfinite(observedRows);
 
-% The segmentation-constrained DP/PCHIP result remains the auditable raw
-% trace. Refinement is bounded only by raw displacement and image dimensions.
+% The DP is not allowed to invent an observed raw location. Guard this public
+% contract explicitly so future scoring changes cannot widen the candidate set.
+observedColumns = find(observedMask);
+observedLinearIndices = sub2ind(size(candidateMask), ...
+    observedRows(observedColumns), observedColumns);
+assert(all(candidateMask(observedLinearIndices)), ...
+    'Every observed raw point must match an exported pixel coordinate.');
+
+% The coordinate-constrained DP/PCHIP result remains the auditable raw trace.
+% Refinement is bounded only by raw displacement and image dimensions.
 [surfaceRows, confidenceByColumn, regularizationDiagnostics] = ...
     regularizeSurfaceSegments(rawSurfaceRows, rawConfidenceByColumn, ...
-    observedMask, interpolatedMask, segmentIds, effectiveMask, ...
+    observedMask, interpolatedMask, segmentIds, numberOfRows, ...
     pixelSpacingXYMm, options, sourceIndex);
 validMask = isfinite(surfaceRows);
 
@@ -971,10 +997,6 @@ frameSurface = struct( ...
         regularizationDiagnostics.displacementMmByColumn, ...
     'regularizationBoundHitColumnMask', ...
         regularizationDiagnostics.boundHitColumnMask, ...
-    'outsideSegmentationColumnMask', ...
-        regularizationDiagnostics.outsideSegmentationColumnMask, ...
-    'outsideSegmentationFraction', ...
-        regularizationDiagnostics.outsideSegmentationFraction, ...
     'regularizationStatus', regularizationDiagnostics.status, ...
     'roughnessBeforePerMm', ...
         regularizationDiagnostics.roughnessBeforePerMm, ...
@@ -995,14 +1017,11 @@ assert(~any(observedMask & interpolatedMask), ...
     'Observed and interpolated masks must be disjoint.');
 assert(isequal(validMask, observedMask | interpolatedMask), ...
     'Finite surface rows must match observed or interpolated columns.');
-assert(~any(regularizationDiagnostics.outsideSegmentationColumnMask & ...
-    ~observedMask), ...
-    'Only originally observed columns may be flagged outside segmentation.');
 end
 
 
 function [selectedRows, selectedConfidence] = traceOneActiveGroup( ...
-        activeColumns, candidateConfidence, effectiveMask, ...
+        activeColumns, candidateConfidence, candidateMask, ...
         xSpacingMm, ySpacingMm, options)
 %TRACEONEACTIVEGROUP Find the minimum-cost path through one lateral group.
 % Dynamic programming compares every mask row, including rows from multiple
@@ -1011,7 +1030,7 @@ function [selectedRows, selectedConfidence] = traceOneActiveGroup( ...
 % Inputs:
 %   activeColumns       : Increasing vector of columns in one gap-bounded group.
 %   candidateConfidence : Image-sized confidence map.
-%   effectiveMask       : Logical candidate mask.
+%   candidateMask       : Sparse raster of exported coordinate candidates.
 %   xSpacingMm          : Lateral pixel spacing in millimetres.
 %   ySpacingMm          : Axial pixel spacing in millimetres.
 %   options             : Validated extraction configuration.
@@ -1026,7 +1045,7 @@ backPointers = cell(1, numberOfActiveColumns);
 smallValue = 1e-6;
 
 firstColumn = activeColumns(1);
-candidateRows{1} = find(effectiveMask(:, firstColumn));
+candidateRows{1} = find(candidateMask(:, firstColumn));
 previousCosts = -log(max( ...
     candidateConfidence(candidateRows{1}, firstColumn), smallValue));
 previousCosts = previousCosts(:);
@@ -1035,7 +1054,7 @@ for activeIndex = 2:numberOfActiveColumns
     currentColumn = activeColumns(activeIndex);
     previousColumn = activeColumns(activeIndex - 1);
     previousRows = candidateRows{activeIndex - 1};
-    currentRows = find(effectiveMask(:, currentColumn));
+    currentRows = find(candidateMask(:, currentColumn));
     candidateRows{activeIndex} = currentRows;
 
     endpointDistanceMm = (currentColumn - previousColumn) * xSpacingMm;
@@ -1157,12 +1176,12 @@ end
 
 function [surfaceRows, confidenceByColumn, diagnostics] = ...
         regularizeSurfaceSegments(rawSurfaceRows, rawConfidenceByColumn, ...
-        observedMask, interpolatedMask, segmentIds, effectiveMask, ...
+        observedMask, interpolatedMask, segmentIds, numberOfImageRows, ...
         pixelSpacingXYMm, options, sourceIndex)
 %REGULARIZESURFACESEGMENTS Refine raw paths with bounded curvature smoothing.
 % The raw dynamic-programming path decides which probe-facing echo response is
 % bone. This stage reduces rapid bending while allowing the final approximation
-% to leave the segmentation when its irregular boundary is not trustworthy.
+% to leave the sparse coordinate set within its raw-path and image bounds.
 %
 % Inputs:
 %   rawSurfaceRows       : Raw DP/PCHIP row at each column, with NaN elsewhere.
@@ -1170,7 +1189,7 @@ function [surfaceRows, confidenceByColumn, diagnostics] = ...
 %   observedMask         : Logical columns directly selected from image evidence.
 %   interpolatedMask     : Logical columns filled across accepted short gaps.
 %   segmentIds           : Nonzero segment label at each retained column.
-%   effectiveMask        : Logical extraction mask, used only for audit flags.
+%   numberOfImageRows    : Height of the displayed B-mode image.
 %   pixelSpacingXYMm     : [xSpacing,ySpacing] in millimetres.
 %   options              : Validated extraction and regularization settings.
 %   sourceIndex          : Source-frame identifier used in fallback warnings.
@@ -1179,8 +1198,8 @@ function [surfaceRows, confidenceByColumn, diagnostics] = ...
 %   surfaceRows       : Final subpixel row at each retained column.
 %   confidenceByColumn: Raw confidence reduced according to refinement movement
 %                       and decayed across interpolated gaps.
-%   diagnostics       : Scalar struct containing status, movement, outside-mask,
-%                       bound-hit, and before/after roughness audit values.
+%   diagnostics       : Scalar struct containing status, movement, bound-hit,
+%                       and before/after roughness audit values.
 
 surfaceRows = rawSurfaceRows;
 confidenceByColumn = rawConfidenceByColumn;
@@ -1191,7 +1210,6 @@ validMask = isfinite(rawSurfaceRows);
 displacementMmByColumn = nan(size(rawSurfaceRows));
 displacementMmByColumn(validMask) = 0;
 boundHitColumnMask = false(size(rawSurfaceRows));
-outsideSegmentationColumnMask = false(size(rawSurfaceRows));
 
 roughnessBeforePerMm = computeSurfaceRoughness( ...
     rawSurfaceRows, segmentIds, pixelSpacingXYMm);
@@ -1199,7 +1217,6 @@ roughnessBeforePerMm = computeSurfaceRoughness( ...
 if ~any(validMask)
     diagnostics = buildRegularizationDiagnostics( ...
         'notApplicable', displacementMmByColumn, boundHitColumnMask, ...
-        outsideSegmentationColumnMask, observedMask, ...
         roughnessBeforePerMm, roughnessBeforePerMm);
     return;
 end
@@ -1208,7 +1225,6 @@ if ~options.regularizationEnabled
     % Disabled mode is an exact compatibility path, including confidence.
     diagnostics = buildRegularizationDiagnostics( ...
         'disabled', displacementMmByColumn, boundHitColumnMask, ...
-        outsideSegmentationColumnMask, observedMask, ...
         roughnessBeforePerMm, roughnessBeforePerMm);
     return;
 end
@@ -1233,7 +1249,7 @@ for segmentNumber = segmentNumbers(:).'
         regularizeOneSurfaceSegment( ...
         rawSurfaceRows(segmentColumns), ...
         rawConfidenceByColumn(segmentColumns), ...
-        observedMask(segmentColumns), size(effectiveMask, 1), ...
+        observedMask(segmentColumns), numberOfImageRows, ...
         pixelSpacingXYMm, options);
 
     if succeeded
@@ -1264,21 +1280,18 @@ else
     regularizationStatus = 'partialFallback';
 end
 
-% The final location is intentionally allowed outside the segmentation, so its
-% confidence derives from raw support and decays monotonically with movement.
+% The final location may leave the listed coordinates, so confidence derives
+% from raw image support and decays monotonically with movement.
 confidenceByColumn = applyDisplacementConfidenceDecay( ...
     rawConfidenceByColumn, displacementMmByColumn, observedMask, ...
     interpolatedMask, segmentIds, pixelSpacingXYMm(1), ...
     options.maxInterpolatedGapMm, ...
     options.regularizationMaxDisplacementMm);
 
-outsideSegmentationColumnMask = findOutsideSegmentationColumns( ...
-    surfaceRows, observedMask, effectiveMask);
 roughnessAfterPerMm = computeSurfaceRoughness( ...
     surfaceRows, segmentIds, pixelSpacingXYMm);
 diagnostics = buildRegularizationDiagnostics( ...
     regularizationStatus, displacementMmByColumn, boundHitColumnMask, ...
-    outsideSegmentationColumnMask, observedMask, ...
     roughnessBeforePerMm, roughnessAfterPerMm);
 end
 
@@ -1289,7 +1302,7 @@ function [refinedRows, boundHitMask, succeeded, failureMessage] = ...
 %REGULARIZEONESURFACESEGMENT Solve one raw-bounded curvature problem.
 % Huber iteratively reweighted least squares limits the influence of isolated
 % branch excursions. Quadprog enforces image limits and the maximum permitted
-% displacement from the segmentation-constrained raw path.
+% displacement from the coordinate-constrained raw path.
 %
 % Inputs:
 %   rawRows          : Raw DP/PCHIP rows for one complete retained segment.
@@ -1469,32 +1482,6 @@ end
 end
 
 
-function outsideMask = findOutsideSegmentationColumns( ...
-        surfaceRows, observedMask, effectiveMask)
-%FINDOUTSIDESEGMENTATIONCOLUMNS Flag refined observed points outside the mask.
-% Interpolated points are deliberately excluded because their separate public
-% flag already communicates that no direct segmentation evidence existed.
-%
-% Inputs:
-%   surfaceRows : Final subpixel row at each image column.
-%   observedMask: Logical columns with a raw image-supported observation.
-%   effectiveMask: Logical extraction mask after applying the reviewed area.
-%
-% Output:
-%   outsideMask : Logical observed columns whose rounded final row lies outside
-%                 the effective extraction mask.
-
-outsideMask = false(size(observedMask));
-numberOfRows = size(effectiveMask, 1);
-observedColumns = find(observedMask);
-roundedRows = round(surfaceRows(observedColumns));
-roundedRows = min(max(roundedRows, 1), numberOfRows);
-linearIndices = sub2ind(size(effectiveMask), ...
-    roundedRows(:), observedColumns(:));
-outsideMask(observedColumns) = ~effectiveMask(linearIndices);
-end
-
-
 function roughnessPerMm = computeSurfaceRoughness( ...
         surfaceRows, segmentIds, pixelSpacingXYMm)
 %COMPUTESURFACEROUGHNESS Measure RMS physical curvature over all segments.
@@ -1536,7 +1523,6 @@ end
 
 function diagnostics = buildRegularizationDiagnostics( ...
         status, displacementMmByColumn, boundHitColumnMask, ...
-        outsideSegmentationColumnMask, observedMask, ...
         roughnessBeforePerMm, roughnessAfterPerMm)
 %BUILDREGULARIZATIONDIAGNOSTICS Summarize one frame's refinement outcome.
 % Centralizing this summary keeps empty, disabled, successful, and fallback
@@ -1546,8 +1532,6 @@ function diagnostics = buildRegularizationDiagnostics( ...
 %   status                        : Text status for the frame refinement.
 %   displacementMmByColumn        : Signed movement, with NaN when absent.
 %   boundHitColumnMask            : Logical columns ending on a hard bound.
-%   outsideSegmentationColumnMask : Refined observed points outside the mask.
-%   observedMask                  : Logical originally observed columns.
 %   roughnessBeforePerMm          : RMS physical curvature before refinement.
 %   roughnessAfterPerMm           : RMS physical curvature after refinement.
 %
@@ -1564,21 +1548,10 @@ else
     maxDisplacementMm = max(abs(finiteDisplacements));
 end
 
-numberObserved = nnz(observedMask);
-if numberObserved == 0
-    outsideSegmentationFraction = nan;
-else
-    outsideSegmentationFraction = ...
-        nnz(outsideSegmentationColumnMask) / numberObserved;
-end
-
 diagnostics = struct( ...
     'status', status, ...
     'displacementMmByColumn', displacementMmByColumn, ...
     'boundHitColumnMask', boundHitColumnMask, ...
-    'outsideSegmentationColumnMask', ...
-        outsideSegmentationColumnMask, ...
-    'outsideSegmentationFraction', outsideSegmentationFraction, ...
     'roughnessBeforePerMm', roughnessBeforePerMm, ...
     'roughnessAfterPerMm', roughnessAfterPerMm, ...
     'rmsDisplacementMm', rmsDisplacementMm, ...
@@ -1610,8 +1583,8 @@ regularizationStatusCounts = struct( ...
     'fallback', nnz(strcmp(regularizationStatuses, 'fallback')));
 extractionMetadata = struct( ...
     'algorithmName', ...
-        'gradientPeakShadowDynamicProgrammingRawBoundedCurvature', ...
-    'algorithmVersion', '1.1.0', ...
+        'pixelCoordinateGradientPeakShadowDynamicProgrammingRawBoundedCurvature', ...
+    'algorithmVersion', '1.2.0', ...
     'createdAt', char(datetime('now', ...
         'Format', 'yyyy-MM-dd''T''HH:mm:ss')), ...
     'coordinateConvention', ...
@@ -1619,6 +1592,16 @@ extractionMetadata = struct( ...
         'top-left pixel centre'], ...
     'beamAxis', 'row', ...
     'beamDirection', 'increasing row', ...
+    'candidateSource', 'segmentationResults.pixelCoordinates', ...
+    'candidateCoordinateConvention', ...
+        'MATLAB 1-based [row,column] integer image coordinates', ...
+    'segmentationMaskRole', 'not consumed by extractor', ...
+    'positionLikelihoodDefinition', ...
+        ['coordinate-local strongest positive axial gradient to first ' ...
+        'intensity peak, evaluated only at exported coordinates'], ...
+    'evidenceThresholdDefinition', ...
+        ['listed coordinates remain DP candidates; confidence below the ' ...
+        'threshold receives the squared fallback-confidence penalty'], ...
     'meanConfidenceDefinition', ...
         ['mean raw observed confidence with exponential final-path ' ...
         'displacement decay'], ...

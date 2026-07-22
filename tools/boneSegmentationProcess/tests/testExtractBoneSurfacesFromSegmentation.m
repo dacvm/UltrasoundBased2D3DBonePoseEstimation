@@ -186,11 +186,20 @@ function testGapInterpolationBoundary(testCase)
 % The surrounding observed sections are longer than the 2 mm retention gate.
 [shortGapResult, shortGapColumns] = extractSyntheticGap(49, 31);
 [longGapResult, longGapColumns] = extractSyntheticGap(51, 32);
+disabledOptions = struct('regularizationEnabled', false);
+shortGapDisabled = extractSyntheticGap(49, 33, disabledOptions);
+longGapDisabled = extractSyntheticGap(51, 34, disabledOptions);
 
 % All missing columns in a 4.9 mm gap must be supplied only by interpolation.
 verifyTrue(testCase, all(shortGapResult.interpolatedColumnMask(shortGapColumns)));
 verifyFalse(testCase, any(shortGapResult.observedColumnMask(shortGapColumns)));
 verifyTrue(testCase, all(isfinite(shortGapResult.surfaceRowByColumn(shortGapColumns))));
+verifyEqual(testCase, shortGapResult.observedColumnMask, ...
+    shortGapDisabled.observedColumnMask);
+verifyEqual(testCase, shortGapResult.interpolatedColumnMask, ...
+    shortGapDisabled.interpolatedColumnMask);
+verifyEqual(testCase, shortGapResult.segmentIdByColumn, ...
+    shortGapDisabled.segmentIdByColumn);
 
 % A 5.1 mm gap remains explicit and separates the observed paths.
 verifyFalse(testCase, any(longGapResult.interpolatedColumnMask(longGapColumns)));
@@ -198,13 +207,20 @@ verifyTrue(testCase, all(isnan(longGapResult.surfaceRowByColumn(longGapColumns))
 segmentIds = unique(longGapResult.segmentIdByColumn);
 segmentIds(segmentIds == 0) = [];
 verifyEqual(testCase, numel(segmentIds), 2);
+verifyEqual(testCase, longGapResult.observedColumnMask, ...
+    longGapDisabled.observedColumnMask);
+verifyEqual(testCase, longGapResult.interpolatedColumnMask, ...
+    longGapDisabled.interpolatedColumnMask);
+verifyEqual(testCase, longGapResult.segmentIdByColumn, ...
+    longGapDisabled.segmentIdByColumn);
 end
 
-function testEmptyAndUnprocessedMasks(testCase)
-% TESTEMPTYANDUNPROCESSEDMASKS Verify valid empty and skipped result states.
-%   TESTEMPTYANDUNPROCESSEDMASKS(TESTCASE) checks that an empty processed mask
-%   becomes NOSURFACE, while any non-processed record is skipped even if its
-%   mask contains pixels.
+function testEmptyCoordinatesAndUnprocessedRecords(testCase)
+% TESTEMPTYCOORDINATESANDUNPROCESSEDRECORDS Verify empty and skipped states.
+%   TESTEMPTYCOORDINATESANDUNPROCESSEDRECORDS(TESTCASE) checks that a
+%   processed record with no exported boundary candidates becomes NOSURFACE,
+%   even when its stored mask is nonempty. An unprocessed record remains
+%   skipped even when it contains valid boundary coordinates.
 %
 %   Inputs:
 %       testCase - matlab.unittest.FunctionTestCase used for verification.
@@ -214,12 +230,12 @@ function testEmptyAndUnprocessedMasks(testCase)
 
 nRows = 80;
 nColumns = 81;
-displayedImage = makeBackgroundImage(nRows, nColumns);
-emptyMask = false(nRows, nColumns);
-nonEmptyMask = false(nRows, nColumns);
-nonEmptyMask(30:40, 15:65) = true;
+expectedRows = repmat(34.5, 1, nColumns);
+[displayedImage, nonEmptyMask] = makeBoneBandImage( ...
+    nRows, nColumns, expectedRows, 10, 30);
 
-segmentationResults(1) = makeSegmentationResult(41, 1, emptyMask, 'processed');
+segmentationResults(1) = makeSegmentationResult(41, 1, nonEmptyMask, 'processed');
+segmentationResults(1).pixelCoordinates = zeros(0, 2);
 segmentationResults(2) = makeSegmentationResult(42, 2, nonEmptyMask, 'pending');
 ultrasoundSequence(1) = makeUltrasoundFrame(41, displayedImage, 0.1, 0.1);
 ultrasoundSequence(2) = makeUltrasoundFrame(42, displayedImage, 0.1, 0.1);
@@ -329,10 +345,11 @@ verifyError(testCase, @() extractBoneSurfacesFromSegmentation( ...
     'extractBoneSurfacesFromSegmentation:MissingSourceImage');
 end
 
-function testImageMaskSizeMismatchRejected(testCase)
-% TESTIMAGEMASKSIZEMISMATCHREJECTED Reject incompatible image geometry.
-%   TESTIMAGEMASKSIZEMISMATCHREJECTED(TESTCASE) removes one displayed image
-%   row while retaining the original mask size.
+function testSegmentationMasksAreNotRequired(testCase)
+% TESTSEGMENTATIONMASKSARENOTREQUIRED Accept coordinate-only production data.
+%   TESTSEGMENTATIONMASKSARENOTREQUIRED(TESTCASE) removes every stored mask
+%   field while retaining exported boundary coordinates. Extraction must use
+%   those coordinates without reconstructing or requesting a filled region.
 %
 %   Inputs:
 %       testCase - matlab.unittest.FunctionTestCase used for verification.
@@ -341,13 +358,114 @@ function testImageMaskSizeMismatchRejected(testCase)
 %       None. Test failures are reported through TESTCASE.
 
 [segmentationResult, ultrasoundFrame] = makeSimpleFixture(65);
-displayedImage = ultrasoundFrame.plane.image.';
-displayedImage = displayedImage(1:end-1, :);
-ultrasoundFrame = makeUltrasoundFrame(65, displayedImage, 0.1, 0.1);
+segmentationResult = rmfield(segmentationResult, { ...
+    'segmentationMask', 'segmentationAreaMask', ...
+    'usesCustomSegmentationArea'});
 
+surfaceResult = extractBoneSurfacesFromSegmentation( ...
+    segmentationResult, ultrasoundFrame, struct());
+
+verifyEqual(testCase, string(surfaceResult.status), "extracted");
+verifyTrue(testCase, any(surfaceResult.observedColumnMask));
+end
+
+function testPixelCoordinatesAreAuthoritative(testCase)
+% TESTPIXELCOORDINATESAREAUTHORITATIVE Ignore contradictory stored masks.
+%   TESTPIXELCOORDINATESAREAUTHORITATIVE(TESTCASE) extracts the same boundary
+%   coordinates with their original region masks and with all-false masks.
+%   Every output must remain identical, proving candidate likelihood, DP,
+%   interpolation, and refinement consume only pixelCoordinates.
+%
+%   Inputs:
+%       testCase - matlab.unittest.FunctionTestCase used for verification.
+%
+%   Outputs:
+%       None. Test failures are reported through TESTCASE.
+
+[segmentationResult, ultrasoundFrame] = makeSimpleFixture(67);
+baselineResult = extractBoneSurfacesFromSegmentation( ...
+    segmentationResult, ultrasoundFrame, struct());
+
+% These masks directly contradict every exported coordinate. They remain in
+% the production-shaped record only to prove they cannot gate any computation.
+contradictoryResult = segmentationResult;
+contradictoryResult.segmentationMask(:) = false;
+contradictoryResult.segmentationAreaMask(:) = false;
+contradictoryResult.usesCustomSegmentationArea = true;
+coordinateOnlyResult = extractBoneSurfacesFromSegmentation( ...
+    contradictoryResult, ultrasoundFrame, struct());
+
+verifyEqual(testCase, coordinateOnlyResult, baselineResult);
+end
+
+function testCoordinateOrderAndDuplicatesDoNotChangeResult(testCase)
+% TESTCOORDINATEORDERANDDUPLICATESDONOTCHANGERESULT Normalize candidate input.
+%   TESTCOORDINATEORDERANDDUPLICATESDONOTCHANGERESULT(TESTCASE) reverses the
+%   exported boundary order and repeats several valid pairs. Candidate-set
+%   construction must be idempotent and independent of storage order.
+%
+%   Inputs:
+%       testCase - matlab.unittest.FunctionTestCase used for verification.
+%
+%   Outputs:
+%       None. Test failures are reported through TESTCASE.
+
+[segmentationResult, ultrasoundFrame] = makeSimpleFixture(68);
+baselineResult = extractBoneSurfacesFromSegmentation( ...
+    segmentationResult, ultrasoundFrame, struct());
+
+coordinates = segmentationResult.pixelCoordinates;
+numberRepeated = min(20, size(coordinates, 1));
+reorderedResult = segmentationResult;
+reorderedResult.pixelCoordinates = [ ...
+    flipud(coordinates); coordinates(1:numberRepeated, :)];
+actualResult = extractBoneSurfacesFromSegmentation( ...
+    reorderedResult, ultrasoundFrame, struct());
+
+verifyEqual(testCase, actualResult, baselineResult);
+end
+
+function testInvalidPixelCoordinatesRejected(testCase)
+% TESTINVALIDPIXELCOORDINATESREJECTED Reject malformed candidate arrays.
+%   TESTINVALIDPIXELCOORDINATESREJECTED(TESTCASE) checks shape, numeric type,
+%   finiteness, integer indexing, and image bounds. Clear rejection prevents
+%   row/column swaps or corrupt exported data from becoming plausible curves.
+%
+%   Inputs:
+%       testCase - matlab.unittest.FunctionTestCase used for verification.
+%
+%   Outputs:
+%       None. Test failures are reported through TESTCASE.
+
+[segmentationResult, ultrasoundFrame] = makeSimpleFixture(69);
+nRows = ultrasoundFrame.plane.nRows;
+nColumns = ultrasoundFrame.plane.nCols;
+validCoordinate = segmentationResult.pixelCoordinates(1, :);
+
+invalidCoordinateArrays = { ...
+    zeros(0, 3), ...
+    'not numeric', ...
+    [nan, validCoordinate(2)], ...
+    [inf, validCoordinate(2)], ...
+    [validCoordinate(1) + 0.5, validCoordinate(2)], ...
+    [0, validCoordinate(2)], ...
+    [nRows + 1, validCoordinate(2)], ...
+    [validCoordinate(1), 0], ...
+    [validCoordinate(1), nColumns + 1]};
+
+for invalidIndex = 1:numel(invalidCoordinateArrays)
+    invalidResult = segmentationResult;
+    invalidResult.pixelCoordinates = ...
+        invalidCoordinateArrays{invalidIndex};
+    verifyError(testCase, @() extractBoneSurfacesFromSegmentation( ...
+        invalidResult, ultrasoundFrame, struct()), ...
+        'extractBoneSurfacesFromSegmentation:InvalidPixelCoordinates');
+end
+
+missingCoordinateResult = rmfield(segmentationResult, 'pixelCoordinates');
 verifyError(testCase, @() extractBoneSurfacesFromSegmentation( ...
-    segmentationResult, ultrasoundFrame, struct()), ...
-    'extractBoneSurfacesFromSegmentation:ImageMaskSizeMismatch');
+    missingCoordinateResult, ultrasoundFrame, struct()), ...
+    'extractBoneSurfacesFromSegmentation:InvalidSegmentationResults');
 end
 
 function testInvalidPlaneGeometryRejected(testCase)
@@ -394,6 +512,114 @@ surfaceResults = extractBoneSurfacesFromSegmentation( ...
 % A clipped shadow window carries less evidence but must not cause indexing
 % errors or remove an otherwise strong, long reflection.
 verifySurfaceNearExpected(testCase, surfaceResults, expectedRows, 0.1, 0.5, 0.70);
+end
+
+function testCustomAreaCutEdgeIsNotCandidate(testCase)
+% TESTCUSTOMAREACUTEDGEISNOTCANDIDATE Honor exported boundary coordinates.
+%   TESTCUSTOMAREACUTEDGEISNOTCANDIDATE(TESTCASE) clips a rectangular region
+%   through its interior. The stored clipped mask gains an artificial edge,
+%   while production pixelCoordinates correctly retain only the original
+%   perimeter points inside the selected area. Even a bright artificial edge
+%   must never become an observed surface candidate.
+%
+%   Inputs:
+%       testCase - matlab.unittest.FunctionTestCase used for verification.
+%
+%   Outputs:
+%       None. Test failures are reported through TESTCASE.
+
+nRows = 100;
+nColumns = 121;
+xSpacingMm = 0.1;
+ySpacingMm = 0.1;
+expectedRows = repmat(30.5, 1, nColumns);
+[displayedImage, fullWidthMask] = makeBoneBandImage( ...
+    nRows, nColumns, expectedRows, 31, 35);
+
+% Restrict the full segmentation laterally, then cut it at row 45. The new
+% row-45 mask perimeter is not part of the UI's exported coordinate list.
+fullSegmentationMask = false(nRows, nColumns);
+fullSegmentationMask(:, 11:111) = fullWidthMask(:, 11:111);
+segmentationAreaMask = false(nRows, nColumns);
+segmentationAreaMask(1:45, :) = true;
+clippedSegmentationMask = ...
+    fullSegmentationMask & segmentationAreaMask;
+
+segmentationResult = makeSegmentationResult(70, 1, ...
+    fullSegmentationMask, 'processed');
+coordinateLinearIndices = sub2ind(size(segmentationAreaMask), ...
+    segmentationResult.pixelCoordinates(:, 1), ...
+    segmentationResult.pixelCoordinates(:, 2));
+keepCoordinate = segmentationAreaMask(coordinateLinearIndices);
+segmentationResult.pixelCoordinates = ...
+    segmentationResult.pixelCoordinates(keepCoordinate, :);
+segmentationResult.segmentationMask = clippedSegmentationMask;
+segmentationResult.segmentationAreaMask = segmentationAreaMask;
+segmentationResult.usesCustomSegmentationArea = true;
+
+% Paint a very attractive response on the artificial cut. A mask-perimeter
+% reconstruction would expose it to DP, but the exported coordinates do not.
+displayedImage(45, 12:110) = 0.78;
+displayedImage(46, 12:110) = 1.00;
+displayedImage(47, 12:110) = 0.64;
+displayedImage(48:82, 12:110) = 0.025;
+ultrasoundFrame = makeUltrasoundFrame( ...
+    70, displayedImage, xSpacingMm, ySpacingMm);
+options = struct('evidenceThreshold', 0.05, ...
+    'minimumMeanSegmentConfidence', 0.05);
+
+surfaceResult = extractBoneSurfacesFromSegmentation( ...
+    segmentationResult, ultrasoundFrame, options);
+
+artificialCutPairs = [ ...
+    repmat(45, 99, 1), (12:110).'];
+verifyFalse(testCase, any(ismember(artificialCutPairs, ...
+    segmentationResult.pixelCoordinates, 'rows')));
+
+interiorColumns = 20:102;
+interiorObserved = surfaceResult.observedColumnMask(interiorColumns);
+verifyGreaterThanOrEqual(testCase, mean(interiorObserved), 0.90);
+rawInteriorRows = surfaceResult.rawSurfaceRowByColumn(interiorColumns);
+verifyEqual(testCase, rawInteriorRows(interiorObserved), ...
+    repmat(30, 1, nnz(interiorObserved)));
+end
+
+function testMaskGapDoesNotCreateCoordinateGap(testCase)
+% TESTMASKGAPDOESNOTCREATECOORDINATEGAP Ignore missing stored-mask columns.
+%   TESTMASKGAPDOESNOTCREATECOORDINATEGAP(TESTCASE) deletes a 5.1 mm region
+%   from both stored masks while preserving continuous pixelCoordinates. The
+%   observed path and all refinement outputs must remain exactly unchanged.
+%
+%   Inputs:
+%       testCase - matlab.unittest.FunctionTestCase used for verification.
+%
+%   Outputs:
+%       None. Test failures are reported through TESTCASE.
+
+nRows = 90;
+nColumns = 181;
+expectedRows = repmat(37.5, 1, nColumns);
+[displayedImage, segmentationMask] = makeBoneBandImage( ...
+    nRows, nColumns, expectedRows, 14, 35);
+segmentationResult = makeSegmentationResult(80, 1, ...
+    segmentationMask, 'processed');
+ultrasoundFrame = makeUltrasoundFrame( ...
+    80, displayedImage, 0.1, 0.1);
+baselineResult = extractBoneSurfacesFromSegmentation( ...
+    segmentationResult, ultrasoundFrame, struct());
+
+maskGapColumns = 61:111;
+maskedResult = segmentationResult;
+maskedResult.segmentationMask(:, maskGapColumns) = false;
+maskedResult.segmentationAreaMask(:, maskGapColumns) = false;
+actualResult = extractBoneSurfacesFromSegmentation( ...
+    maskedResult, ultrasoundFrame, struct());
+
+verifyEqual(testCase, actualResult, baselineResult);
+verifyTrue(testCase, ...
+    all(actualResult.observedColumnMask(maskGapColumns)));
+verifyFalse(testCase, ...
+    any(actualResult.interpolatedColumnMask(maskGapColumns)));
 end
 
 function testBranchingDeepValleyRegularization(testCase)
@@ -594,12 +820,12 @@ verifyFalse(testCase, ...
     disabledMetadata.resolvedConfiguration.regularizationEnabled);
 end
 
-function testOutsideMaskFlagsAndConfidenceDecay(testCase)
-% TESTOUTSIDEMASKFLAGSANDCONFIDENCEDECAY Audit permitted mask departures.
-%   TESTOUTSIDEMASKFLAGSANDCONFIDENCEDECAY(TESTCASE) uses a narrow zig-zag
-%   segmentation that forces the raw path away from a flat surface. The
-%   refined curve should leave that unreliable mask, report every departure,
-%   and reduce confidence according to its physical displacement.
+function testConfidenceDecayAndDisplacementBound(testCase)
+% TESTCONFIDENCEDECAYANDDISPLACEMENTBOUND Audit bounded path movement.
+%   TESTCONFIDENCEDECAYANDDISPLACEMENTBOUND(TESTCASE) uses a narrow zig-zag
+%   candidate boundary that forces the raw path away from a flat surface. The
+%   refined curve must reduce confidence according to physical displacement
+%   and stop at the configured raw-path bound when necessary.
 %
 %   Inputs:
 %       testCase - matlab.unittest.FunctionTestCase used for verification.
@@ -626,18 +852,6 @@ options = makeRefinementTestOptions();
 surfaceResult = extractBoneSurfacesFromSegmentation( ...
     segmentationResult, ultrasoundFrame, options);
 observedMask = logical(surfaceResult.observedColumnMask);
-observedColumns = find(observedMask);
-roundedFinalRows = round(surfaceResult.surfaceRowByColumn(observedMask));
-finalLinearIndices = sub2ind(size(segmentationMask), ...
-    roundedFinalRows, observedColumns);
-expectedOutsideMask = false(1, nColumns);
-expectedOutsideMask(observedMask) = ~segmentationMask(finalLinearIndices);
-
-verifyTrue(testCase, any(expectedOutsideMask));
-verifyEqual(testCase, surfaceResult.outsideSegmentationColumnMask, ...
-    expectedOutsideMask);
-verifyEqual(testCase, surfaceResult.outsideSegmentationFraction, ...
-    nnz(expectedOutsideMask) / nnz(observedMask), 'AbsTol', 10 * eps);
 
 observedDisplacementMm = abs( ...
     surfaceResult.regularizationDisplacementMmByColumn(observedMask));
@@ -725,8 +939,11 @@ expectedRows = round(42 + 4 * sin(linspace(0, pi, nColumns))) + 0.5;
 [displayedImage, segmentationMask] = makeBoneBandImage( ...
     nRows, nColumns, expectedRows, 16, 38);
 gapColumns = 52:60;
-segmentationMask(:, gapColumns) = false;
 segmentationResults = makeSegmentationResult(81, 3, segmentationMask, 'processed');
+keepCoordinate = ~ismember( ...
+    segmentationResults.pixelCoordinates(:, 2), gapColumns);
+segmentationResults.pixelCoordinates = ...
+    segmentationResults.pixelCoordinates(keepCoordinate, :);
 segmentationResultsBeforeExtraction = segmentationResults;
 ultrasoundSequence = makeUltrasoundFrame(81, displayedImage, 0.1, 0.1);
 
@@ -743,13 +960,15 @@ requiredFields = {'sequencePosition', 'sourceIndex', 'status', ...
     'segmentIdByColumn', 'confidenceByColumn', 'pixelSpacingXYMm', ...
     'regularizationDisplacementMmByColumn', ...
     'regularizationBoundHitColumnMask', ...
-    'outsideSegmentationColumnMask', 'outsideSegmentationFraction', ...
     'regularizationStatus', 'roughnessBeforePerMm', ...
     'roughnessAfterPerMm', 'regularizationRmsDisplacementMm', ...
     'regularizationMaxDisplacementMm', ...
     'observedLengthMm', 'interpolatedLengthMm', 'meanConfidence', ...
     'numberOfSegments'};
 verifyTrue(testCase, all(isfield(surfaceResults, requiredFields)));
+removedMaskAuditFields = {'outsideSegmentationColumnMask', ...
+    'outsideSegmentationFraction'};
+verifyFalse(testCase, any(isfield(surfaceResults, removedMaskAuditFields)));
 
 % A column can be observed, interpolated, or absent, but never two at once.
 observedMask = logical(surfaceResults.observedColumnMask(:).');
@@ -762,8 +981,6 @@ displacementMm = ...
     surfaceResults.regularizationDisplacementMmByColumn(:).';
 boundHitMask = logical( ...
     surfaceResults.regularizationBoundHitColumnMask(:).');
-outsideMask = logical( ...
-    surfaceResults.outsideSegmentationColumnMask(:).');
 segmentIds = surfaceResults.segmentIdByColumn(:).';
 verifyEqual(testCase, numel(surfaceRows), nColumns);
 verifyFalse(testCase, any(observedMask & interpolatedMask));
@@ -784,26 +1001,19 @@ expectedDisplacementMm = (surfaceRows - rawSurfaceRows) * ...
 verifyEqual(testCase, displacementMm, expectedDisplacementMm, ...
     'AbsTol', 1e-10);
 verifyFalse(testCase, any(boundHitMask & ~isfinite(surfaceRows)));
-verifyFalse(testCase, any(outsideMask & ~observedMask));
 verifyLessThanOrEqual(testCase, abs(displacementMm(isfinite(surfaceRows))), ...
     extractionMetadata.resolvedConfiguration. ...
     regularizationMaxDisplacementMm + 1e-8);
 
-% Raw observed points must remain in the extraction mask. Final points may
-% leave it, and the explicit outside mask must exactly describe that event.
+% Every raw observed point must be one of the exported boundary candidates.
+% This is stronger than mask membership and catches accidental use of filled
+% segmentation regions or artificial custom-area cut edges.
 observedColumns = find(observedMask);
-roundedRawRows = round(rawSurfaceRows(observedMask));
-rawLinearIndices = sub2ind(size(segmentationMask), ...
-    roundedRawRows, observedColumns);
-verifyTrue(testCase, all(segmentationMask(rawLinearIndices)));
-roundedFinalRows = round(surfaceRows(observedMask));
-finalLinearIndices = sub2ind(size(segmentationMask), ...
-    roundedFinalRows, observedColumns);
-expectedOutsideMask = false(1, nColumns);
-expectedOutsideMask(observedMask) = ~segmentationMask(finalLinearIndices);
-verifyEqual(testCase, outsideMask, expectedOutsideMask);
-verifyEqual(testCase, surfaceResults.outsideSegmentationFraction, ...
-    nnz(expectedOutsideMask) / nnz(observedMask), 'AbsTol', 10 * eps);
+rawObservedRows = rawSurfaceRows(observedMask).';
+verifyEqual(testCase, rawObservedRows, round(rawObservedRows));
+rawObservedPairs = [rawObservedRows, observedColumns(:)];
+verifyTrue(testCase, all(ismember(rawObservedPairs, ...
+    segmentationResults.pixelCoordinates, 'rows')));
 
 % Final observed confidence decays from its raw value based only on the
 % bounded physical movement made by regularization.
@@ -835,9 +1045,14 @@ verifyEqual(testCase, surfaceResults.numberOfSegments, 1);
 
 metadataFields = {'algorithmVersion', 'coordinateConvention', ...
     'beamDirection', 'resolvedConfiguration', ...
-    'regularizationStatusCounts'};
+    'regularizationStatusCounts', 'candidateSource', ...
+    'segmentationMaskRole'};
 verifyTrue(testCase, all(isfield(extractionMetadata, metadataFields)));
-verifyEqual(testCase, string(extractionMetadata.algorithmVersion), "1.1.0");
+verifyEqual(testCase, string(extractionMetadata.algorithmVersion), "1.2.0");
+verifyEqual(testCase, string(extractionMetadata.candidateSource), ...
+    "segmentationResults.pixelCoordinates");
+verifyEqual(testCase, string(extractionMetadata.segmentationMaskRole), ...
+    "not consumed by extractor");
 
 configurationFields = {'regularizationEnabled', ...
     'regularizationHalfResponseWavelengthMm', ...
@@ -1070,20 +1285,27 @@ surfaceResult = extractBoneSurfacesFromSegmentation( ...
     segmentationResult, ultrasoundFrame, makeRefinementTestOptions());
 end
 
-function [surfaceResult, gapColumns] = extractSyntheticGap(numberOfMissingColumns, sourceIndex)
-% EXTRACTSYNTHETICGAP Extract one flat response with a controlled mask gap.
+function [surfaceResult, gapColumns] = extractSyntheticGap( ...
+        numberOfMissingColumns, sourceIndex, options)
+% EXTRACTSYNTHETICGAP Extract one flat response with a coordinate gap.
 %   [SURFACERESULT,GAPCOLUMNS] = EXTRACTSYNTHETICGAP(NUMBEROFMISSINGCOLUMNS,
 %   SOURCEINDEX) creates a 0.1 mm-spaced image, removes the requested number
-%   of candidate columns, and calls the public extractor. This helper keeps
-%   the 4.9/5.1 mm boundary fixtures identical apart from gap size.
+%   of exported boundary-coordinate columns, and calls the public extractor.
+%   The filled mask stays continuous so only pixelCoordinates can create the
+%   4.9/5.1 mm gap decision.
 %
 %   Inputs:
 %       numberOfMissingColumns - Positive integer number of empty columns.
 %       sourceIndex - Unique scalar identifier used to match the test frame.
+%       options - Optional scalar extractor-options structure.
 %
 %   Outputs:
 %       surfaceResult - One result structure returned by the extractor.
-%       gapColumns - Column indices intentionally removed from the mask.
+%       gapColumns - Column indices intentionally removed from coordinates.
+
+if nargin < 3
+    options = struct();
+end
 
 nRows = 90;
 nColumns = 181;
@@ -1094,14 +1316,17 @@ expectedRows = repmat(37.5, 1, nColumns);
 % Keep both observed sides comfortably longer than the 2 mm segment gate.
 gapStartColumn = 61;
 gapColumns = gapStartColumn:(gapStartColumn + numberOfMissingColumns - 1);
-segmentationMask(:, gapColumns) = false;
 
 segmentationResults = makeSegmentationResult( ...
     sourceIndex, 1, segmentationMask, 'processed');
+keepCoordinate = ~ismember( ...
+    segmentationResults.pixelCoordinates(:, 2), gapColumns);
+segmentationResults.pixelCoordinates = ...
+    segmentationResults.pixelCoordinates(keepCoordinate, :);
 ultrasoundSequence = makeUltrasoundFrame( ...
     sourceIndex, displayedImage, 0.1, 0.1);
 surfaceResult = extractBoneSurfacesFromSegmentation( ...
-    segmentationResults, ultrasoundSequence, struct());
+    segmentationResults, ultrasoundSequence, options);
 end
 
 function [segmentationResult, ultrasoundFrame] = makeSimpleFixture(sourceIndex)
@@ -1132,7 +1357,8 @@ function segmentationResult = makeSegmentationResult(sourceIndex, sequencePositi
 % MAKESEGMENTATIONRESULT Build one production-shaped segmentation record.
 %   SEGMENTATIONRESULT = MAKESEGMENTATIONRESULT(SOURCEINDEX,SEQUENCEPOSITION,
 %   SEGMENTATIONMASK,STATUS) creates the fields emitted by the semi-automatic
-%   segmentation tool. Keeping the real shape catches public-input regressions.
+%   segmentation tool. Its pixelCoordinates contain only eight-connected
+%   perimeter pixels, matching the real exported candidate contract.
 %
 %   Inputs:
 %       sourceIndex - Scalar identifier of the matching ultrasound frame.
@@ -1143,9 +1369,11 @@ function segmentationResult = makeSegmentationResult(sourceIndex, sequencePositi
 %   Outputs:
 %       segmentationResult - Scalar structure accepted by the extractor.
 
-% Store all foreground pixels as coordinates because the extractor must use
-% the mask as its authoritative candidate region, not coordinate ordering.
-[pixelRows, pixelColumns] = find(segmentationMask);
+% The segmentation UI exports the boundary before any custom-area clipping.
+% Using BWPERIM here prevents synthetic tests from silently supplying filled
+% region pixels that never occur in production pixelCoordinates.
+boundaryMask = bwperim(logical(segmentationMask), 8);
+[pixelRows, pixelColumns] = find(boundaryMask);
 
 segmentationResult = struct( ...
     'sequencePosition', sequencePosition, ...
