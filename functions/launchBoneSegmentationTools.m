@@ -155,17 +155,15 @@ ylabel(imageAxes, 'Row');
 box(imageAxes, 'on');
 colormap(imageAxes, gray(256));
 
-% Divide the right column by processing stage so the control order mirrors
-% the order in which each image operation is applied.
-parametersPanel = uipanel(mainGrid, ...
-    'Title', 'Processing Parameters', ...
-    'Tag', 'bone_segmentation_parameters_panel');
-parametersPanel.Layout.Row = 1;
-parametersPanel.Layout.Column = 3;
-parametersGrid = uigridlayout(parametersPanel, [4, 1], ...
+% Place the four processing stages directly in the right column. Avoiding an
+% outer panel leaves its former title, border, and padding space available to
+% the controls inside each stage.
+parametersGrid = uigridlayout(mainGrid, [4, 1], ...
     'RowHeight', {190, 220, '1x', 185}, ...
-    'Padding', [5, 5, 5, 5], ...
+    'Padding', [0, 0, 0, 0], ...
     'RowSpacing', 6);
+parametersGrid.Layout.Row = 1;
+parametersGrid.Layout.Column = 3;
 
 %% CREATE THE PREPROCESSING CONTROLS
 
@@ -413,6 +411,13 @@ workflowPanel = uipanel(parametersGrid, ...
     'Tag', 'bone_segmentation_workflow_panel');
 workflowPanel.Layout.Row = 4;
 workflowPanel.Layout.Column = 1;
+
+% Keep the four stage panels together so callbacks can disable or enable the
+% complete right column without relying on the removed outer panel.
+parameterStagePanels = [ ...
+    preprocessingPanel, segmentationPanel, ...
+    postprocessingPanel, workflowPanel];
+
 workflowGrid = uigridlayout(workflowPanel, [4, 2], ...
     'RowHeight', {22, 30, 32, 38}, ...
     'ColumnWidth', {'1x', '1x'}, ...
@@ -559,7 +564,7 @@ end
         % cancelled, preventing navigation to a different image mid-draw.
         isDrawingSegmentationArea = true;
         sequenceTable.Enable = 'off';
-        parametersPanel.Enable = 'off';
+        set(parameterStagePanels, 'Enable', 'off');
         areaStatusLabel.Text = 'Area: Draw an enclosed region on the image';
         drawnow;
 
@@ -637,7 +642,7 @@ end
         isDrawingSegmentationArea = false;
         if isvalid(segmentationFigure)
             sequenceTable.Enable = 'on';
-            parametersPanel.Enable = 'on';
+            set(parameterStagePanels, 'Enable', 'on');
             refreshSegmentationAreaControls();
             refreshProgressAndNavigation();
         end
@@ -891,7 +896,7 @@ end
         % either finishes or rolls back without touching committed data.
         isApplyingParametersToAll = true;
         sequenceTable.Enable = 'off';
-        parametersPanel.Enable = 'off';
+        set(parameterStagePanels, 'Enable', 'off');
         drawnow;
 
         progressDialog = [];
@@ -930,7 +935,7 @@ end
             isApplyingParametersToAll = false;
             if isvalid(segmentationFigure)
                 sequenceTable.Enable = 'on';
-                parametersPanel.Enable = 'on';
+                set(parameterStagePanels, 'Enable', 'on');
                 refreshSegmentationAreaControls();
                 refreshProgressAndNavigation();
                 uialert(segmentationFigure, ...
@@ -980,7 +985,7 @@ end
 
         isApplyingParametersToAll = false;
         sequenceTable.Enable = 'on';
-        parametersPanel.Enable = 'on';
+        set(parameterStagePanels, 'Enable', 'on');
         refreshSegmentationAreaControls();
         refreshProgressAndNavigation();
 
