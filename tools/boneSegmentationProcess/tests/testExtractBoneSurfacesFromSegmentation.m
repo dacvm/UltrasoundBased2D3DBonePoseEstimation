@@ -396,6 +396,317 @@ surfaceResults = extractBoneSurfacesFromSegmentation( ...
 verifySurfaceNearExpected(testCase, surfaceResults, expectedRows, 0.1, 0.5, 0.70);
 end
 
+function testBranchingDeepValleyRegularization(testCase)
+% TESTBRANCHINGDEEPVALLEYREGULARIZATION Smooth erratic mask-supported paths.
+%   TESTBRANCHINGDEEPVALLEYREGULARIZATION(TESTCASE) builds a narrow,
+%   rapidly changing response with an extra downward valley and disconnected
+%   segmentation branches. The raw trace must retain that image-supported
+%   evidence, while the final trace should recover the smooth underlying
+%   surface without violating the configured displacement bound.
+%
+%   Inputs:
+%       testCase - matlab.unittest.FunctionTestCase used for verification.
+%
+%   Outputs:
+%       None. Test failures are reported through TESTCASE.
+
+[segmentationResult, ultrasoundFrame, expectedRows, ySpacingMm] = ...
+    makeErraticRefinementFixture(72, 0.1);
+options = makeRefinementTestOptions();
+
+surfaceResult = extractBoneSurfacesFromSegmentation( ...
+    segmentationResult, ultrasoundFrame, options);
+
+% This fixture is intentionally rough enough that a skipped or ineffective
+% second stage cannot pass merely because the original DP already smoothed it.
+verifyEqual(testCase, string(surfaceResult.regularizationStatus), "applied");
+verifyGreaterThan(testCase, surfaceResult.roughnessBeforePerMm, 0);
+verifyLessThanOrEqual(testCase, surfaceResult.roughnessAfterPerMm, ...
+    0.30 * surfaceResult.roughnessBeforePerMm);
+
+validMask = isfinite(surfaceResult.surfaceRowByColumn);
+finalErrorMm = (surfaceResult.surfaceRowByColumn(validMask) - ...
+    expectedRows(validMask)) * ySpacingMm;
+verifyLessThanOrEqual(testCase, sqrt(mean(finalErrorMm .^ 2)), 0.25);
+verifyLessThanOrEqual(testCase, ...
+    surfaceResult.regularizationMaxDisplacementMm, 0.75 + 1e-8);
+end
+
+function testDiagonalSlopePreserved(testCase)
+% TESTDIAGONALSLOPEPRESERVED Preserve a legitimate inclined bone surface.
+%   TESTDIAGONALSLOPEPRESERVED(TESTCASE) extracts a long diagonal response
+%   and verifies that curvature regularization does not confuse constant
+%   slope with high-frequency roughness.
+%
+%   Inputs:
+%       testCase - matlab.unittest.FunctionTestCase used for verification.
+%
+%   Outputs:
+%       None. Test failures are reported through TESTCASE.
+
+nRows = 120;
+nColumns = 161;
+xSpacingMm = 0.1;
+ySpacingMm = 0.1;
+xCoordinatesMm = (0:(nColumns - 1)) * xSpacingMm;
+
+% Quantization creates a realistic staircase while the physical trend stays
+% linear. A second-derivative penalty should remove the staircase, not tilt it.
+expectedRows = round(34 + 2.2 * xCoordinatesMm) + 0.5;
+[displayedImage, segmentationMask] = makeBoneBandImage( ...
+    nRows, nColumns, expectedRows, 12, 38);
+segmentationResult = makeSegmentationResult(73, 1, ...
+    segmentationMask, 'processed');
+ultrasoundFrame = makeUltrasoundFrame(73, displayedImage, ...
+    xSpacingMm, ySpacingMm);
+
+surfaceResult = extractBoneSurfacesFromSegmentation( ...
+    segmentationResult, ultrasoundFrame, struct());
+validMask = isfinite(surfaceResult.surfaceRowByColumn);
+rawDepthMm = surfaceResult.rawSurfaceRowByColumn(validMask) * ySpacingMm;
+finalDepthMm = surfaceResult.surfaceRowByColumn(validMask) * ySpacingMm;
+validXCoordinatesMm = xCoordinatesMm(validMask);
+rawLine = polyfit(validXCoordinatesMm, rawDepthMm, 1);
+finalLine = polyfit(validXCoordinatesMm, finalDepthMm, 1);
+
+verifyEqual(testCase, string(surfaceResult.regularizationStatus), "applied");
+verifyGreaterThan(testCase, abs(rawLine(1)), 0.05);
+verifyLessThanOrEqual(testCase, ...
+    abs(finalLine(1) - rawLine(1)) / abs(rawLine(1)), 0.05);
+end
+
+function testBroadCurvaturePreserved(testCase)
+% TESTBROADCURVATUREPRESERVED Retain anatomy wider than the smoothing scale.
+%   TESTBROADCURVATUREPRESERVED(TESTCASE) uses a sinusoidal response whose
+%   wavelength is much wider than 2.5 mm. The final fit may remove pixel
+%   stair-steps but must retain at least 90 percent of the broad curvature.
+%
+%   Inputs:
+%       testCase - matlab.unittest.FunctionTestCase used for verification.
+%
+%   Outputs:
+%       None. Test failures are reported through TESTCASE.
+
+nRows = 110;
+nColumns = 181;
+xSpacingMm = 0.1;
+ySpacingMm = 0.1;
+xCoordinatesMm = (0:(nColumns - 1)) * xSpacingMm;
+curvatureWavelengthMm = 12;
+expectedRows = round(48 + 6 * sin( ...
+    2 * pi * xCoordinatesMm / curvatureWavelengthMm)) + 0.5;
+[displayedImage, segmentationMask] = makeBoneBandImage( ...
+    nRows, nColumns, expectedRows, 14, 38);
+segmentationResult = makeSegmentationResult(74, 1, ...
+    segmentationMask, 'processed');
+ultrasoundFrame = makeUltrasoundFrame(74, displayedImage, ...
+    xSpacingMm, ySpacingMm);
+
+surfaceResult = extractBoneSurfacesFromSegmentation( ...
+    segmentationResult, ultrasoundFrame, struct());
+validMask = isfinite(surfaceResult.surfaceRowByColumn);
+rawAmplitudeMm = estimatePeriodicAmplitude( ...
+    xCoordinatesMm(validMask), ...
+    surfaceResult.rawSurfaceRowByColumn(validMask) * ySpacingMm, ...
+    curvatureWavelengthMm);
+finalAmplitudeMm = estimatePeriodicAmplitude( ...
+    xCoordinatesMm(validMask), ...
+    surfaceResult.surfaceRowByColumn(validMask) * ySpacingMm, ...
+    curvatureWavelengthMm);
+
+verifyGreaterThan(testCase, rawAmplitudeMm, 0.4);
+verifyGreaterThanOrEqual(testCase, finalAmplitudeMm, ...
+    0.90 * rawAmplitudeMm);
+end
+
+function testRegularizationUsesPhysicalLateralSpacing(testCase)
+% TESTREGULARIZATIONUSESPHYSICALLATERALSPACING Check resolution invariance.
+%   TESTREGULARIZATIONUSESPHYSICALLATERALSPACING(TESTCASE) samples the same
+%   physical response at 0.1 and 0.2 mm lateral spacing. The two refined
+%   depths should agree at their shared physical positions.
+%
+%   Inputs:
+%       testCase - matlab.unittest.FunctionTestCase used for verification.
+%
+%   Outputs:
+%       None. Test failures are reported through TESTCASE.
+
+[fineResult, fineXCoordinatesMm, ySpacingMm] = ...
+    extractPhysicalSpacingFixture(75, 0.1);
+[coarseResult, coarseXCoordinatesMm] = ...
+    extractPhysicalSpacingFixture(76, 0.2);
+
+% Coarse coordinates are an exact subset of the fine grid. Interpolation is
+% still used here to express the comparison in physical rather than index space.
+fineDepthMm = fineResult.surfaceRowByColumn * ySpacingMm;
+coarseDepthMm = coarseResult.surfaceRowByColumn * ySpacingMm;
+fineDepthAtCoarseMm = interp1(fineXCoordinatesMm, fineDepthMm, ...
+    coarseXCoordinatesMm, 'linear');
+sharedMask = isfinite(fineDepthAtCoarseMm) & isfinite(coarseDepthMm);
+spacingDifferenceMm = fineDepthAtCoarseMm(sharedMask) - ...
+    coarseDepthMm(sharedMask);
+
+verifyGreaterThanOrEqual(testCase, mean(sharedMask), 0.90);
+verifyLessThanOrEqual(testCase, ...
+    sqrt(mean(spacingDifferenceMm .^ 2)), 0.10);
+end
+
+function testDisabledRegularizationMatchesRawStageExactly(testCase)
+% TESTDISABLEDREGULARIZATIONMATCHESRAWSTAGEEXACTLY Preserve legacy output.
+%   TESTDISABLEDREGULARIZATIONMATCHESRAWSTAGEEXACTLY(TESTCASE) compares an
+%   explicitly disabled run with the raw DP/PCHIP audit fields from an
+%   enabled run. This verifies that refinement does not alter the first stage
+%   and that disabling it reproduces that legacy result without rounding.
+%
+%   Inputs:
+%       testCase - matlab.unittest.FunctionTestCase used for verification.
+%
+%   Outputs:
+%       None. Test failures are reported through TESTCASE.
+
+[segmentationResult, ultrasoundFrame] = ...
+    makeErraticRefinementFixture(77, 0.1);
+enabledOptions = makeRefinementTestOptions();
+disabledOptions = enabledOptions;
+disabledOptions.regularizationEnabled = false;
+
+enabledResult = extractBoneSurfacesFromSegmentation( ...
+    segmentationResult, ultrasoundFrame, enabledOptions);
+[disabledResult, disabledMetadata] = extractBoneSurfacesFromSegmentation( ...
+    segmentationResult, ultrasoundFrame, disabledOptions);
+
+verifyEqual(testCase, string(disabledResult.regularizationStatus), "disabled");
+verifyTrue(testCase, isequaln(disabledResult.surfaceRowByColumn, ...
+    enabledResult.rawSurfaceRowByColumn));
+verifyTrue(testCase, isequaln(disabledResult.confidenceByColumn, ...
+    enabledResult.rawConfidenceByColumn));
+verifyTrue(testCase, isequaln(disabledResult.surfaceRowByColumn, ...
+    disabledResult.rawSurfaceRowByColumn));
+verifyTrue(testCase, isequaln(disabledResult.confidenceByColumn, ...
+    disabledResult.rawConfidenceByColumn));
+verifyEqual(testCase, disabledResult.observedColumnMask, ...
+    enabledResult.observedColumnMask);
+verifyEqual(testCase, disabledResult.interpolatedColumnMask, ...
+    enabledResult.interpolatedColumnMask);
+verifyEqual(testCase, disabledResult.segmentIdByColumn, ...
+    enabledResult.segmentIdByColumn);
+verifyFalse(testCase, ...
+    disabledMetadata.resolvedConfiguration.regularizationEnabled);
+end
+
+function testOutsideMaskFlagsAndConfidenceDecay(testCase)
+% TESTOUTSIDEMASKFLAGSANDCONFIDENCEDECAY Audit permitted mask departures.
+%   TESTOUTSIDEMASKFLAGSANDCONFIDENCEDECAY(TESTCASE) uses a narrow zig-zag
+%   segmentation that forces the raw path away from a flat surface. The
+%   refined curve should leave that unreliable mask, report every departure,
+%   and reduce confidence according to its physical displacement.
+%
+%   Inputs:
+%       testCase - matlab.unittest.FunctionTestCase used for verification.
+%
+%   Outputs:
+%       None. Test failures are reported through TESTCASE.
+
+nRows = 100;
+nColumns = 141;
+xSpacingMm = 0.1;
+ySpacingMm = 0.1;
+columnIndices = 1:nColumns;
+rawOffsetsRows = 10 * sign(sin(2 * pi * columnIndices / 10));
+rawOffsetsRows(rawOffsetsRows == 0) = 10;
+rawTargetRows = 48.5 + rawOffsetsRows;
+[displayedImage, segmentationMask] = makeBoneBandImage( ...
+    nRows, nColumns, rawTargetRows, 3, 35);
+segmentationResult = makeSegmentationResult(78, 1, ...
+    segmentationMask, 'processed');
+ultrasoundFrame = makeUltrasoundFrame(78, displayedImage, ...
+    xSpacingMm, ySpacingMm);
+options = makeRefinementTestOptions();
+
+surfaceResult = extractBoneSurfacesFromSegmentation( ...
+    segmentationResult, ultrasoundFrame, options);
+observedMask = logical(surfaceResult.observedColumnMask);
+observedColumns = find(observedMask);
+roundedFinalRows = round(surfaceResult.surfaceRowByColumn(observedMask));
+finalLinearIndices = sub2ind(size(segmentationMask), ...
+    roundedFinalRows, observedColumns);
+expectedOutsideMask = false(1, nColumns);
+expectedOutsideMask(observedMask) = ~segmentationMask(finalLinearIndices);
+
+verifyTrue(testCase, any(expectedOutsideMask));
+verifyEqual(testCase, surfaceResult.outsideSegmentationColumnMask, ...
+    expectedOutsideMask);
+verifyEqual(testCase, surfaceResult.outsideSegmentationFraction, ...
+    nnz(expectedOutsideMask) / nnz(observedMask), 'AbsTol', 10 * eps);
+
+observedDisplacementMm = abs( ...
+    surfaceResult.regularizationDisplacementMmByColumn(observedMask));
+expectedConfidence = surfaceResult.rawConfidenceByColumn(observedMask) .* ...
+    exp(-observedDisplacementMm / options.regularizationMaxDisplacementMm);
+verifyEqual(testCase, surfaceResult.confidenceByColumn(observedMask), ...
+    expectedConfidence, 'AbsTol', 1e-10);
+verifyLessThanOrEqual(testCase, observedDisplacementMm, ...
+    options.regularizationMaxDisplacementMm + 1e-8);
+
+% The deliberately incompatible alternating corridors require some points
+% to stop at the raw-displacement cap, exercising the bound-hit audit field.
+observedBoundHits = surfaceResult. ...
+    regularizationBoundHitColumnMask(observedMask);
+verifyTrue(testCase, any(observedBoundHits));
+verifyEqual(testCase, observedDisplacementMm(observedBoundHits), ...
+    repmat(options.regularizationMaxDisplacementMm, ...
+    1, nnz(observedBoundHits)), ...
+    'AbsTol', options.regularizationConvergenceMm);
+end
+
+function testSolverFailureRetainsRawSegment(testCase)
+% TESTSOLVERFAILURERETAINSRAWSEGMENT Verify safe numerical fallback.
+%   TESTSOLVERFAILURERETAINSRAWSEGMENT(TESTCASE) temporarily places a
+%   deliberately failing QUADPROG shim first on the MATLAB path. The public
+%   extractor must warn, mark the frame as a fallback, and preserve every raw
+%   surface and confidence value instead of returning a partial curve.
+%
+%   Inputs:
+%       testCase - matlab.unittest.FunctionTestCase used for verification.
+%
+%   Outputs:
+%       None. Test failures are reported through TESTCASE.
+
+[segmentationResult, ultrasoundFrame] = makeSimpleFixture(79);
+temporaryDirectory = tempname;
+mkdir(temporaryDirectory);
+writeFailingQuadprogShim(temporaryDirectory);
+
+% Cleanup also clears MATLAB's function cache so later tests resolve the real
+% Optimization Toolbox implementation even when this verification fails.
+cleanupTemporaryShim = onCleanup( ...
+    @() removeFailingQuadprogShim(temporaryDirectory));
+addpath(temporaryDirectory, '-begin');
+rehash path;
+clear quadprog;
+
+lastwarn('');
+surfaceResult = extractBoneSurfacesFromSegmentation( ...
+    segmentationResult, ultrasoundFrame, struct());
+[warningMessage, warningIdentifier] = lastwarn;
+
+verifyEqual(testCase, warningIdentifier, ...
+    'extractBoneSurfacesFromSegmentation:RegularizationFallback');
+verifyThat(testCase, warningMessage, ...
+    matlab.unittest.constraints.ContainsSubstring('sourceIndex 79'));
+verifyEqual(testCase, string(surfaceResult.regularizationStatus), "fallback");
+verifyTrue(testCase, isequaln(surfaceResult.surfaceRowByColumn, ...
+    surfaceResult.rawSurfaceRowByColumn));
+verifyTrue(testCase, isequaln(surfaceResult.confidenceByColumn, ...
+    surfaceResult.rawConfidenceByColumn));
+fallbackDisplacementMm = ...
+    surfaceResult.regularizationDisplacementMmByColumn( ...
+    isfinite(surfaceResult.surfaceRowByColumn));
+verifyTrue(testCase, all(fallbackDisplacementMm == 0));
+verifyFalse(testCase, ...
+    any(surfaceResult.regularizationBoundHitColumnMask));
+end
+
 function testOutputInterfaceAndInvariants(testCase)
 % TESTOUTPUTINTERFACEANDINVARIANTS Verify the documented result contract.
 %   TESTOUTPUTINTERFACEANDINVARIANTS(TESTCASE) checks coordinates, flags,
@@ -427,8 +738,15 @@ verifyEqual(testCase, segmentationResults, segmentationResultsBeforeExtraction);
 
 requiredFields = {'sequencePosition', 'sourceIndex', 'status', ...
     'surfacePixelCoordinatesXY', 'surfaceRowByColumn', ...
+    'rawSurfaceRowByColumn', 'rawConfidenceByColumn', ...
     'observedColumnMask', 'interpolatedColumnMask', ...
     'segmentIdByColumn', 'confidenceByColumn', 'pixelSpacingXYMm', ...
+    'regularizationDisplacementMmByColumn', ...
+    'regularizationBoundHitColumnMask', ...
+    'outsideSegmentationColumnMask', 'outsideSegmentationFraction', ...
+    'regularizationStatus', 'roughnessBeforePerMm', ...
+    'roughnessAfterPerMm', 'regularizationRmsDisplacementMm', ...
+    'regularizationMaxDisplacementMm', ...
     'observedLengthMm', 'interpolatedLengthMm', 'meanConfidence', ...
     'numberOfSegments'};
 verifyTrue(testCase, all(isfield(surfaceResults, requiredFields)));
@@ -437,21 +755,64 @@ verifyTrue(testCase, all(isfield(surfaceResults, requiredFields)));
 observedMask = logical(surfaceResults.observedColumnMask(:).');
 interpolatedMask = logical(surfaceResults.interpolatedColumnMask(:).');
 surfaceRows = surfaceResults.surfaceRowByColumn(:).';
+rawSurfaceRows = surfaceResults.rawSurfaceRowByColumn(:).';
 confidence = surfaceResults.confidenceByColumn(:).';
+rawConfidence = surfaceResults.rawConfidenceByColumn(:).';
+displacementMm = ...
+    surfaceResults.regularizationDisplacementMmByColumn(:).';
+boundHitMask = logical( ...
+    surfaceResults.regularizationBoundHitColumnMask(:).');
+outsideMask = logical( ...
+    surfaceResults.outsideSegmentationColumnMask(:).');
 segmentIds = surfaceResults.segmentIdByColumn(:).';
 verifyEqual(testCase, numel(surfaceRows), nColumns);
 verifyFalse(testCase, any(observedMask & interpolatedMask));
 verifyEqual(testCase, isfinite(surfaceRows), observedMask | interpolatedMask);
+verifyEqual(testCase, isfinite(rawSurfaceRows), observedMask | interpolatedMask);
 verifyTrue(testCase, all(segmentIds(~isfinite(surfaceRows)) == 0));
 verifyTrue(testCase, all(isnan(confidence(~isfinite(surfaceRows)))));
+verifyTrue(testCase, all(isnan(rawConfidence(~isfinite(rawSurfaceRows)))));
 verifyGreaterThanOrEqual(testCase, confidence(isfinite(surfaceRows)), 0);
 verifyLessThanOrEqual(testCase, confidence(isfinite(surfaceRows)), 1);
+verifyGreaterThanOrEqual(testCase, rawConfidence(isfinite(rawSurfaceRows)), 0);
+verifyLessThanOrEqual(testCase, rawConfidence(isfinite(rawSurfaceRows)), 1);
 
-% Every observed point must remain inside the original candidate mask.
+% Displacement is expressed in axial millimetres and is bounded for every
+% finite point. Diagnostic masks must never label an absent surface column.
+expectedDisplacementMm = (surfaceRows - rawSurfaceRows) * ...
+    surfaceResults.pixelSpacingXYMm(2);
+verifyEqual(testCase, displacementMm, expectedDisplacementMm, ...
+    'AbsTol', 1e-10);
+verifyFalse(testCase, any(boundHitMask & ~isfinite(surfaceRows)));
+verifyFalse(testCase, any(outsideMask & ~observedMask));
+verifyLessThanOrEqual(testCase, abs(displacementMm(isfinite(surfaceRows))), ...
+    extractionMetadata.resolvedConfiguration. ...
+    regularizationMaxDisplacementMm + 1e-8);
+
+% Raw observed points must remain in the extraction mask. Final points may
+% leave it, and the explicit outside mask must exactly describe that event.
 observedColumns = find(observedMask);
-observedRows = round(surfaceRows(observedMask));
-linearIndices = sub2ind(size(segmentationMask), observedRows, observedColumns);
-verifyTrue(testCase, all(segmentationMask(linearIndices)));
+roundedRawRows = round(rawSurfaceRows(observedMask));
+rawLinearIndices = sub2ind(size(segmentationMask), ...
+    roundedRawRows, observedColumns);
+verifyTrue(testCase, all(segmentationMask(rawLinearIndices)));
+roundedFinalRows = round(surfaceRows(observedMask));
+finalLinearIndices = sub2ind(size(segmentationMask), ...
+    roundedFinalRows, observedColumns);
+expectedOutsideMask = false(1, nColumns);
+expectedOutsideMask(observedMask) = ~segmentationMask(finalLinearIndices);
+verifyEqual(testCase, outsideMask, expectedOutsideMask);
+verifyEqual(testCase, surfaceResults.outsideSegmentationFraction, ...
+    nnz(expectedOutsideMask) / nnz(observedMask), 'AbsTol', 10 * eps);
+
+% Final observed confidence decays from its raw value based only on the
+% bounded physical movement made by regularization.
+maximumDisplacementMm = extractionMetadata.resolvedConfiguration. ...
+    regularizationMaxDisplacementMm;
+expectedObservedConfidence = rawConfidence(observedMask) .* exp( ...
+    -abs(displacementMm(observedMask)) / maximumDisplacementMm);
+verifyEqual(testCase, confidence(observedMask), ...
+    expectedObservedConfidence, 'AbsTol', 1e-10);
 
 % The compact coordinate array must be ordered, one point per finite column,
 % and use MATLAB [column,row] pixel coordinates.
@@ -473,8 +834,240 @@ verifyGreaterThan(testCase, surfaceResults.observedLengthMm, 0);
 verifyEqual(testCase, surfaceResults.numberOfSegments, 1);
 
 metadataFields = {'algorithmVersion', 'coordinateConvention', ...
-    'beamDirection', 'resolvedConfiguration'};
+    'beamDirection', 'resolvedConfiguration', ...
+    'regularizationStatusCounts'};
 verifyTrue(testCase, all(isfield(extractionMetadata, metadataFields)));
+verifyEqual(testCase, string(extractionMetadata.algorithmVersion), "1.1.0");
+
+configurationFields = {'regularizationEnabled', ...
+    'regularizationHalfResponseWavelengthMm', ...
+    'regularizationHuberDeltaMm', ...
+    'regularizationMaxDisplacementMm', ...
+    'regularizationMinimumDataWeight', ...
+    'regularizationMaximumIterations', ...
+    'regularizationConvergenceMm'};
+verifyTrue(testCase, all(isfield( ...
+    extractionMetadata.resolvedConfiguration, configurationFields)));
+verifyTrue(testCase, ...
+    extractionMetadata.resolvedConfiguration.regularizationEnabled);
+verifyEqual(testCase, extractionMetadata.resolvedConfiguration. ...
+    regularizationHalfResponseWavelengthMm, 2.5);
+verifyEqual(testCase, extractionMetadata.resolvedConfiguration. ...
+    regularizationHuberDeltaMm, 0.15);
+verifyEqual(testCase, extractionMetadata.resolvedConfiguration. ...
+    regularizationMaxDisplacementMm, 0.75);
+verifyEqual(testCase, extractionMetadata.resolvedConfiguration. ...
+    regularizationMinimumDataWeight, 0.10);
+verifyEqual(testCase, extractionMetadata.resolvedConfiguration. ...
+    regularizationMaximumIterations, 10);
+verifyEqual(testCase, extractionMetadata.resolvedConfiguration. ...
+    regularizationConvergenceMm, 0.001);
+
+statusCountFields = {'applied', 'disabled', 'notApplicable', ...
+    'partialFallback', 'fallback'};
+verifyTrue(testCase, all(isfield( ...
+    extractionMetadata.regularizationStatusCounts, statusCountFields)));
+statusCounts = cell2mat(struct2cell( ...
+    extractionMetadata.regularizationStatusCounts));
+verifyEqual(testCase, sum(statusCounts), 1);
+end
+
+function writeFailingQuadprogShim(temporaryDirectory)
+% WRITEFAILINGQUADPROGSHIM Create a temporary solver failure injector.
+%   WRITEFAILINGQUADPROGSHIM(TEMPORARYDIRECTORY) writes a minimal QUADPROG
+%   function that always throws. Keeping this shim outside the repository
+%   lets the fallback test exercise the public numerical-error path without
+%   changing production code or Optimization Toolbox files.
+%
+%   Inputs:
+%       temporaryDirectory - Existing writable folder used only by the test.
+%
+%   Outputs:
+%       None. The temporary quadprog.m file is written into the folder.
+
+shimPath = fullfile(temporaryDirectory, 'quadprog.m');
+fileIdentifier = fopen(shimPath, 'w');
+if fileIdentifier < 0
+    error('testExtractBoneSurfaces:TemporaryFileFailure', ...
+        'Could not create the temporary quadprog failure shim.');
+end
+closeFile = onCleanup(@() fclose(fileIdentifier));
+
+shimLines = { ...
+    'function varargout = quadprog(varargin)', ...
+    '% QUADPROG Test-only shim that injects a deterministic solver error.', ...
+    'error(''testExtractBoneSurfaces:InjectedSolverFailure'', ...', ...
+    '    ''Injected quadprog failure for fallback verification.'');', ...
+    'end'};
+for lineIndex = 1:numel(shimLines)
+    fprintf(fileIdentifier, '%s\n', shimLines{lineIndex});
+end
+end
+
+function removeFailingQuadprogShim(temporaryDirectory)
+% REMOVEFAILINGQUADPROGSHIM Restore solver lookup and delete test files.
+%   REMOVEFAILINGQUADPROGSHIM(TEMPORARYDIRECTORY) removes the temporary path,
+%   clears the shadowed function from MATLAB's cache, and deletes the exact
+%   temporary directory created by TESTSOLVERFAILURERETAINSRAWSEGMENT.
+%
+%   Inputs:
+%       temporaryDirectory - Exact test-owned folder containing the shim.
+%
+%   Outputs:
+%       None. MATLAB path and temporary files are restored in place.
+
+pathEntries = strsplit(path, pathsep);
+if any(strcmp(pathEntries, temporaryDirectory))
+    rmpath(temporaryDirectory);
+end
+clear quadprog;
+rehash path;
+
+% TEMPORARYDIRECTORY comes directly from TEMPNAME and is never inferred from
+% a broad parent directory, so recursive cleanup cannot affect project data.
+if isfolder(temporaryDirectory)
+    rmdir(temporaryDirectory, 's');
+end
+end
+
+function [segmentationResult, ultrasoundFrame, expectedRows, ySpacingMm] = ...
+        makeErraticRefinementFixture(sourceIndex, xSpacingMm)
+% MAKEERRATICREFINEMENTFIXTURE Build a rough path around a flat truth.
+%   [SEGMENTATIONRESULT,ULTRASOUNDFRAME,EXPECTEDROWS,YSPACINGMM] =
+%   MAKEERRATICREFINEMENTFIXTURE(SOURCEINDEX,XSPACINGMM) creates strong
+%   alternating first echoes, one narrow deep valley, and extra distal mask
+%   runs. It is used to isolate the post-DP curvature refinement from normal
+%   first-stage smoothness.
+%
+%   Inputs:
+%       sourceIndex - Unique scalar identifier used to match the test frame.
+%       xSpacingMm - Positive lateral pixel spacing in millimetres.
+%
+%   Outputs:
+%       segmentationResult - Processed synthetic segmentation structure.
+%       ultrasoundFrame - Matching synthetic ultrasound frame structure.
+%       expectedRows - Flat anatomical approximation for every column.
+%       ySpacingMm - Axial pixel spacing in millimetres.
+
+nRows = 110;
+nColumns = 161;
+ySpacingMm = 0.1;
+xCoordinatesMm = (0:(nColumns - 1)) * xSpacingMm;
+expectedRows = repmat(52.5, 1, nColumns);
+
+% Alternating 0.8 mm blocks model jagged branches. The central 0.6 mm
+% downward excursion models the implausible narrow valley seen in hard cases.
+blockIndices = floor(xCoordinatesMm / 0.4);
+alternatingOffsetsRows = 3 * (2 * mod(blockIndices, 2) - 1);
+rawTargetRows = expectedRows + alternatingOffsetsRows;
+valleyMask = abs(xCoordinatesMm - 8.0) <= 0.3;
+rawTargetRows(valleyMask) = expectedRows(valleyMask) + 7;
+[displayedImage, segmentationMask] = makeBoneBandImage( ...
+    nRows, nColumns, rawTargetRows, 5, 35);
+
+% Add dark distal runs in selected regions. They create amoeba-like
+% competing branches without replacing the strong probe-facing reflection.
+branchColumns = [24:42, 70:88, 118:137];
+for columnIndex = branchColumns
+    branchStartRow = round(rawTargetRows(columnIndex)) + 9;
+    branchEndRow = min(nRows, branchStartRow + 4);
+    segmentationMask(branchStartRow:branchEndRow, columnIndex) = true;
+end
+
+segmentationResult = makeSegmentationResult( ...
+    sourceIndex, 1, segmentationMask, 'processed');
+ultrasoundFrame = makeUltrasoundFrame( ...
+    sourceIndex, displayedImage, xSpacingMm, ySpacingMm);
+end
+
+function options = makeRefinementTestOptions()
+% MAKEREFINEMENTTESTOPTIONS Configure tests to expose the raw rough path.
+%   OPTIONS = MAKEREFINEMENTTESTOPTIONS() returns explicit production
+%   refinement settings while reducing only the first-stage slope penalty.
+%   This makes synthetic pixel-scale perturbations visible in the raw audit
+%   trace so tests measure the new stage instead of the existing DP prior.
+%
+%   Inputs:
+%       None.
+%
+%   Outputs:
+%       options - Scalar extractor-options structure.
+
+options = struct( ...
+    'smoothnessWeight', 0.005, ...
+    'evidenceThreshold', 0.05, ...
+    'minimumMeanSegmentConfidence', 0.05, ...
+    'regularizationEnabled', true, ...
+    'regularizationHalfResponseWavelengthMm', 2.5, ...
+    'regularizationHuberDeltaMm', 0.15, ...
+    'regularizationMaxDisplacementMm', 0.75, ...
+    'regularizationMinimumDataWeight', 0.10, ...
+    'regularizationMaximumIterations', 10, ...
+    'regularizationConvergenceMm', 0.001);
+end
+
+function amplitudeMm = estimatePeriodicAmplitude( ...
+        xCoordinatesMm, depthMm, wavelengthMm)
+% ESTIMATEPERIODICAMPLITUDE Measure one known sinusoidal component.
+%   AMPLITUDEMM = ESTIMATEPERIODICAMPLITUDE(XCOORDINATESMM,DEPTHMM,
+%   WAVELENGTHMM) fits offset, sine, and cosine terms at the requested
+%   wavelength. Combining the two periodic coefficients avoids sensitivity
+%   to a small phase shift introduced by smoothing.
+%
+%   Inputs:
+%       xCoordinatesMm - Physical lateral sample coordinates in millimetres.
+%       depthMm - Surface depths at the matching coordinates in millimetres.
+%       wavelengthMm - Positive wavelength of the component to measure.
+%
+%   Outputs:
+%       amplitudeMm - Nonnegative fitted sinusoidal amplitude in millimetres.
+
+xCoordinatesMm = double(xCoordinatesMm(:));
+depthMm = double(depthMm(:));
+phaseRadians = 2 * pi * xCoordinatesMm / wavelengthMm;
+designMatrix = [ones(size(phaseRadians)), ...
+    sin(phaseRadians), cos(phaseRadians)];
+coefficients = designMatrix \ depthMm;
+amplitudeMm = hypot(coefficients(2), coefficients(3));
+end
+
+function [surfaceResult, xCoordinatesMm, ySpacingMm] = ...
+        extractPhysicalSpacingFixture(sourceIndex, xSpacingMm)
+% EXTRACTPHYSICALSPACINGFIXTURE Extract one resolution-controlled response.
+%   [SURFACERESULT,XCOORDINATESMM,YSPACINGMM] =
+%   EXTRACTPHYSICALSPACINGFIXTURE(SOURCEINDEX,XSPACINGMM) samples the same
+%   16 mm physical mixture of broad curvature and short roughness using the
+%   requested lateral spacing, then runs the public extractor.
+%
+%   Inputs:
+%       sourceIndex - Unique scalar identifier used to match the test frame.
+%       xSpacingMm - Positive lateral pixel spacing in millimetres.
+%
+%   Outputs:
+%       surfaceResult - One surface result returned by the extractor.
+%       xCoordinatesMm - Lateral coordinate for every result column.
+%       ySpacingMm - Axial pixel spacing in millimetres.
+
+physicalWidthMm = 16;
+nColumns = round(physicalWidthMm / xSpacingMm) + 1;
+nRows = 110;
+ySpacingMm = 0.1;
+xCoordinatesMm = (0:(nColumns - 1)) * xSpacingMm;
+
+% Both samplings share these physical wavelengths. Rounding only represents
+% the unavoidable pixel quantization of the synthetic ultrasound image.
+rawTargetRows = round(50 + ...
+    2 * sin(2 * pi * xCoordinatesMm / 10) + ...
+    3 * sin(2 * pi * xCoordinatesMm / 0.8)) + 0.5;
+[displayedImage, segmentationMask] = makeBoneBandImage( ...
+    nRows, nColumns, rawTargetRows, 8, 35);
+segmentationResult = makeSegmentationResult( ...
+    sourceIndex, 1, segmentationMask, 'processed');
+ultrasoundFrame = makeUltrasoundFrame( ...
+    sourceIndex, displayedImage, xSpacingMm, ySpacingMm);
+
+surfaceResult = extractBoneSurfacesFromSegmentation( ...
+    segmentationResult, ultrasoundFrame, makeRefinementTestOptions());
 end
 
 function [surfaceResult, gapColumns] = extractSyntheticGap(numberOfMissingColumns, sourceIndex)

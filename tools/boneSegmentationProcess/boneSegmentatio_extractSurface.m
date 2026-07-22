@@ -154,9 +154,25 @@ for pageIndex = 1:numberOfPages
         colormap(currentAxes, gray(256));
         hold(currentAxes, 'on');
 
-        plotMaskBoundary(currentAxes, ...
-            logical(segmentationResults(frameIndex).segmentationMask));
+        % Match the extractor's effective mask exactly so blue outside-mask
+        % markers are judged against the same reviewed search region shown in
+        % yellow, including an optional segmentation-area restriction.
+        segmentationEntry = segmentationResults(frameIndex);
+        effectiveMask = logical(segmentationEntry.segmentationMask);
+        if isfield(segmentationEntry, 'segmentationAreaMask') && ...
+                ~isempty(segmentationEntry.segmentationAreaMask)
+            effectiveMask = effectiveMask & ...
+                logical(segmentationEntry.segmentationAreaMask);
+        end
+        plotMaskBoundary(currentAxes, effectiveMask);
         plotSurfaceResult(currentAxes, surfaceResults(frameIndex));
+
+        % Add one shared key to the page. Repeating the legend in every tile
+        % would hide useful ultrasound detail in these small review panels.
+        if frameIndex == firstFrame
+            reviewLegend = createBoneSurfaceReviewLegend(currentAxes);
+            reviewLegend.Layout.Tile = 'south';
+        end
 
         title(currentAxes, sprintf('#%d | src %g | %s', ...
             frameIndex, sourceIndex, surfaceResults(frameIndex).status), ...
@@ -193,9 +209,13 @@ end
 
 
 function plotSurfaceResult(targetAxes, surfaceResult)
-%PLOTSURFACERESULT Draw segments and distinguish measured from inferred points.
-% Green lines show the complete downstream curve, red dots mark image-supported
-% observations, and cyan dots expose columns filled only by interpolation.
+%PLOTSURFACERESULT Draw raw and refined bone-surface review overlays.
+% The raw extraction is drawn as a thin magenta line so reviewers can see how
+% far regularization moved it. Red and cyan points distinguish final observed
+% and interpolated locations. Blue rings flag observed points that finished
+% outside the segmentation. Results saved before these audit fields existed
+% remain reviewable by treating their final curve as their raw curve and by
+% omitting the unavailable outside-mask markers.
 %
 % Inputs:
 %   targetAxes   : Axes that already display the source B-mode image.
@@ -204,21 +224,94 @@ function plotSurfaceResult(targetAxes, surfaceResult)
 % Outputs:
 %   None. The function adds surface overlays to targetAxes.
 
-for segmentIndex = 1:surfaceResult.numberOfSegments
-    segmentColumns = find( ...
-        surfaceResult.segmentIdByColumn == segmentIndex);
-    plot(targetAxes, segmentColumns, ...
-        surfaceResult.surfaceRowByColumn(segmentColumns), ...
-        '-', 'Color', [0.10, 0.90, 0.30], 'LineWidth', 1.1);
+finalSurfaceRows = reshape(surfaceResult.surfaceRowByColumn, 1, []);
+
+% New result files retain the pre-regularization path explicitly. Falling
+% back to the final path lets older MAT files use this review code unchanged.
+if isfield(surfaceResult, 'rawSurfaceRowByColumn') && ...
+        numel(surfaceResult.rawSurfaceRowByColumn) == numel(finalSurfaceRows)
+    rawSurfaceRows = reshape(surfaceResult.rawSurfaceRowByColumn, 1, []);
+else
+    rawSurfaceRows = finalSurfaceRows;
 end
 
-observedColumns = find(surfaceResult.observedColumnMask);
-plot(targetAxes, observedColumns, ...
-    surfaceResult.surfaceRowByColumn(observedColumns), ...
-    '.', 'Color', [1.0, 0.15, 0.10], 'MarkerSize', 8);
+% Draw each segment separately so a long rejected gap is never represented
+% by a misleading magenta connection between two accepted surface pieces.
+segmentIds = unique(surfaceResult.segmentIdByColumn);
+segmentIds = segmentIds(isfinite(segmentIds) & segmentIds > 0);
+for segmentId = reshape(segmentIds, 1, [])
+    segmentColumns = find(surfaceResult.segmentIdByColumn == segmentId);
+    plot(targetAxes, segmentColumns, rawSurfaceRows(segmentColumns), ...
+        '-', 'Color', [0.90, 0.10, 0.80], 'LineWidth', 0.65, ...
+        'HandleVisibility', 'off');
+end
 
-interpolatedColumns = find(surfaceResult.interpolatedColumnMask);
+observedColumnMask = reshape(logical( ...
+    surfaceResult.observedColumnMask), 1, []);
+interpolatedColumnMask = reshape(logical( ...
+    surfaceResult.interpolatedColumnMask), 1, []);
+
+% Point markers intentionally do not connect across classification changes.
+% This keeps short inferred gaps visibly cyan instead of hiding them under a
+% red line joining the observations on either side.
+observedColumns = find(observedColumnMask);
+plot(targetAxes, observedColumns, finalSurfaceRows(observedColumns), ...
+    '.', 'Color', [1.0, 0.15, 0.10], 'MarkerSize', 8, ...
+    'HandleVisibility', 'off');
+
+interpolatedColumns = find(interpolatedColumnMask);
 plot(targetAxes, interpolatedColumns, ...
-    surfaceResult.surfaceRowByColumn(interpolatedColumns), ...
-    '.', 'Color', [0.0, 0.90, 1.0], 'MarkerSize', 8);
+    finalSurfaceRows(interpolatedColumns), ...
+    '.', 'Color', [0.0, 0.90, 1.0], 'MarkerSize', 8, ...
+    'HandleVisibility', 'off');
+
+% Older result files have no outside-mask audit field. An all-false fallback
+% preserves their original display while new results gain the blue warning.
+outsideSegmentationColumnMask = false(size(finalSurfaceRows));
+if isfield(surfaceResult, 'outsideSegmentationColumnMask') && ...
+        numel(surfaceResult.outsideSegmentationColumnMask) == ...
+        numel(finalSurfaceRows)
+    outsideSegmentationColumnMask = reshape(logical( ...
+        surfaceResult.outsideSegmentationColumnMask), 1, []);
+end
+outsideColumns = find(outsideSegmentationColumnMask & observedColumnMask);
+plot(targetAxes, outsideColumns, finalSurfaceRows(outsideColumns), ...
+    'o', 'Color', [0.10, 0.45, 1.0], 'MarkerSize', 4.5, ...
+    'LineWidth', 0.9, 'MarkerFaceColor', 'none', ...
+    'HandleVisibility', 'off');
+end
+
+
+function legendHandle = createBoneSurfaceReviewLegend(targetAxes)
+%CREATEBONESURFACEREVIEWLEGEND Add one compact key below a review page.
+% The key uses placeholder graphics so the five overlay meanings stay visible
+% even when the first frame has no interpolation or outside-mask points. It is
+% attached to the tiled layout below all panels to avoid covering image data.
+%
+% Inputs:
+%   targetAxes : Axes belonging to the tiled review layout.
+%
+% Outputs:
+%   legendHandle : MATLAB legend object that the caller places in the layout.
+
+% NaN coordinates create legend samples without adding visible data marks to
+% the ultrasound panel. Their styles exactly match the real review overlays.
+maskKey = plot(targetAxes, NaN, NaN, '-', ...
+    'Color', [1.0, 0.80, 0.05], 'LineWidth', 0.75);
+rawKey = plot(targetAxes, NaN, NaN, '-', ...
+    'Color', [0.90, 0.10, 0.80], 'LineWidth', 0.65);
+observedKey = plot(targetAxes, NaN, NaN, '.', ...
+    'Color', [1.0, 0.15, 0.10], 'MarkerSize', 8);
+interpolatedKey = plot(targetAxes, NaN, NaN, '.', ...
+    'Color', [0.0, 0.90, 1.0], 'MarkerSize', 8);
+outsideKey = plot(targetAxes, NaN, NaN, 'o', ...
+    'Color', [0.10, 0.45, 1.0], 'MarkerSize', 4.5, ...
+    'LineWidth', 0.9, 'MarkerFaceColor', 'none');
+
+legendHandle = legend(targetAxes, ...
+    [maskKey, rawKey, observedKey, interpolatedKey, outsideKey], ...
+    {'Segmentation', 'Raw surface', 'Final observed', ...
+    'Final interpolated', 'Outside segmentation'}, ...
+    'Orientation', 'horizontal', 'NumColumns', 5, ...
+    'Box', 'off', 'FontSize', 7);
 end

@@ -14,5 +14,12 @@
   "maxInterpolatedGapMm": 5.0,
   "normalizationPercentiles": [5.0, 95.0],
   "fallbackConfidenceScale": 0.5,
-  "interpolationMethod": "pchip"
+  "interpolationMethod": "pchip",
+  "regularizationEnabled": true,
+  "regularizationHalfResponseWavelengthMm": 2.5,
+  "regularizationHuberDeltaMm": 0.15,
+  "regularizationMaxDisplacementMm": 0.75,
+  "regularizationMinimumDataWeight": 0.10,
+  "regularizationMaximumIterations": 10,
+  "regularizationConvergenceMm": 0.001
 }
