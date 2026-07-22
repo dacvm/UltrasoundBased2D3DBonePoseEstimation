@@ -1,0 +1,18 @@
+{
+  "gaussianSigmaMm": 0.15,
+  "ridgeSigmaMm": 0.25,
+  "gradientSearchMarginMm": 0.25,
+  "shadowStartMm": 0.25,
+  "shadowLengthMm": 4.0,
+  "evidenceThreshold": 0.20,
+  "positionWeight": 1.0,
+  "reflectionWeight": 0.5,
+  "shadowWeight": 0.5,
+  "smoothnessWeight": 2.0,
+  "minimumObservedSegmentLengthMm": 2.0,
+  "minimumMeanSegmentConfidence": 0.30,
+  "maxInterpolatedGapMm": 5.0,
+  "normalizationPercentiles": [5.0, 95.0],
+  "fallbackConfidenceScale": 0.5,
+  "interpolationMethod": "pchip"
+}

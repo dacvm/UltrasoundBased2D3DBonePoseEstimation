@@ -7,15 +7,14 @@ filename_ultrasoundimage = 'validSnapshots_20260721_145143.mat';
 
 % Load the MAT-file into a structure so its saved variable does not appear
 % directly in the script workspace under an unknown name.
-ultrasoundFileData = load(fullfile( ...
-    filepath_ultrasoundimage, filename_ultrasoundimage));
+ultrasoundFileData = load(fullfile(filepath_ultrasoundimage, filename_ultrasoundimage));
 
 % Require one saved variable so the script cannot silently choose the wrong
 % data when a MAT-file contains unrelated values.
 savedVariableNames = fieldnames(ultrasoundFileData);
 if numel(savedVariableNames) ~= 1
     error('Expected exactly one variable in "%s", but found %d.', ...
-        filename_ultrasoundimage, numel(savedVariableNames));
+          filename_ultrasoundimage, numel(savedVariableNames));
 end
 
 % Give the loaded sequence one stable name for the segmentation workflow.
