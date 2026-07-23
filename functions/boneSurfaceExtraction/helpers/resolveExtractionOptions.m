@@ -37,21 +37,61 @@ if ~isstruct(options) || ~isscalar(options)
         'options must be an empty value or a scalar struct.');
 end
 
-% Reject unknown names because a misspelled parameter would otherwise appear
-% to work while leaving the intended default unchanged.
-defaultFieldNames = fieldnames(defaultOptions);
-overrideFieldNames = fieldnames(options);
-unknownFields = setdiff(overrideFieldNames, defaultFieldNames);
-if ~isempty(unknownFields)
-    error('extractBoneSurfacesFromSegmentation:InvalidOptions', ...
-        'Unknown extraction option: %s', unknownFields{1});
-end
-
-resolvedOptions = defaultOptions;
-for fieldIndex = 1:numel(overrideFieldNames)
-    currentField = overrideFieldNames{fieldIndex};
-    resolvedOptions.(currentField) = options.(currentField);
-end
+% Merge at every hierarchy level so a caller may override one leaf without
+% copying all sibling defaults from the same algorithm group.
+resolvedOptions = mergeExtractionOptionStructs( ...
+    defaultOptions, options, '');
 
 resolvedOptions = validateExtractionOptions(resolvedOptions);
+end
+
+function mergedOptions = mergeExtractionOptionStructs( ...
+        defaultOptions, overrideOptions, parentPath)
+%MERGEEXTRACTIONOPTIONSTRUCTS Apply validated overrides recursively.
+% This helper keeps unspecified JSON defaults while rejecting misspelled group
+% or parameter names. It is needed because replacing a whole nested group
+% would otherwise discard defaults for every sibling parameter.
+%
+% Inputs:
+%   defaultOptions  : Scalar struct containing defaults at the current level.
+%   overrideOptions : Scalar struct containing caller values at this level.
+%   parentPath      : Dot-separated parent path used in clear error messages.
+%
+% Output:
+%   mergedOptions   : Scalar struct with the requested leaf overrides applied.
+
+mergedOptions = defaultOptions;
+overrideFieldNames = fieldnames(overrideOptions);
+
+for fieldIndex = 1:numel(overrideFieldNames)
+    currentField = overrideFieldNames{fieldIndex};
+
+    % Include the full hierarchy in errors so similarly named settings are
+    % easy to locate in the JSON file.
+    if isempty(parentPath)
+        currentPath = currentField;
+    else
+        currentPath = [parentPath, '.', currentField];
+    end
+
+    if ~isfield(defaultOptions, currentField)
+        error('extractBoneSurfacesFromSegmentation:InvalidOptions', ...
+            'Unknown extraction option: %s', currentPath);
+    end
+
+    defaultValue = defaultOptions.(currentField);
+    overrideValue = overrideOptions.(currentField);
+    if isstruct(defaultValue)
+        % Configuration groups must stay scalar structs so their required
+        % child settings remain addressable and unambiguous.
+        if ~isstruct(overrideValue) || ~isscalar(overrideValue)
+            error('extractBoneSurfacesFromSegmentation:InvalidOptions', ...
+                '%s must be a scalar struct.', currentPath);
+        end
+        mergedOptions.(currentField) = mergeExtractionOptionStructs( ...
+            defaultValue, overrideValue, currentPath);
+    else
+        mergedOptions.(currentField) = overrideValue;
+    end
+end
 end

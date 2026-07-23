@@ -13,8 +13,11 @@ function [surfaceResults, extractionMetadata] = extractBoneSurfacesFromSegmentat
 %                         status. pixelCoordinates uses [row,column] order.
 %   ultrasoundSequence  : Struct vector containing sourceIndex and plane. The
 %                         plane must contain image, W, H, nRows, and nCols.
-%   options             : Optional scalar struct whose fields override the JSON
-%                         defaults in tools/boneSegmentationProcess/configs.
+%   options             : Optional scalar struct whose nested fields override
+%                         the JSON defaults in tools/boneSegmentationProcess/
+%                         configs. The groups follow the extraction stages:
+%                         imageEvidence, surfaceTracing, gapInterpolation, and
+%                         regularization.
 %
 % Outputs:
 %   surfaceResults      : Struct vector aligned with segmentationResults. Each

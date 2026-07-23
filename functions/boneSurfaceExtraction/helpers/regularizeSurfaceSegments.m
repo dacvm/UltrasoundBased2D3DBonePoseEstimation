@@ -29,6 +29,10 @@ surfaceRows = rawSurfaceRows;
 confidenceByColumn = rawConfidenceByColumn;
 validMask = isfinite(rawSurfaceRows);
 
+% Refinement settings stay separate from the earlier tracing and gap stages.
+regularizationOptions = options.regularization;
+gapInterpolationOptions = options.gapInterpolation;
+
 % Signed movement retains direction for audit. Absent columns remain NaN so
 % downstream code cannot mistake them for unchanged surface samples.
 displacementMmByColumn = nan(size(rawSurfaceRows));
@@ -45,7 +49,7 @@ if ~any(validMask)
     return;
 end
 
-if ~options.regularizationEnabled
+if ~regularizationOptions.enabled
     % Disabled mode is an exact compatibility path, including confidence.
     diagnostics = buildRegularizationDiagnostics( ...
         'disabled', displacementMmByColumn, boundHitColumnMask, ...
@@ -109,8 +113,8 @@ end
 confidenceByColumn = applyDisplacementConfidenceDecay( ...
     rawConfidenceByColumn, displacementMmByColumn, observedMask, ...
     interpolatedMask, segmentIds, pixelSpacingXYMm(1), ...
-    options.maxInterpolatedGapMm, ...
-    options.regularizationMaxDisplacementMm);
+    gapInterpolationOptions.maximumGapMm, ...
+    regularizationOptions.maximumDisplacementMm);
 
 roughnessAfterPerMm = computeSurfaceRoughness( ...
     surfaceRows, segmentIds, pixelSpacingXYMm);

@@ -13,12 +13,15 @@ function shadowLikelihood = computeShadowLikelihood( ...
 % Output:
 %   shadowLikelihood : Image-sized normalized shadow confidence in [0,1].
 
-startOffsetRows = max(1, ceil(options.shadowStartMm / ySpacingMm));
+% Read all shadow-window settings from their image-evidence group.
+imageEvidenceOptions = options.imageEvidence;
+startOffsetRows = max(1, ceil( ...
+    imageEvidenceOptions.shadowStartMm / ySpacingMm));
 endOffsetRows = max(startOffsetRows, ...
-    floor(options.shadowLengthMm / ySpacingMm));
+    floor(imageEvidenceOptions.shadowLengthMm / ySpacingMm));
 offsetRows = startOffsetRows:endOffsetRows;
 offsetDistancesMm = offsetRows * ySpacingMm;
-shadowSigmaMm = max(options.shadowLengthMm / 2, ySpacingMm);
+shadowSigmaMm = max(imageEvidenceOptions.shadowLengthMm / 2, ySpacingMm);
 weights = exp(-0.5 * (offsetDistancesMm / shadowSigmaMm) .^ 2);
 
 weightedIntensity = zeros(size(smoothedImage));
@@ -53,5 +56,6 @@ weightedMean(hasShadowSamples) = ...
 coverage = min(availableWeight / max(fullWeight, eps), 1);
 rawShadow = coverage .* (1 - weightedMean) + (1 - coverage) * 0.5;
 shadowLikelihood = robustNormalizeFeature( ...
-    rawShadow, candidateMask, options.normalizationPercentiles);
+    rawShadow, candidateMask, ...
+    imageEvidenceOptions.normalizationPercentiles);
 end

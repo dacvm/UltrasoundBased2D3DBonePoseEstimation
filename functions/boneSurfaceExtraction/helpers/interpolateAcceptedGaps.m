@@ -29,9 +29,12 @@ if isempty(observedColumns)
     return;
 end
 
+% Both the gap limit and interpolation method belong to one configuration
+% group because they jointly decide how missing columns are filled.
+gapInterpolationOptions = options.gapInterpolation;
 missingGapMm = (diff(observedColumns) - 1) * xSpacingMm;
 segmentStarts = [1, find(missingGapMm > ...
-    options.maxInterpolatedGapMm) + 1];
+    gapInterpolationOptions.maximumGapMm) + 1];
 segmentEnds = [segmentStarts(2:end) - 1, numel(observedColumns)];
 
 for segmentIndex = 1:numel(segmentStarts)
@@ -43,7 +46,7 @@ for segmentIndex = 1:numel(segmentStarts)
     if isscalar(currentObservedColumns)
         interpolatedRows = observedRows(currentObservedColumns);
     else
-        interpolationMethod = options.interpolationMethod;
+        interpolationMethod = gapInterpolationOptions.method;
         if numel(currentObservedColumns) == 2
             % Two endpoints define a straight line; explicitly using linear
             % avoids implying curvature without supporting observations.
@@ -77,7 +80,7 @@ for segmentIndex = 1:numel(segmentStarts)
             observedConfidence(leftColumn), ...
             observedConfidence(rightColumn));
         confidenceByColumn(gapColumns) = endpointConfidence * ...
-            exp(-gapLengthMm / options.maxInterpolatedGapMm);
+            exp(-gapLengthMm / gapInterpolationOptions.maximumGapMm);
     end
 end
 end

@@ -22,6 +22,9 @@ candidateRows = cell(1, numberOfActiveColumns);
 backPointers = cell(1, numberOfActiveColumns);
 smallValue = 1e-6;
 
+% The path penalty belongs to the surface-tracing stage in the configuration.
+surfaceTracingOptions = options.surfaceTracing;
+
 firstColumn = activeColumns(1);
 candidateRows{1} = find(candidateMask(:, firstColumn));
 previousCosts = -log(max( ...
@@ -39,7 +42,7 @@ for activeIndex = 2:numberOfActiveColumns
     depthDifferenceMm = ( ...
         double(currentRows(:).') - double(previousRows(:))) * ySpacingMm;
     slope = depthDifferenceMm / endpointDistanceMm;
-    transitionCost = options.smoothnessWeight * ...
+    transitionCost = surfaceTracingOptions.smoothnessWeight * ...
         (slope .^ 2) * endpointDistanceMm;
 
     accumulatedCosts = previousCosts + transitionCost;

@@ -1,0 +1,767 @@
+function reviewFigure = createBoneSurfaceReviewGUI( ...
+        surfaceResults, segmentationResults, ultrasoundSequence, ...
+        extractionOptions, configurationFilePath)
+%CREATEBONESURFACEREVIEWGUI Open an interactive bone-surface review window.
+% The GUI keeps all extraction results in one sortable table. Selecting a row
+% redraws only its matching ultrasound image, segmentation, and extracted
+% surface, which makes large result sets practical to inspect back and forth.
+% The right-hand table documents the JSON settings without allowing edits.
+%
+% Inputs:
+%   surfaceResults        : Extracted surface result struct vector.
+%   segmentationResults   : Matching segmentation result struct vector.
+%   ultrasoundSequence    : Source image struct vector matched by sourceIndex.
+%   extractionOptions     : Scalar struct decoded from the extraction JSON.
+%   configurationFilePath : Path of the JSON file shown in the GUI.
+%
+% Outputs:
+%   reviewFigure          : Handle to the non-blocking review uifigure.
+
+numberOfResults = numel(surfaceResults);
+
+% Reject malformed direct calls early. The extraction script supplies these
+% shapes, but clear messages make the display helper safe to reuse elsewhere.
+if ~isstruct(surfaceResults) || ~isstruct(segmentationResults) || ...
+        ~isstruct(ultrasoundSequence)
+    error('createBoneSurfaceReviewGUI:InvalidReviewData', ...
+        ['surfaceResults, segmentationResults, and ultrasoundSequence ' ...
+         'must be struct vectors.']);
+end
+if ~isstruct(extractionOptions) || ~isscalar(extractionOptions)
+    error('createBoneSurfaceReviewGUI:InvalidOptions', ...
+        'extractionOptions must be a scalar struct decoded from JSON.');
+end
+if ~(ischar(configurationFilePath) || ...
+        (isstring(configurationFilePath) && isscalar(configurationFilePath)))
+    error('createBoneSurfaceReviewGUI:InvalidConfigurationPath', ...
+        'configurationFilePath must be a character vector or string scalar.');
+end
+
+% Match every result to its image once. Row changes can then remain fast even
+% when the table contains hundreds of extraction results.
+if numberOfResults > 0
+    requiredSurfaceFields = { ...
+        'sequencePosition', 'sourceIndex', 'status', 'numberOfSegments', ...
+        'observedLengthMm', 'interpolatedLengthMm', 'meanConfidence'};
+    if ~all(isfield(surfaceResults, requiredSurfaceFields))
+        error('createBoneSurfaceReviewGUI:InvalidSurfaceResults', ...
+            'surfaceResults is missing one or more fields needed by the GUI.');
+    end
+    if ~isfield(ultrasoundSequence, 'sourceIndex')
+        error('createBoneSurfaceReviewGUI:InvalidUltrasoundSequence', ...
+            'ultrasoundSequence must contain sourceIndex.');
+    end
+
+    surfaceSourceIndices = [surfaceResults.sourceIndex];
+    ultrasoundSourceIndices = [ultrasoundSequence.sourceIndex];
+    [hasUltrasoundImage, ultrasoundIndexByResult] = ismember( ...
+        surfaceSourceIndices, ultrasoundSourceIndices);
+    if ~all(hasUltrasoundImage)
+        firstMissingResult = find(~hasUltrasoundImage, 1, 'first');
+        error('createBoneSurfaceReviewGUI:MissingUltrasoundImage', ...
+            'No ultrasound image matches sourceIndex %g.', ...
+            surfaceSourceIndices(firstMissingResult));
+    end
+else
+    surfaceSourceIndices = zeros(1, 0);
+    ultrasoundIndexByResult = zeros(1, 0);
+end
+
+% Include a permanent result index because the visible row position changes
+% whenever the user sorts the table.
+resultIndices = (1:numberOfResults).';
+if numberOfResults > 0
+    sequencePositions = [surfaceResults.sequencePosition].';
+    sourceIndices = surfaceSourceIndices.';
+    statusValues = string({surfaceResults.status}).';
+    segmentCounts = [surfaceResults.numberOfSegments].';
+    observedLengthsMm = [surfaceResults.observedLengthMm].';
+    interpolatedLengthsMm = [surfaceResults.interpolatedLengthMm].';
+    meanConfidences = [surfaceResults.meanConfidence].';
+else
+    sequencePositions = zeros(0, 1);
+    sourceIndices = zeros(0, 1);
+    statusValues = strings(0, 1);
+    segmentCounts = zeros(0, 1);
+    observedLengthsMm = zeros(0, 1);
+    interpolatedLengthsMm = zeros(0, 1);
+    meanConfidences = zeros(0, 1);
+end
+
+reviewTableData = table( ...
+    resultIndices, sequencePositions, sourceIndices, statusValues, ...
+    segmentCounts, observedLengthsMm, interpolatedLengthsMm, ...
+    meanConfidences, ...
+    'VariableNames', { ...
+        'ResultIndex', 'SequencePosition', 'SourceIndex', 'Status', ...
+        'Segments', 'ObservedLengthMm', 'InterpolatedLengthMm', ...
+        'MeanConfidence'});
+
+% Flatten the nested JSON hierarchy into rows while retaining the algorithm
+% group for quick scanning in the read-only parameter table.
+parameterTableData = buildProcessingParameterTable(extractionOptions);
+
+%% CREATE THE THREE-COLUMN REVIEW INTERFACE
+
+reviewFigure = uifigure( ...
+    'Name', 'Bone Surface Extraction Review', ...
+    'Position', [20, 60, 1880, 900], ...
+    'Tag', 'bone_surface_review_gui');
+
+% Relative widths keep the requested table-image-parameter arrangement usable
+% when the window is resized on a smaller or larger monitor.
+mainGrid = uigridlayout(reviewFigure, [1, 3], ...
+    'ColumnWidth', {'1x', '1.25x', '1x'}, ...
+    'Padding', [10, 10, 10, 10], ...
+    'ColumnSpacing', 10);
+
+% The left panel contains only navigation and result summaries. Users can sort
+% any column, then click a row to redraw the permanent matching result index.
+dataPanel = uipanel(mainGrid, ...
+    'Title', 'Data Table', ...
+    'Tag', 'bone_surface_review_data_panel');
+dataPanel.Layout.Row = 1;
+dataPanel.Layout.Column = 1;
+dataGrid = uigridlayout(dataPanel, [2, 1], ...
+    'RowHeight', {28, '1x'}, ...
+    'Padding', [5, 5, 5, 5], ...
+    'RowSpacing', 4);
+
+instructionLabel = uilabel(dataGrid, ...
+    'Text', sprintf('Select a row to review. %d result(s) available.', ...
+        numberOfResults), ...
+    'Tag', 'bone_surface_review_instruction_label');
+instructionLabel.Layout.Row = 1;
+instructionLabel.Layout.Column = 1;
+
+resultsTable = uitable(dataGrid, ...
+    'Data', reviewTableData, ...
+    'ColumnName', { ...
+        '#', 'Sequence', 'Source', 'Status', 'Segments', ...
+        'Observed mm', 'Filled mm', 'Confidence'}, ...
+    'ColumnWidth', {40, 60, 55, 100, 60, 78, 70, 78}, ...
+    'ColumnEditable', false(1, width(reviewTableData)), ...
+    'ColumnSortable', true(1, width(reviewTableData)), ...
+    'SelectionType', 'row', ...
+    'Multiselect', 'off', ...
+    'Tag', 'bone_surface_review_data_table');
+resultsTable.Layout.Row = 2;
+resultsTable.Layout.Column = 1;
+
+% Reuse one central axes so selecting among hundreds of rows does not create
+% hundreds of graphics objects or separate figure windows.
+imagePanel = uipanel(mainGrid, ...
+    'Title', 'Ultrasound Image (Segmentation and Surface)', ...
+    'Tag', 'bone_surface_review_image_panel');
+imagePanel.Layout.Row = 1;
+imagePanel.Layout.Column = 2;
+imageGrid = uigridlayout(imagePanel, [3, 1], ...
+    'RowHeight', {'1x', 26, 26}, ...
+    'Padding', [5, 5, 5, 5], ...
+    'RowSpacing', 2);
+
+imageAxes = uiaxes(imageGrid, ...
+    'Tag', 'bone_surface_review_image_axes');
+imageAxes.Layout.Row = 1;
+imageAxes.Layout.Column = 1;
+xlabel(imageAxes, 'Image column (pixel)');
+ylabel(imageAxes, 'Image row (pixel)');
+box(imageAxes, 'on');
+colormap(imageAxes, gray(256));
+
+% A changing summary below the image exposes key metrics without requiring
+% the reviewer to find the corresponding columns in a wide sorted table.
+resultSummaryLabel = uilabel(imageGrid, ...
+    'HorizontalAlignment', 'center', ...
+    'Text', '', ...
+    'Tag', 'bone_surface_review_result_summary');
+resultSummaryLabel.Layout.Row = 2;
+resultSummaryLabel.Layout.Column = 1;
+
+% Keep a color key permanently visible instead of rebuilding a legend that
+% could cover anatomy in the selected ultrasound image.
+legendGrid = uigridlayout(imageGrid, [1, 4], ...
+    'ColumnWidth', {'1x', '1x', '1x', '1x'}, ...
+    'Padding', [0, 0, 0, 0], ...
+    'ColumnSpacing', 3);
+legendGrid.Layout.Row = 3;
+legendGrid.Layout.Column = 1;
+
+segmentationLegendLabel = uilabel(legendGrid, ...
+    'Text', '--- Segmentation', ...
+    'FontColor', [0.68, 0.50, 0.00], ...
+    'HorizontalAlignment', 'center');
+segmentationLegendLabel.Layout.Column = 1;
+rawLegendLabel = uilabel(legendGrid, ...
+    'Text', '--- Raw surface', ...
+    'FontColor', [0.90, 0.10, 0.80], ...
+    'HorizontalAlignment', 'center');
+rawLegendLabel.Layout.Column = 2;
+observedLegendLabel = uilabel(legendGrid, ...
+    'Text', '* Final observed', ...
+    'FontColor', [0.85, 0.10, 0.05], ...
+    'HorizontalAlignment', 'center');
+observedLegendLabel.Layout.Column = 3;
+interpolatedLegendLabel = uilabel(legendGrid, ...
+    'Text', '* Final interpolated', ...
+    'FontColor', [0.00, 0.65, 0.75], ...
+    'HorizontalAlignment', 'center');
+interpolatedLegendLabel.Layout.Column = 4;
+
+% The right panel reports exactly the settings supplied from the JSON file.
+% ColumnEditable is false for every column, so these values are informational.
+parameterPanel = uipanel(mainGrid, ...
+    'Title', 'Processing Parameters (Read Only)', ...
+    'Tag', 'bone_surface_review_parameter_panel');
+parameterPanel.Layout.Row = 1;
+parameterPanel.Layout.Column = 3;
+parameterGrid = uigridlayout(parameterPanel, [2, 1], ...
+    'RowHeight', {28, '1x'}, ...
+    'Padding', [5, 5, 5, 5], ...
+    'RowSpacing', 4);
+
+[~, configurationFileName, configurationExtension] = ...
+    fileparts(char(configurationFilePath));
+configurationLabel = uilabel(parameterGrid, ...
+    'Text', ['Loaded from: ', configurationFileName, configurationExtension], ...
+    'Tooltip', char(configurationFilePath), ...
+    'Tag', 'bone_surface_review_configuration_label');
+configurationLabel.Layout.Row = 1;
+configurationLabel.Layout.Column = 1;
+
+parameterTable = uitable(parameterGrid, ...
+    'Data', parameterTableData, ...
+    'ColumnName', {'Group', 'Parameter', 'Value', 'Description'}, ...
+    'ColumnWidth', {100, 160, 65, 220}, ...
+    'ColumnEditable', false(1, width(parameterTableData)), ...
+    'ColumnSortable', false(1, width(parameterTableData)), ...
+    'SelectionType', 'row', ...
+    'Multiselect', 'off', ...
+    'FontSize', 10, ...
+    'Tag', 'bone_surface_review_parameter_table');
+parameterTable.Layout.Row = 2;
+parameterTable.Layout.Column = 1;
+
+%% CONNECT TABLE NAVIGATION TO THE SELECTED IMAGE
+
+if numberOfResults == 0
+    % An empty extraction still gets a clear GUI state instead of failing while
+    % trying to select the first row.
+    resultsTable.Enable = 'off';
+    axis(imageAxes, 'off');
+    text(imageAxes, 0.5, 0.5, ...
+        'No bone-surface results are available for review.', ...
+        'Units', 'normalized', ...
+        'HorizontalAlignment', 'center', ...
+        'VerticalAlignment', 'middle', ...
+        'Interpreter', 'none');
+    resultSummaryLabel.Text = 'No result selected.';
+else
+    % Render the first result before registering the callback so initial setup
+    % is not treated as a user-generated table selection.
+    resultsTable.Selection = 1;
+    renderSelectedResult(1);
+    resultsTable.SelectionChangedFcn = @handleTableSelection;
+end
+
+    function handleTableSelection(~, eventData)
+        %HANDLETABLESELECTION Render the permanent result behind a selected row.
+        % MATLAB reports a row in the table Data even after visual sorting. The
+        % stored ResultIndex therefore remains a safe key into surfaceResults.
+        %
+        % Inputs:
+        %   ~         : Unused table source supplied by MATLAB.
+        %   eventData : Selection event containing the selected data row.
+        %
+        % Outputs:
+        %   None. The callback redraws the selected image and overlays.
+
+        if isempty(eventData.Selection)
+            return;
+        end
+
+        selectedDataRow = eventData.Selection(1);
+        currentTableData = resultsTable.Data;
+        if selectedDataRow < 1 || selectedDataRow > height(currentTableData)
+            return;
+        end
+
+        stableResultIndex = currentTableData.ResultIndex(selectedDataRow);
+        renderSelectedResult(stableResultIndex);
+    end
+
+    function renderSelectedResult(resultIndex)
+        %RENDERSELECTEDRESULT Draw one image, segmentation, and surface result.
+        % Redrawing one shared axes keeps navigation fast and ensures overlays
+        % from the previously selected row cannot remain visible.
+        %
+        % Inputs:
+        %   resultIndex : Permanent positive index into surfaceResults.
+        %
+        % Outputs:
+        %   None. The central axes and summary label are updated in place.
+
+        currentResult = surfaceResults(resultIndex);
+        ultrasoundIndex = ultrasoundIndexByResult(resultIndex);
+        displayedImage = ultrasoundSequence(ultrasoundIndex).plane.image.';
+
+        cla(imageAxes);
+        imagesc(imageAxes, displayedImage);
+        axis(imageAxes, 'image');
+        imageAxes.YDir = 'reverse';
+        imageAxes.XLim = [0.5, size(displayedImage, 2) + 0.5];
+        imageAxes.YLim = [0.5, size(displayedImage, 1) + 0.5];
+        colormap(imageAxes, gray(256));
+        hold(imageAxes, 'on');
+
+        % Match segmentation independently by sourceIndex because stored result
+        % arrays may be reordered before this reusable display helper is called.
+        [segmentationEntry, hasSegmentationEntry] = ...
+            getMatchingSegmentationEntry( ...
+                segmentationResults, currentResult.sourceIndex);
+        if hasSegmentationEntry
+            segmentationDisplayStatus = plotSegmentationOverlay( ...
+                imageAxes, segmentationEntry, size(displayedImage));
+        else
+            segmentationDisplayStatus = "unavailable";
+        end
+
+        plotSurfaceResult(imageAxes, currentResult);
+        hold(imageAxes, 'off');
+
+        title(imageAxes, sprintf( ...
+            'Result %d of %d | sequence %g | source %g | %s', ...
+            resultIndex, numberOfResults, currentResult.sequencePosition, ...
+            currentResult.sourceIndex, currentResult.status), ...
+            'Interpreter', 'none');
+
+        % Keep the summary concise enough to remain readable under the image.
+        resultSummaryLabel.Text = sprintf( ...
+            ['Segmentation: %s | Segments: %d | Observed: %.3g mm | ' ...
+             'Interpolated: %.3g mm | Mean confidence: %.3g'], ...
+            char(segmentationDisplayStatus), currentResult.numberOfSegments, ...
+            currentResult.observedLengthMm, ...
+            currentResult.interpolatedLengthMm, ...
+            currentResult.meanConfidence);
+        drawnow limitrate;
+    end
+end
+
+
+function [segmentationEntry, hasMatch] = getMatchingSegmentationEntry( ...
+        segmentationResults, sourceIndex)
+%GETMATCHINGSEGMENTATIONENTRY Find display data with the requested source key.
+% Matching by sourceIndex prevents an image from being paired with a different
+% segmentation when either input struct vector has been reordered.
+%
+% Inputs:
+%   segmentationResults : Segmentation result struct vector.
+%   sourceIndex         : Scalar source identifier requested for display.
+%
+% Outputs:
+%   segmentationEntry   : Matching scalar struct, or an empty struct.
+%   hasMatch            : True when exactly one usable entry was found.
+
+segmentationEntry = struct([]);
+hasMatch = false;
+
+if isempty(segmentationResults) || ...
+        ~isfield(segmentationResults, 'sourceIndex')
+    return;
+end
+
+segmentationSourceIndices = [segmentationResults.sourceIndex];
+matchingIndex = find(segmentationSourceIndices == sourceIndex, 1, 'first');
+if isempty(matchingIndex)
+    return;
+end
+
+segmentationEntry = segmentationResults(matchingIndex);
+hasMatch = true;
+end
+
+
+function displayStatus = plotSegmentationOverlay( ...
+        targetAxes, segmentationEntry, expectedImageSize)
+%PLOTSEGMENTATIONOVERLAY Draw the selected bone segmentation over B-mode.
+% A valid mask is shown with a light fill and separate boundary curves. Older
+% results that contain only boundary coordinates still receive a point overlay.
+%
+% Inputs:
+%   targetAxes        : Axes that already display the selected B-mode image.
+%   segmentationEntry : One matching segmentation result record.
+%   expectedImageSize : Size vector of the displayed B-mode image.
+%
+% Outputs:
+%   displayStatus     : Text describing whether a mask, coordinates, or no
+%                       segmentation could be displayed.
+
+displayStatus = "unavailable";
+segmentationColor = [1.00, 0.80, 0.05];
+
+if isfield(segmentationEntry, 'segmentationMask')
+    candidateMask = segmentationEntry.segmentationMask;
+    isValidMask = ~isempty(candidateMask) && ismatrix(candidateMask) && ...
+        (islogical(candidateMask) || isnumeric(candidateMask)) && ...
+        isreal(candidateMask) && ...
+        isequal(size(candidateMask), expectedImageSize(1:2));
+
+    % Numeric masks must be finite binary data. This avoids presenting a soft
+    % or corrupt array as if it were an accepted segmentation.
+    if isValidMask && isnumeric(candidateMask)
+        isValidMask = all(isfinite(candidateMask(:))) && ...
+            all(candidateMask(:) == 0 | candidateMask(:) == 1);
+    end
+
+    if isValidMask && any(candidateMask(:))
+        segmentationMask = logical(candidateMask);
+
+        % Use an RGB overlay so the axes grayscale colormap remains unchanged.
+        colorOverlay = zeros( ...
+            [expectedImageSize(1:2), 3], 'double');
+        colorOverlay(:, :, 1) = segmentationColor(1);
+        colorOverlay(:, :, 2) = segmentationColor(2);
+        colorOverlay(:, :, 3) = segmentationColor(3);
+        image(targetAxes, colorOverlay, ...
+            'XData', [1, expectedImageSize(2)], ...
+            'YData', [1, expectedImageSize(1)], ...
+            'AlphaData', 0.12 * double(segmentationMask), ...
+            'HitTest', 'off');
+
+        % Draw connected boundaries separately so disjoint regions are never
+        % joined by misleading diagonal lines.
+        boundaries = bwboundaries(segmentationMask, 8, 'noholes');
+        for boundaryIndex = 1:numel(boundaries)
+            currentBoundary = boundaries{boundaryIndex};
+            plot(targetAxes, ...
+                currentBoundary(:, 2), currentBoundary(:, 1), ...
+                '-', 'Color', segmentationColor, 'LineWidth', 1.1, ...
+                'HandleVisibility', 'off');
+        end
+
+        displayStatus = "mask";
+        return;
+    end
+end
+
+% Fall back to exported [row,column] coordinates for historical results that
+% do not retain a filled segmentation mask.
+if ~isfield(segmentationEntry, 'pixelCoordinates')
+    return;
+end
+
+pixelCoordinates = segmentationEntry.pixelCoordinates;
+isValidCoordinates = isnumeric(pixelCoordinates) && isreal(pixelCoordinates) && ...
+    ismatrix(pixelCoordinates) && size(pixelCoordinates, 2) == 2 && ...
+    all(isfinite(pixelCoordinates(:)));
+if ~isValidCoordinates || isempty(pixelCoordinates)
+    return;
+end
+
+insideImage = pixelCoordinates(:, 1) >= 1 & ...
+    pixelCoordinates(:, 1) <= expectedImageSize(1) & ...
+    pixelCoordinates(:, 2) >= 1 & ...
+    pixelCoordinates(:, 2) <= expectedImageSize(2);
+pixelCoordinates = pixelCoordinates(insideImage, :);
+if isempty(pixelCoordinates)
+    return;
+end
+
+plot(targetAxes, pixelCoordinates(:, 2), pixelCoordinates(:, 1), ...
+    '.', 'Color', segmentationColor, 'MarkerSize', 5, ...
+    'HandleVisibility', 'off');
+displayStatus = "boundary coordinates";
+end
+
+
+function plotSurfaceResult(targetAxes, surfaceResult)
+%PLOTSURFACERESULT Draw raw and refined bone-surface review overlays.
+% Raw segments remain thin magenta lines. Final observed and interpolated
+% columns use separate red and cyan points so inferred gaps stay obvious.
+%
+% Inputs:
+%   targetAxes   : Axes that already display the source B-mode image.
+%   surfaceResult: One extracted surface result record.
+%
+% Outputs:
+%   None. The function adds surface overlays to targetAxes.
+
+finalSurfaceRows = reshape(surfaceResult.surfaceRowByColumn, 1, []);
+
+% Result files created before the raw-path audit field existed can still be
+% reviewed by treating their final curve as the raw curve.
+if isfield(surfaceResult, 'rawSurfaceRowByColumn') && ...
+        numel(surfaceResult.rawSurfaceRowByColumn) == numel(finalSurfaceRows)
+    rawSurfaceRows = reshape(surfaceResult.rawSurfaceRowByColumn, 1, []);
+else
+    rawSurfaceRows = finalSurfaceRows;
+end
+
+% Plot each accepted segment independently so a rejected long gap never looks
+% like one continuous raw surface.
+segmentIds = unique(surfaceResult.segmentIdByColumn);
+segmentIds = segmentIds(isfinite(segmentIds) & segmentIds > 0);
+for segmentId = reshape(segmentIds, 1, [])
+    segmentColumns = find(surfaceResult.segmentIdByColumn == segmentId);
+    plot(targetAxes, segmentColumns, rawSurfaceRows(segmentColumns), ...
+        '-', 'Color', [0.90, 0.10, 0.80], 'LineWidth', 0.9, ...
+        'HandleVisibility', 'off');
+end
+
+observedColumnMask = reshape( ...
+    logical(surfaceResult.observedColumnMask), 1, []);
+interpolatedColumnMask = reshape( ...
+    logical(surfaceResult.interpolatedColumnMask), 1, []);
+
+observedColumns = find(observedColumnMask);
+plot(targetAxes, observedColumns, finalSurfaceRows(observedColumns), ...
+    '.', 'Color', [1.00, 0.15, 0.10], 'MarkerSize', 10, ...
+    'HandleVisibility', 'off');
+
+interpolatedColumns = find(interpolatedColumnMask);
+plot(targetAxes, interpolatedColumns, ...
+    finalSurfaceRows(interpolatedColumns), ...
+    '.', 'Color', [0.00, 0.90, 1.00], 'MarkerSize', 10, ...
+    'HandleVisibility', 'off');
+end
+
+
+function parameterTableData = buildProcessingParameterTable(extractionOptions)
+%BUILDPROCESSINGPARAMETERTABLE Convert nested JSON settings into GUI rows.
+% Flattening the hierarchy lets reviewers scan every current and future JSON
+% leaf value while descriptions make the algorithm controls understandable.
+%
+% Inputs:
+%   extractionOptions : Scalar struct decoded from boneSurfaceExtraction.json.
+%
+% Outputs:
+%   parameterTableData: Table with group, name, value, and description text.
+
+[groupNames, parameterNames, valueTexts, descriptions] = ...
+    flattenParameterStruct(extractionOptions, '');
+parameterTableData = table( ...
+    groupNames, parameterNames, valueTexts, descriptions, ...
+    'VariableNames', {'Group', 'Parameter', 'Value', 'Description'});
+end
+
+
+function [groupNames, parameterNames, valueTexts, descriptions] = ...
+        flattenParameterStruct(parameterStruct, parentPath)
+%FLATTENPARAMETERSTRUCT Recursively collect configuration leaf values.
+% Recursion preserves the JSON field order and automatically includes new
+% settings that may be added after this GUI is created.
+%
+% Inputs:
+%   parameterStruct : Scalar configuration struct at the current hierarchy.
+%   parentPath      : Dot-separated path of its parent group.
+%
+% Outputs:
+%   groupNames      : String vector of readable algorithm group names.
+%   parameterNames  : String vector of readable parameter names.
+%   valueTexts      : String vector of compact formatted values.
+%   descriptions    : String vector explaining each parameter's purpose.
+
+groupNames = strings(0, 1);
+parameterNames = strings(0, 1);
+valueTexts = strings(0, 1);
+descriptions = strings(0, 1);
+
+fieldNames = fieldnames(parameterStruct);
+for fieldIndex = 1:numel(fieldNames)
+    currentFieldName = fieldNames{fieldIndex};
+    if isempty(parentPath)
+        currentPath = currentFieldName;
+    else
+        currentPath = [parentPath, '.', currentFieldName];
+    end
+
+    currentValue = parameterStruct.(currentFieldName);
+    if isstruct(currentValue) && isscalar(currentValue)
+        [childGroups, childNames, childValues, childDescriptions] = ...
+            flattenParameterStruct(currentValue, currentPath);
+        groupNames = [groupNames; childGroups]; %#ok<AGROW>
+        parameterNames = [parameterNames; childNames]; %#ok<AGROW>
+        valueTexts = [valueTexts; childValues]; %#ok<AGROW>
+        descriptions = [descriptions; childDescriptions]; %#ok<AGROW>
+        continue;
+    end
+
+    [groupName, parameterName, description] = ...
+        describeExtractionParameter(currentPath);
+    groupNames(end + 1, 1) = groupName; %#ok<AGROW>
+    parameterNames(end + 1, 1) = parameterName; %#ok<AGROW>
+    valueTexts(end + 1, 1) = formatParameterValue(currentValue); %#ok<AGROW>
+    descriptions(end + 1, 1) = description; %#ok<AGROW>
+end
+end
+
+
+function [groupName, parameterName, description] = ...
+        describeExtractionParameter(parameterPath)
+%DESCRIBEEXTRACTIONPARAMETER Provide readable JSON labels and short help.
+% Known production settings receive specific junior-friendly descriptions.
+% Unknown future leaves remain visible with a clear generic description.
+%
+% Inputs:
+%   parameterPath : Dot-separated path of one JSON leaf value.
+%
+% Outputs:
+%   groupName     : Readable algorithm-stage name.
+%   parameterName : Readable setting name including units where applicable.
+%   description   : Short statement of what the setting controls.
+
+pathParts = strsplit(parameterPath, '.');
+groupName = makeFriendlyGroupName(pathParts{1});
+parameterName = makeFriendlyParameterName(pathParts{end});
+description = "Additional setting loaded from the JSON file.";
+
+switch parameterPath
+    case 'imageEvidence.gaussianSigmaMm'
+        parameterName = "Gaussian sigma (mm)";
+        description = "Smooths image noise before scoring.";
+    case 'imageEvidence.ridgeSigmaMm'
+        parameterName = "Ridge sigma (mm)";
+        description = "Scale used to emphasize bone-like ridges.";
+    case 'imageEvidence.gradientSearchMarginMm'
+        parameterName = "Gradient margin (mm)";
+        description = "Search radius around each candidate edge.";
+    case 'imageEvidence.shadowStartMm'
+        parameterName = "Shadow start (mm)";
+        description = "Offset where distal shadow scoring begins.";
+    case 'imageEvidence.shadowLengthMm'
+        parameterName = "Shadow length (mm)";
+        description = "Depth used to measure acoustic shadow.";
+    case 'imageEvidence.normalizationPercentiles'
+        parameterName = "Normalization percentiles";
+        description = "Low and high intensity normalization limits.";
+    case 'imageEvidence.fallbackConfidenceScale'
+        parameterName = "Fallback confidence scale";
+        description = "Penalty for weak evidence candidates.";
+    case 'imageEvidence.weights.position'
+        parameterName = "Position weight";
+        description = "Influence of probe-facing position evidence.";
+    case 'imageEvidence.weights.reflection'
+        parameterName = "Reflection weight";
+        description = "Influence of bright reflection evidence.";
+    case 'imageEvidence.weights.shadow'
+        parameterName = "Shadow weight";
+        description = "Influence of dark acoustic-shadow evidence.";
+    case 'surfaceTracing.evidenceThreshold'
+        parameterName = "Evidence threshold";
+        description = "Boundary between strong and weak candidates.";
+    case 'surfaceTracing.smoothnessWeight'
+        parameterName = "Smoothness weight";
+        description = "Penalty for abrupt depth changes.";
+    case 'surfaceTracing.minimumObservedSegmentLengthMm'
+        parameterName = "Minimum segment length (mm)";
+        description = "Shortest observed segment that is kept.";
+    case 'surfaceTracing.minimumMeanSegmentConfidence'
+        parameterName = "Minimum mean confidence";
+        description = "Lowest confidence allowed for a segment.";
+    case 'gapInterpolation.maximumGapMm'
+        parameterName = "Maximum gap (mm)";
+        description = "Largest missing span that may be filled.";
+    case 'gapInterpolation.method'
+        parameterName = "Interpolation method";
+        description = "Curve method used to fill accepted gaps.";
+    case 'regularization.enabled'
+        parameterName = "Enabled";
+        description = "Turns curvature regularization on or off.";
+    case 'regularization.halfResponseWavelengthMm'
+        parameterName = "Half-response wavelength (mm)";
+        description = "Shortest curve scale substantially smoothed.";
+    case 'regularization.huberDeltaMm'
+        parameterName = "Huber delta (mm)";
+        description = "Residual size where robust fitting changes.";
+    case 'regularization.maximumDisplacementMm'
+        parameterName = "Maximum displacement (mm)";
+        description = "Largest move from the raw traced surface.";
+    case 'regularization.minimumDataWeight'
+        parameterName = "Minimum data weight";
+        description = "Lowest confidence weight used in fitting.";
+    case 'regularization.maximumIterations'
+        parameterName = "Maximum iterations";
+        description = "Maximum number of refinement iterations.";
+    case 'regularization.convergenceMm'
+        parameterName = "Convergence (mm)";
+        description = "Change threshold used to stop refinement.";
+end
+end
+
+
+function groupName = makeFriendlyGroupName(rawGroupName)
+%MAKEFRIENDLYGROUPNAME Convert a JSON group key into a display label.
+% Known group names use consistent terminology; future camel-case group names
+% are split automatically so their parameters remain readable.
+%
+% Inputs:
+%   rawGroupName : Top-level JSON group field name.
+%
+% Outputs:
+%   groupName    : Readable string used in the parameter table.
+
+switch rawGroupName
+    case 'imageEvidence'
+        groupName = "Image evidence";
+    case 'surfaceTracing'
+        groupName = "Surface tracing";
+    case 'gapInterpolation'
+        groupName = "Gap interpolation";
+    case 'regularization'
+        groupName = "Regularization";
+    otherwise
+        groupName = makeFriendlyParameterName(rawGroupName);
+end
+end
+
+
+function parameterName = makeFriendlyParameterName(rawParameterName)
+%MAKEFRIENDLYPARAMETERNAME Split a camel-case JSON key for fallback display.
+% This helper is needed so newly added settings remain understandable before
+% a more specific description is added to the GUI mapping.
+%
+% Inputs:
+%   rawParameterName : JSON field name at a configuration leaf.
+%
+% Outputs:
+%   parameterName    : Readable string with spaces between words.
+
+spacedName = regexprep(rawParameterName, ...
+    '([a-z0-9])([A-Z])', '$1 $2');
+parameterName = string([upper(spacedName(1)), spacedName(2:end)]);
+end
+
+
+function valueText = formatParameterValue(parameterValue)
+%FORMATPARAMETERVALUE Convert one JSON leaf value into compact display text.
+% Numeric arrays, logical switches, and text settings receive stable formats
+% so the read-only table shows values without MATLAB type decorations.
+%
+% Inputs:
+%   parameterValue : One non-struct value decoded from JSON.
+%
+% Outputs:
+%   valueText      : Scalar string used in the parameter table.
+
+if islogical(parameterValue) && isscalar(parameterValue)
+    if parameterValue
+        valueText = "true";
+    else
+        valueText = "false";
+    end
+elseif isnumeric(parameterValue)
+    formattedNumbers = compose('%.6g', double(parameterValue(:).'));
+    if isscalar(parameterValue)
+        valueText = formattedNumbers;
+    else
+        valueText = "[" + strjoin(formattedNumbers, ", ") + "]";
+    end
+elseif ischar(parameterValue) || ...
+        (isstring(parameterValue) && isscalar(parameterValue))
+    valueText = string(parameterValue);
+else
+    % JSONENCODE provides a useful last-resort representation for any future
+    % leaf type that JSONDECODE can return.
+    valueText = string(jsonencode(parameterValue));
+end
+end

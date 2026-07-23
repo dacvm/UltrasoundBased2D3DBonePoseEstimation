@@ -24,14 +24,17 @@ xSpacingMm = pixelSpacingXYMm(1);
 ySpacingMm = pixelSpacingXYMm(2);
 numberOfPoints = numel(rawRows);
 
+% Use the dedicated regularization group for every numerical solver setting.
+regularizationOptions = options.regularization;
+
 % Depth zero is the centre of MATLAB row one. The only spatial constraints are
 % image limits and the configured distance from the raw curve.
 initialDepthMm = (double(rawRows(:)) - 1) * ySpacingMm;
 maximumImageDepthMm = (numberOfImageRows - 1) * ySpacingMm;
 lowerBoundsMm = max(0, initialDepthMm - ...
-    options.regularizationMaxDisplacementMm);
+    regularizationOptions.maximumDisplacementMm);
 upperBoundsMm = min(maximumImageDepthMm, initialDepthMm + ...
-    options.regularizationMaxDisplacementMm);
+    regularizationOptions.maximumDisplacementMm);
 
 refinedRows = rawRows;
 boundHitMask = false(size(rawRows));
@@ -50,11 +53,11 @@ baseWeights = zeros(numberOfPoints, 1);
 observedConfidence = double(rawConfidence(observedMask));
 observedConfidence(~isfinite(observedConfidence)) = 0;
 baseWeights(observedMask(:)) = max( ...
-    observedConfidence(:), options.regularizationMinimumDataWeight);
+    observedConfidence(:), regularizationOptions.minimumDataWeight);
 
 % This conversion gives the configured physical wavelength a clear meaning in
 % the continuous smoothing response rather than making it resolution-specific.
-alphaMm4 = (options.regularizationHalfResponseWavelengthMm / ...
+alphaMm4 = (regularizationOptions.halfResponseWavelengthMm / ...
     (2 * pi)) ^ 4;
 currentDepthMm = initialDepthMm;
 try
@@ -64,13 +67,13 @@ catch solverSetupError
     return;
 end
 
-for iterationIndex = 1:options.regularizationMaximumIterations
+for iterationIndex = 1:regularizationOptions.maximumIterations
     residualMagnitudeMm = abs(currentDepthMm - initialDepthMm);
     huberWeights = ones(numberOfPoints, 1);
     largeResidualMask = residualMagnitudeMm > ...
-        options.regularizationHuberDeltaMm;
+        regularizationOptions.huberDeltaMm;
     huberWeights(largeResidualMask) = ...
-        options.regularizationHuberDeltaMm ./ ...
+        regularizationOptions.huberDeltaMm ./ ...
         residualMagnitudeMm(largeResidualMask);
     effectiveWeights = baseWeights .* huberWeights;
 
@@ -101,7 +104,7 @@ for iterationIndex = 1:options.regularizationMaximumIterations
     maximumChangeMm = max(abs(nextDepthMm - currentDepthMm));
     currentDepthMm = nextDepthMm;
     succeeded = true;
-    if maximumChangeMm < options.regularizationConvergenceMm
+    if maximumChangeMm < regularizationOptions.convergenceMm
         break;
     end
 end
@@ -115,7 +118,7 @@ end
 currentDepthMm = min(max( ...
     currentDepthMm, lowerBoundsMm), upperBoundsMm);
 refinedRows = reshape(currentDepthMm / ySpacingMm + 1, size(rawRows));
-boundToleranceMm = max(options.regularizationConvergenceMm, 1e-8);
+boundToleranceMm = max(regularizationOptions.convergenceMm, 1e-8);
 boundHitMask = reshape( ...
     abs(currentDepthMm - lowerBoundsMm) <= boundToleranceMm | ...
     abs(currentDepthMm - upperBoundsMm) <= boundToleranceMm, ...

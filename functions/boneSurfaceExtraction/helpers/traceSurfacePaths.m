@@ -22,14 +22,20 @@ numberOfColumns = size(candidateMask, 2);
 xSpacingMm = pixelSpacingXYMm(1);
 ySpacingMm = pixelSpacingXYMm(2);
 
+% Read each decision from its algorithm-stage group so the code and JSON use
+% the same mental model.
+imageEvidenceOptions = options.imageEvidence;
+surfaceTracingOptions = options.surfaceTracing;
+gapInterpolationOptions = options.gapInterpolation;
+
 % The exported coordinates are authoritative, so a low image score must not
 % create a new gap. Retain every listed point but apply the existing threshold
 % as a soft confidence penalty. DP can still use global continuity to recover a
 % weak local echo, while consistently weak segments remain rejectable below.
 belowThresholdMask = candidateMask & ...
-    candidateConfidence < options.evidenceThreshold;
+    candidateConfidence < surfaceTracingOptions.evidenceThreshold;
 candidateConfidence(belowThresholdMask) = ...
-    options.fallbackConfidenceScale ^ 2 * ...
+    imageEvidenceOptions.fallbackConfidenceScale ^ 2 * ...
     candidateConfidence(belowThresholdMask);
 activeColumns = find(any(candidateMask, 1));
 
@@ -39,7 +45,7 @@ observedConfidence = nan(1, numberOfColumns);
 if ~isempty(activeColumns)
     missingGapMm = (diff(activeColumns) - 1) * xSpacingMm;
     groupStarts = [1, find(missingGapMm > ...
-        options.maxInterpolatedGapMm) + 1];
+        gapInterpolationOptions.maximumGapMm) + 1];
     groupEnds = [groupStarts(2:end) - 1, numel(activeColumns)];
 
     for groupIndex = 1:numel(groupStarts)
@@ -53,8 +59,10 @@ if ~isempty(activeColumns)
         % small number of points separated by a wide gap is not a long surface.
         observedSupportMm = numel(groupColumns) * xSpacingMm;
         meanGroupConfidence = mean(groupConfidence);
-        if observedSupportMm < options.minimumObservedSegmentLengthMm || ...
-                meanGroupConfidence < options.minimumMeanSegmentConfidence
+        if observedSupportMm < ...
+                surfaceTracingOptions.minimumObservedSegmentLengthMm || ...
+                meanGroupConfidence < ...
+                surfaceTracingOptions.minimumMeanSegmentConfidence
             continue;
         end
 

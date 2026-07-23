@@ -1,25 +1,35 @@
 {
-  "gaussianSigmaMm": 0.15,
-  "ridgeSigmaMm": 0.25,
-  "gradientSearchMarginMm": 0.25,
-  "shadowStartMm": 0.25,
-  "shadowLengthMm": 4.0,
-  "evidenceThreshold": 0.20,
-  "positionWeight": 1.0,
-  "reflectionWeight": 0.5,
-  "shadowWeight": 0.5,
-  "smoothnessWeight": 2.0,
-  "minimumObservedSegmentLengthMm": 2.0,
-  "minimumMeanSegmentConfidence": 0.30,
-  "maxInterpolatedGapMm": 5.0,
-  "normalizationPercentiles": [5.0, 95.0],
-  "fallbackConfidenceScale": 0.5,
-  "interpolationMethod": "pchip",
-  "regularizationEnabled": true,
-  "regularizationHalfResponseWavelengthMm": 2.5,
-  "regularizationHuberDeltaMm": 0.15,
-  "regularizationMaxDisplacementMm": 0.75,
-  "regularizationMinimumDataWeight": 0.10,
-  "regularizationMaximumIterations": 10,
-  "regularizationConvergenceMm": 0.001
+  "imageEvidence": {
+    "gaussianSigmaMm": 0.15,
+    "ridgeSigmaMm": 0.25,
+    "gradientSearchMarginMm": 0.25,
+    "shadowStartMm": 0.25,
+    "shadowLengthMm": 4.0,
+    "normalizationPercentiles": [5.0, 95.0],
+    "fallbackConfidenceScale": 0.5,
+    "weights": {
+      "position": 1.0,
+      "reflection": 0.5,
+      "shadow": 0.5
+    }
+  },
+  "surfaceTracing": {
+    "evidenceThreshold": 0.20,
+    "smoothnessWeight": 2.0,
+    "minimumObservedSegmentLengthMm": 2.0,
+    "minimumMeanSegmentConfidence": 0.30
+  },
+  "gapInterpolation": {
+    "maximumGapMm": 5.0,
+    "method": "pchip"
+  },
+  "regularization": {
+    "enabled": true,
+    "halfResponseWavelengthMm": 2.5,
+    "huberDeltaMm": 0.15,
+    "maximumDisplacementMm": 0.75,
+    "minimumDataWeight": 0.10,
+    "maximumIterations": 10,
+    "convergenceMm": 0.001
+  }
 }
