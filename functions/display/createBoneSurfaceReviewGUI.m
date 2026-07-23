@@ -97,9 +97,9 @@ reviewTableData = table( ...
         'Segments', 'ObservedLengthMm', 'InterpolatedLengthMm', ...
         'MeanConfidence'});
 
-% Flatten the nested JSON hierarchy into rows while retaining the algorithm
-% group for quick scanning in the read-only parameter table.
-parameterTableData = buildProcessingParameterTable(extractionOptions);
+% Flatten the nested JSON hierarchy while retaining the algorithm group. The
+% resulting display data drives the individual read-only parameter controls.
+parameterDisplayData = buildProcessingParameterDisplayData(extractionOptions);
 
 %% CREATE THE THREE-COLUMN REVIEW INTERFACE
 
@@ -108,10 +108,10 @@ reviewFigure = uifigure( ...
     'Position', [20, 60, 1880, 900], ...
     'Tag', 'bone_surface_review_gui');
 
-% Relative widths keep the requested table-image-parameter arrangement usable
-% when the window is resized on a smaller or larger monitor.
+% Give the image more room and keep the parameter column intentionally narrow.
+% Its longer descriptions wrap vertically inside a scrollable area.
 mainGrid = uigridlayout(reviewFigure, [1, 3], ...
-    'ColumnWidth', {'1x', '1.25x', '1x'}, ...
+    'ColumnWidth', {'1x', '1.55x', '0.72x'}, ...
     'Padding', [10, 10, 10, 10], ...
     'ColumnSpacing', 10);
 
@@ -122,17 +122,8 @@ dataPanel = uipanel(mainGrid, ...
     'Tag', 'bone_surface_review_data_panel');
 dataPanel.Layout.Row = 1;
 dataPanel.Layout.Column = 1;
-dataGrid = uigridlayout(dataPanel, [2, 1], ...
-    'RowHeight', {28, '1x'}, ...
-    'Padding', [5, 5, 5, 5], ...
-    'RowSpacing', 4);
-
-instructionLabel = uilabel(dataGrid, ...
-    'Text', sprintf('Select a row to review. %d result(s) available.', ...
-        numberOfResults), ...
-    'Tag', 'bone_surface_review_instruction_label');
-instructionLabel.Layout.Row = 1;
-instructionLabel.Layout.Column = 1;
+dataGrid = uigridlayout(dataPanel, [1, 1], ...
+    'Padding', [5, 5, 5, 5]);
 
 resultsTable = uitable(dataGrid, ...
     'Data', reviewTableData, ...
@@ -145,7 +136,7 @@ resultsTable = uitable(dataGrid, ...
     'SelectionType', 'row', ...
     'Multiselect', 'off', ...
     'Tag', 'bone_surface_review_data_table');
-resultsTable.Layout.Row = 2;
+resultsTable.Layout.Row = 1;
 resultsTable.Layout.Column = 1;
 
 % Reuse one central axes so selecting among hundreds of rows does not create
@@ -209,40 +200,38 @@ interpolatedLegendLabel = uilabel(legendGrid, ...
 interpolatedLegendLabel.Layout.Column = 4;
 
 % The right panel reports exactly the settings supplied from the JSON file.
-% ColumnEditable is false for every column, so these values are informational.
+% Each algorithm group receives its own panel in a vertically scrollable area.
 parameterPanel = uipanel(mainGrid, ...
     'Title', 'Processing Parameters (Read Only)', ...
     'Tag', 'bone_surface_review_parameter_panel');
 parameterPanel.Layout.Row = 1;
 parameterPanel.Layout.Column = 3;
-parameterGrid = uigridlayout(parameterPanel, [2, 1], ...
-    'RowHeight', {28, '1x'}, ...
-    'Padding', [5, 5, 5, 5], ...
-    'RowSpacing', 4);
+parameterGrid = uigridlayout(parameterPanel, [1, 1], ...
+    'Padding', [5, 5, 5, 5]);
 
-[~, configurationFileName, configurationExtension] = ...
-    fileparts(char(configurationFilePath));
-configurationLabel = uilabel(parameterGrid, ...
-    'Text', ['Loaded from: ', configurationFileName, configurationExtension], ...
-    'Tooltip', char(configurationFilePath), ...
-    'Tag', 'bone_surface_review_configuration_label');
-configurationLabel.Layout.Row = 1;
-configurationLabel.Layout.Column = 1;
+parameterScrollPanel = uipanel(parameterGrid, ...
+    'BorderType', 'none', ...
+    'Scrollable', 'on', ...
+    'AutoResizeChildren', 'off', ...
+    'Tag', 'bone_surface_review_parameter_scroll_panel');
+parameterScrollPanel.Layout.Row = 1;
+parameterScrollPanel.Layout.Column = 1;
 
-parameterTable = uitable(parameterGrid, ...
-    'Data', parameterTableData, ...
-    'ColumnName', {'Group', 'Parameter', 'Value', 'Description'}, ...
-    'ColumnWidth', {100, 160, 65, 220}, ...
-    'ColumnEditable', false(1, width(parameterTableData)), ...
-    'ColumnSortable', false(1, width(parameterTableData)), ...
-    'SelectionType', 'row', ...
-    'Multiselect', 'off', ...
-    'FontSize', 10, ...
-    'Tag', 'bone_surface_review_parameter_table');
-parameterTable.Layout.Row = 2;
-parameterTable.Layout.Column = 1;
+% Build the grouped controls inside one tall content panel. The outer panel
+% provides vertical scrolling while descriptions use their full wrapped text.
+parameterContentPanel = createProcessingParameterPanels( ...
+    parameterScrollPanel, parameterDisplayData);
+parameterScrollPanel.SizeChangedFcn = @resizeParameterContent;
 
 %% CONNECT TABLE NAVIGATION TO THE SELECTED IMAGE
+
+% Lay out the scrollable parameter content after the figure has received its
+% real on-screen size, then begin at the first parameter group.
+drawnow;
+resizeParameterContent([], []);
+drawnow;
+scroll(parameterScrollPanel, 'top');
+drawnow limitrate;
 
 if numberOfResults == 0
     % An empty extraction still gets a clear GUI state instead of failing while
@@ -263,6 +252,28 @@ else
     renderSelectedResult(1);
     resultsTable.SelectionChangedFcn = @handleTableSelection;
 end
+
+    function resizeParameterContent(~, ~)
+        %RESIZEPARAMETERCONTENT Fit grouped controls to the narrow viewport.
+        % Keeping the content slightly narrower than the scroll panel prevents
+        % a horizontal scrollbar while the vertical scrollbar remains available.
+        %
+        % Inputs:
+        %   ~ : Unused source and event values supplied by MATLAB.
+        %
+        % Outputs:
+        %   None. The content panel width is updated in place.
+
+        if ~isvalid(parameterScrollPanel) || ...
+                ~isvalid(parameterContentPanel)
+            return;
+        end
+
+        viewportWidth = parameterScrollPanel.InnerPosition(3);
+        contentPosition = parameterContentPanel.Position;
+        contentPosition(3) = max(260, viewportWidth - 18);
+        parameterContentPanel.Position = contentPosition;
+    end
 
     function handleTableSelection(~, eventData)
         %HANDLETABLESELECTION Render the permanent result behind a selected row.
@@ -526,22 +537,136 @@ plot(targetAxes, interpolatedColumns, ...
 end
 
 
-function parameterTableData = buildProcessingParameterTable(extractionOptions)
-%BUILDPROCESSINGPARAMETERTABLE Convert nested JSON settings into GUI rows.
-% Flattening the hierarchy lets reviewers scan every current and future JSON
-% leaf value while descriptions make the algorithm controls understandable.
+function parameterDisplayData = ...
+        buildProcessingParameterDisplayData(extractionOptions)
+%BUILDPROCESSINGPARAMETERDISPLAYDATA Prepare nested JSON settings for the GUI.
+% Flattening the hierarchy lets grouped controls include every current and
+% future JSON leaf while retaining readable names and descriptions.
 %
 % Inputs:
 %   extractionOptions : Scalar struct decoded from boneSurfaceExtraction.json.
 %
 % Outputs:
-%   parameterTableData: Table with group, name, value, and description text.
+%   parameterDisplayData : Table containing group, name, value, and help text.
 
 [groupNames, parameterNames, valueTexts, descriptions] = ...
     flattenParameterStruct(extractionOptions, '');
-parameterTableData = table( ...
+parameterDisplayData = table( ...
     groupNames, parameterNames, valueTexts, descriptions, ...
     'VariableNames', {'Group', 'Parameter', 'Value', 'Description'});
+end
+
+
+function parameterContentPanel = createProcessingParameterPanels( ...
+        parameterScrollPanel, parameterDisplayData)
+%CREATEPROCESSINGPARAMETERPANELS Build grouped read-only parameter controls.
+% Each JSON group gets a titled panel. Every parameter uses a label beside a
+% disabled value field, followed by a wrapped explanation on the next row.
+%
+% Inputs:
+%   parameterScrollPanel : Scrollable parent panel in the GUI right column.
+%   parameterDisplayData : Table containing grouped parameter display text.
+%
+% Outputs:
+%   parameterContentPanel: Tall child panel that contains all group panels.
+
+groupNames = unique(parameterDisplayData.Group, 'stable');
+numberOfGroups = numel(groupNames);
+
+% Fixed pixel heights make every description readable and give the outer
+% panel a concrete content height from which to calculate vertical scrolling.
+parameterRowHeight = 28;
+descriptionRowHeight = 52;
+innerRowSpacing = 2;
+groupTitleAndPaddingHeight = 34;
+outerGroupSpacing = 8;
+groupPanelHeights = zeros(1, numberOfGroups);
+
+for groupIndex = 1:numberOfGroups
+    numberOfGroupParameters = nnz( ...
+        parameterDisplayData.Group == groupNames(groupIndex));
+    numberOfInnerRows = 2 * numberOfGroupParameters;
+    groupPanelHeights(groupIndex) = groupTitleAndPaddingHeight + ...
+        numberOfGroupParameters * ...
+            (parameterRowHeight + descriptionRowHeight) + ...
+        max(0, numberOfInnerRows - 1) * innerRowSpacing;
+end
+
+totalContentHeight = sum(groupPanelHeights) + ...
+    max(0, numberOfGroups - 1) * outerGroupSpacing + 2;
+initialContentWidth = max(260, parameterScrollPanel.Position(3) - 18);
+
+% This absolute-size child extends beyond the visible parent height. MATLAB's
+% scrollable panel then exposes all groups through one vertical scrollbar.
+parameterContentPanel = uipanel(parameterScrollPanel, ...
+    'BorderType', 'none', ...
+    'Units', 'pixels', ...
+    'Position', [1, 1, initialContentWidth, totalContentHeight], ...
+    'Tag', 'bone_surface_review_parameter_content_panel');
+
+contentGrid = uigridlayout(parameterContentPanel, [numberOfGroups, 1], ...
+    'RowHeight', num2cell(groupPanelHeights), ...
+    'Padding', [0, 0, 0, 0], ...
+    'RowSpacing', outerGroupSpacing);
+
+for groupIndex = 1:numberOfGroups
+    currentGroupName = groupNames(groupIndex);
+    currentGroupRows = parameterDisplayData.Group == currentGroupName;
+    currentGroupData = parameterDisplayData(currentGroupRows, :);
+    numberOfGroupParameters = height(currentGroupData);
+
+    groupPanel = uipanel(contentGrid, ...
+        'Title', char(currentGroupName), ...
+        'FontWeight', 'bold', ...
+        'Tag', 'bone_surface_review_parameter_group_panel');
+    groupPanel.Layout.Row = groupIndex;
+    groupPanel.Layout.Column = 1;
+
+    % Two rows per parameter keep its explanation directly below the matching
+    % name and disabled value field.
+    groupRowHeights = repmat( ...
+        {parameterRowHeight, descriptionRowHeight}, ...
+        1, numberOfGroupParameters);
+    groupGrid = uigridlayout(groupPanel, ...
+        [2 * numberOfGroupParameters, 2], ...
+        'RowHeight', groupRowHeights, ...
+        'ColumnWidth', {'1x', 100}, ...
+        'Padding', [8, 6, 8, 6], ...
+        'RowSpacing', innerRowSpacing, ...
+        'ColumnSpacing', 8);
+
+    for parameterIndex = 1:numberOfGroupParameters
+        valueRow = 2 * parameterIndex - 1;
+        descriptionRow = valueRow + 1;
+
+        parameterLabel = uilabel(groupGrid, ...
+            'Text', char(currentGroupData.Parameter(parameterIndex)), ...
+            'FontWeight', 'bold', ...
+            'Tag', 'bone_surface_review_parameter_name_label');
+        parameterLabel.Layout.Row = valueRow;
+        parameterLabel.Layout.Column = 1;
+
+        % Disable the value field so MATLAB renders it gray and clearly shows
+        % that extraction settings cannot be changed from this review window.
+        valueField = uieditfield(groupGrid, 'text', ...
+            'Value', char(currentGroupData.Value(parameterIndex)), ...
+            'Editable', 'off', ...
+            'Enable', 'off', ...
+            'HorizontalAlignment', 'center', ...
+            'Tag', 'bone_surface_review_parameter_value_field');
+        valueField.Layout.Row = valueRow;
+        valueField.Layout.Column = 2;
+
+        descriptionLabel = uilabel(groupGrid, ...
+            'Text', char(currentGroupData.Description(parameterIndex)), ...
+            'WordWrap', 'on', ...
+            'VerticalAlignment', 'top', ...
+            'FontColor', [0.32, 0.32, 0.32], ...
+            'Tag', 'bone_surface_review_parameter_description_label');
+        descriptionLabel.Layout.Row = descriptionRow;
+        descriptionLabel.Layout.Column = [1, 2];
+    end
+end
 end
 
 
@@ -618,73 +743,73 @@ description = "Additional setting loaded from the JSON file.";
 switch parameterPath
     case 'imageEvidence.gaussianSigmaMm'
         parameterName = "Gaussian sigma (mm)";
-        description = "Smooths image noise before scoring.";
+        description = "Smooths small image noise before evidence is measured, reducing unstable responses from isolated bright pixels.";
     case 'imageEvidence.ridgeSigmaMm'
         parameterName = "Ridge sigma (mm)";
-        description = "Scale used to emphasize bone-like ridges.";
+        description = "Sets the physical scale used to emphasize thin, ridge-like echoes that may represent a bone surface.";
     case 'imageEvidence.gradientSearchMarginMm'
         parameterName = "Gradient margin (mm)";
-        description = "Search radius around each candidate edge.";
+        description = "Defines how far around each segmentation candidate the algorithm may search for the strongest reflection edge.";
     case 'imageEvidence.shadowStartMm'
         parameterName = "Shadow start (mm)";
-        description = "Offset where distal shadow scoring begins.";
+        description = "Moves the start of shadow measurement below the candidate so the bright bone echo itself is not treated as shadow.";
     case 'imageEvidence.shadowLengthMm'
         parameterName = "Shadow length (mm)";
-        description = "Depth used to measure acoustic shadow.";
+        description = "Sets how much tissue below a candidate is inspected for the dark acoustic shadow expected behind bone.";
     case 'imageEvidence.normalizationPercentiles'
         parameterName = "Normalization percentiles";
-        description = "Low and high intensity normalization limits.";
+        description = "Uses these low and high image percentiles as robust intensity limits before reflection evidence is compared.";
     case 'imageEvidence.fallbackConfidenceScale'
         parameterName = "Fallback confidence scale";
-        description = "Penalty for weak evidence candidates.";
+        description = "Reduces the confidence of weak candidates that remain available only as a fallback for continuous tracing.";
     case 'imageEvidence.weights.position'
         parameterName = "Position weight";
-        description = "Influence of probe-facing position evidence.";
+        description = "Controls how strongly the probe-facing location of a candidate contributes to its combined evidence score.";
     case 'imageEvidence.weights.reflection'
         parameterName = "Reflection weight";
-        description = "Influence of bright reflection evidence.";
+        description = "Controls how strongly a bright ultrasound reflection contributes to the combined evidence score.";
     case 'imageEvidence.weights.shadow'
         parameterName = "Shadow weight";
-        description = "Influence of dark acoustic-shadow evidence.";
+        description = "Controls how strongly a dark region below the candidate contributes to the combined evidence score.";
     case 'surfaceTracing.evidenceThreshold'
         parameterName = "Evidence threshold";
-        description = "Boundary between strong and weak candidates.";
+        description = "Separates strong candidates from weak fallback candidates before the continuous surface path is traced.";
     case 'surfaceTracing.smoothnessWeight'
         parameterName = "Smoothness weight";
-        description = "Penalty for abrupt depth changes.";
+        description = "Penalizes sudden depth changes between neighboring image columns so the traced surface stays anatomically plausible.";
     case 'surfaceTracing.minimumObservedSegmentLengthMm'
         parameterName = "Minimum segment length (mm)";
-        description = "Shortest observed segment that is kept.";
+        description = "Rejects observed surface segments shorter than this physical length because they are more likely to be noise.";
     case 'surfaceTracing.minimumMeanSegmentConfidence'
         parameterName = "Minimum mean confidence";
-        description = "Lowest confidence allowed for a segment.";
+        description = "Rejects a traced segment when its average image-evidence confidence falls below this value.";
     case 'gapInterpolation.maximumGapMm'
         parameterName = "Maximum gap (mm)";
-        description = "Largest missing span that may be filled.";
+        description = "Allows interpolation only when the missing distance between two observed surface segments is no larger than this.";
     case 'gapInterpolation.method'
         parameterName = "Interpolation method";
-        description = "Curve method used to fill accepted gaps.";
+        description = "Selects the curve-fitting method used to estimate surface positions inside an accepted short gap.";
     case 'regularization.enabled'
         parameterName = "Enabled";
-        description = "Turns curvature regularization on or off.";
+        description = "Determines whether the raw traced surface is refined to reduce small, implausible curvature changes.";
     case 'regularization.halfResponseWavelengthMm'
         parameterName = "Half-response wavelength (mm)";
-        description = "Shortest curve scale substantially smoothed.";
+        description = "Sets the curve wavelength where regularization has half strength, linking smoothing to physical anatomy size.";
     case 'regularization.huberDeltaMm'
         parameterName = "Huber delta (mm)";
-        description = "Residual size where robust fitting changes.";
+        description = "Sets the displacement where robust fitting becomes less sensitive to large residuals and possible outliers.";
     case 'regularization.maximumDisplacementMm'
         parameterName = "Maximum displacement (mm)";
-        description = "Largest move from the raw traced surface.";
+        description = "Limits how far regularization may move a point away from the raw image-supported surface.";
     case 'regularization.minimumDataWeight'
         parameterName = "Minimum data weight";
-        description = "Lowest confidence weight used in fitting.";
+        description = "Keeps even low-confidence observed points connected to their image evidence during regularization.";
     case 'regularization.maximumIterations'
         parameterName = "Maximum iterations";
-        description = "Maximum number of refinement iterations.";
+        description = "Stops the regularization solver after this many refinement steps if convergence has not happened sooner.";
     case 'regularization.convergenceMm'
         parameterName = "Convergence (mm)";
-        description = "Change threshold used to stop refinement.";
+        description = "Stops regularization when the change between successive surface estimates is smaller than this distance.";
 end
 end
 
