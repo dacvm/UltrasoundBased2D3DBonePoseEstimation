@@ -5,6 +5,7 @@ clear; clc; close all;
 % Resolve all extraction paths from this script so it can be run from any
 % MATLAB current folder without changing project-wide paths.
 extractionToolDirectory = fileparts(mfilename('fullpath'));
+projectDirectory = fileparts(fileparts(extractionToolDirectory));
 segmentationOutputDirectory = fullfile(extractionToolDirectory, 'outputs');
 segmentationFileName = 'boneSegmentation_20260722_162046.mat';
 segmentationFilePath = fullfile( ...
@@ -18,9 +19,19 @@ ultrasoundFilePath = fullfile(snapshotOutputDirectory, ultrasoundFileName);
 configurationFilePath = fullfile( ...
     extractionToolDirectory, 'configs', 'boneSurfaceExtraction.json');
 
-% Make the public extractor visible even when this script is launched by its
-% full path from a different working directory.
-addpath(extractionToolDirectory);
+% Add the public extractor and its separated helpers explicitly so this tool
+% also works when MATLAB starts outside the project directory.
+surfaceExtractionDirectory = fullfile( ...
+    projectDirectory, 'functions', 'boneSurfaceExtraction');
+surfaceExtractionHelperDirectory = fullfile( ...
+    surfaceExtractionDirectory, 'helpers');
+if ~isfolder(surfaceExtractionDirectory) || ...
+        ~isfolder(surfaceExtractionHelperDirectory)
+    error('boneSegmentatio_extractSurface:MissingExtractionFunctions', ...
+        'Bone-surface extraction functions were not found under: %s', ...
+        surfaceExtractionDirectory);
+end
+addpath(surfaceExtractionDirectory, surfaceExtractionHelperDirectory);
 
 %% LOAD THE SEGMENTATION AND MATCHING B-MODE DATA
 
@@ -64,35 +75,36 @@ end
 
 %% EXTRACT AND SAVE THE THIN BONE SURFACES
 
-[surfaceResults, extractionMetadata] = ...
-    extractBoneSurfacesFromSegmentation( ...
-    segmentationResults, ultrasoundSequence, extractionOptions);
+[surfaceResults, extractionMetadata] = extractBoneSurfacesFromSegmentation(segmentationResults, ultrasoundSequence, extractionOptions);
 
 % The public function receives arrays rather than file paths, so record the
 % resolved provenance here before saving the result artifact.
 extractionMetadata.sourceSegmentationFile = segmentationFilePath;
-extractionMetadata.sourceUltrasoundFile = ultrasoundFilePath;
-extractionMetadata.configurationFile = configurationFilePath;
+extractionMetadata.sourceUltrasoundFile   = ultrasoundFilePath;
+extractionMetadata.configurationFile      = configurationFilePath;
 
 runTimestamp = char(datetime('now', 'Format', 'yyyyMMdd_HHmmss'));
-surfaceOutputFilePath = fullfile(segmentationOutputDirectory, ...
-    ['boneSurface_', runTimestamp, '.mat']);
+surfaceOutputFilePath = fullfile(segmentationOutputDirectory, ['boneSurface_', runTimestamp, '.mat']);
 
 % Create paged review images before saving so their paths are included in the
 % same metadata record as the numeric results.
 [reviewFigureHandles, reviewImagePaths] = ...
     createBoneSurfaceReviewFigures(surfaceResults, segmentationResults, ...
     ultrasoundSequence, segmentationOutputDirectory, runTimestamp);
+
 extractionMetadata.reviewImageFiles = reviewImagePaths;
-extractionMetadata.outputFile = surfaceOutputFilePath;
+extractionMetadata.outputFile       = surfaceOutputFilePath;
 
 save(surfaceOutputFilePath, 'surfaceResults', 'extractionMetadata', '-v7.3');
 
-fprintf('Saved %d surface result(s) to:\n%s\n', ...
-    numel(surfaceResults), surfaceOutputFilePath);
+fprintf('Saved %d surface result(s) to:\n%s\n', numel(surfaceResults), surfaceOutputFilePath);
 fprintf('Created %d review figure page(s).\n', numel(reviewFigureHandles));
 
 
+
+
+
+%% 
 function [figureHandles, reviewImagePaths] = ...
         createBoneSurfaceReviewFigures(surfaceResults, segmentationResults, ...
         ultrasoundSequence, outputDirectory, runTimestamp)

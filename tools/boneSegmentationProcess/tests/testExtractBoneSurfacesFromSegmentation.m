@@ -13,9 +13,9 @@ tests = functiontests(localfunctions);
 end
 
 function setupOnce(testCase)
-% SETUPONCE Add the extractor folder before this test file is run.
-%   SETUPONCE(TESTCASE) records and adds the parent tool folder so the public
-%   extractor can be called while the tests remain in their own subfolder.
+% SETUPONCE Add the extractor folders before this test file is run.
+%   SETUPONCE(TESTCASE) records and adds the public extractor and helper
+%   folders so the tests can call the split implementation.
 %
 %   Inputs:
 %       testCase - matlab.unittest.FunctionTestCase for this test file.
@@ -23,18 +23,29 @@ function setupOnce(testCase)
 %   Outputs:
 %       None. The shared test data and MATLAB path are updated in place.
 
-% Resolve the tool folder from this test file instead of assuming MATLAB's
+% Resolve the project root from this test file instead of assuming MATLAB's
 % current folder is the project root.
 testDirectory = fileparts(mfilename('fullpath'));
-toolDirectory = fileparts(testDirectory);
+projectDirectory = fileparts(fileparts(fileparts(testDirectory)));
+surfaceExtractionDirectory = fullfile( ...
+    projectDirectory, 'functions', 'boneSurfaceExtraction');
+surfaceExtractionHelperDirectory = fullfile( ...
+    surfaceExtractionDirectory, 'helpers');
 
-% Remember whether the path was already present so teardown does not remove
-% a path entry owned by the caller's project setup.
-testCase.TestData.toolDirectory = toolDirectory;
+% Remember each path separately so teardown removes only entries added here.
+testCase.TestData.surfaceExtractionDirectory = surfaceExtractionDirectory;
+testCase.TestData.surfaceExtractionHelperDirectory = ...
+    surfaceExtractionHelperDirectory;
 pathEntries = strsplit(path, pathsep);
-testCase.TestData.addedToolDirectory = ~any(strcmp(pathEntries, toolDirectory));
-if testCase.TestData.addedToolDirectory
-    addpath(toolDirectory);
+testCase.TestData.addedSurfaceExtractionDirectory = ...
+    ~any(strcmp(pathEntries, surfaceExtractionDirectory));
+testCase.TestData.addedSurfaceExtractionHelperDirectory = ...
+    ~any(strcmp(pathEntries, surfaceExtractionHelperDirectory));
+if testCase.TestData.addedSurfaceExtractionDirectory
+    addpath(surfaceExtractionDirectory);
+end
+if testCase.TestData.addedSurfaceExtractionHelperDirectory
+    addpath(surfaceExtractionHelperDirectory);
 end
 end
 
@@ -48,9 +59,12 @@ function teardownOnce(testCase)
 %   Outputs:
 %       None. The MATLAB path is restored in place.
 
-% Avoid leaving a project-specific path only when this suite added it.
-if testCase.TestData.addedToolDirectory
-    rmpath(testCase.TestData.toolDirectory);
+% Remove only paths added by this suite so caller-owned path entries remain.
+if testCase.TestData.addedSurfaceExtractionHelperDirectory
+    rmpath(testCase.TestData.surfaceExtractionHelperDirectory);
+end
+if testCase.TestData.addedSurfaceExtractionDirectory
+    rmpath(testCase.TestData.surfaceExtractionDirectory);
 end
 end
 
