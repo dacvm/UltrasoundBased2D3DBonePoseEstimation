@@ -1,5 +1,5 @@
 function [displayedImage, candidateMask, pixelSpacingXYMm] = ...
-        prepareFrameData(segmentationEntry, ultrasoundEntry, resultIndex)
+        prepareFrameData(segmentationEntry, ultrasoundEntry, frameIdentity)
 %PREPAREFRAMEDATA Align one B-mode image and rasterize coordinate candidates.
 % The acquisition stores image packets as [width,height], so one transpose is
 % required to reproduce the segmentation tool's [row,column] display space.
@@ -9,7 +9,7 @@ function [displayedImage, candidateMask, pixelSpacingXYMm] = ...
 % Inputs:
 %   segmentationEntry : One segmentationResults record.
 %   ultrasoundEntry   : Matching ultrasoundSequence record.
-%   resultIndex       : One-based result position used in error messages.
+%   frameIdentity     : Composite group/local/source text for error messages.
 %
 % Outputs:
 %   displayedImage    : Double B-mode image normalized to [0,1].
@@ -21,8 +21,8 @@ requiredPlaneFields = {'image', 'W', 'H', 'nRows', 'nCols'};
 if ~isstruct(plane) || ~isscalar(plane) || ...
         ~all(isfield(plane, requiredPlaneFields))
     error('extractBoneSurfacesFromSegmentation:InvalidUltrasoundSequence', ...
-        'Ultrasound plane for result %d lacks required geometry fields.', ...
-        resultIndex);
+        'Ultrasound plane for %s lacks required geometry fields.', ...
+        frameIdentity);
 end
 
 storedImage = plane.image;
@@ -32,8 +32,8 @@ if ~isnumeric(storedImage) || ~ismatrix(storedImage) || ...
         any(double(storedImage(:)) < 0) || ...
         any(double(storedImage(:)) > 255)
     error('extractBoneSurfacesFromSegmentation:InvalidUltrasoundSequence', ...
-        'plane.image for result %d must be a finite 2D image in [0,255].', ...
-        resultIndex);
+        'plane.image for %s must be a finite 2D image in [0,255].', ...
+        frameIdentity);
 end
 
 hasValidW = isnumeric(plane.W) && isscalar(plane.W) && ...
@@ -49,19 +49,19 @@ hasValidColumns = isnumeric(plane.nCols) && isscalar(plane.nCols) && ...
 if ~(hasValidW && hasValidH && hasValidRows && hasValidColumns)
     error('extractBoneSurfacesFromSegmentation:InvalidPlaneGeometry', ...
         ['plane W/H must be positive and nRows/nCols must be integer values ' ...
-        'greater than one for result %d.'], resultIndex);
+        'greater than one for %s.'], frameIdentity);
 end
 
 displayedImageSize = size(storedImage.');
 if ~isequal(displayedImageSize, [plane.nRows, plane.nCols])
     error('extractBoneSurfacesFromSegmentation:InvalidPlaneGeometry', ...
         ['The transpose of plane.image does not match plane.nRows and ' ...
-        'plane.nCols for result %d.'], resultIndex);
+        'plane.nCols for %s.'], frameIdentity);
 end
 
 displayedImage = double(storedImage.') / 255;
 candidateMask = buildCandidateMask( ...
-    segmentationEntry.pixelCoordinates, displayedImageSize, resultIndex);
+    segmentationEntry.pixelCoordinates, displayedImageSize, frameIdentity);
 
 % Use pixel-centre endpoint spacing so physical gap and error thresholds use
 % the same plane extent as current project visualization code.

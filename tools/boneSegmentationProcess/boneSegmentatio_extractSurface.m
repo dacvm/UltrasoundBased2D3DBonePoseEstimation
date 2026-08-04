@@ -9,12 +9,12 @@ projectDirectory        = fileparts(fileparts(extractionToolDirectory));
 
 % Define the path to the segmentation result
 segmentationOutputDirectory = fullfile(extractionToolDirectory, 'outputs');
-segmentationFileName        = 'boneSegmentation_20260722_162046.mat';
+segmentationFileName        = 'boneSegmentation_20260804_171803.mat';
 segmentationFilePath        = fullfile(segmentationOutputDirectory, segmentationFileName);
 
 % Define the path to the ultrasound sequence file
 snapshotOutputDirectory     = fullfile(fileparts(extractionToolDirectory), 'snapshotProcess', 'outputs');
-ultrasoundFileName          = 'validSnapshots_20260721_145143.mat';
+ultrasoundFileName          = 'validSnapshots_20260804_152821.mat';
 ultrasoundFilePath          = fullfile(snapshotOutputDirectory, ultrasoundFileName);
 
 % Define the path to the configuration file
@@ -116,7 +116,13 @@ surfaceOutputFilePath = fullfile(segmentationOutputDirectory, ['boneSurface_', r
 extractionMetadata.outputFile = surfaceOutputFilePath;
 
 save(surfaceOutputFilePath, 'surfaceResults', 'extractionMetadata', '-v7.3');
-fprintf('Saved %d surface result(s) to:\n%s\n', numel(surfaceResults), surfaceOutputFilePath);
+
+% Count nested records rather than outer source groups so the message reports
+% the number of processed ultrasound frames after grouped extraction.
+numberOfSurfaceRecords = sum(arrayfun( ...
+    @(surfaceGroup) numel(surfaceGroup.data), surfaceResults));
+fprintf('Saved %d surface result(s) to:\n%s\n', ...
+    numberOfSurfaceRecords, surfaceOutputFilePath);
 
 % Launch one interactive browser instead of creating paged 3-by-3 figures.
 % Row selection redraws a single image and the JSON settings remain read only.

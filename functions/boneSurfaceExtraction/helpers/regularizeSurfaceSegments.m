@@ -1,7 +1,7 @@
 function [surfaceRows, confidenceByColumn, diagnostics] = ...
         regularizeSurfaceSegments(rawSurfaceRows, rawConfidenceByColumn, ...
         observedMask, interpolatedMask, segmentIds, numberOfImageRows, ...
-        pixelSpacingXYMm, options, sourceIndex)
+        pixelSpacingXYMm, options, frameIdentity)
 %REGULARIZESURFACESEGMENTS Refine raw paths with bounded curvature smoothing.
 % The raw dynamic-programming path decides which probe-facing echo response is
 % bone. This stage reduces rapid bending while allowing the final approximation
@@ -16,7 +16,7 @@ function [surfaceRows, confidenceByColumn, diagnostics] = ...
 %   numberOfImageRows    : Height of the displayed B-mode image.
 %   pixelSpacingXYMm     : [xSpacing,ySpacing] in millimetres.
 %   options              : Validated extraction and regularization settings.
-%   sourceIndex          : Source-frame identifier used in fallback warnings.
+%   frameIdentity        : Composite group/local/source text for warnings.
 %
 % Outputs:
 %   surfaceRows       : Final subpixel row at each retained column.
@@ -92,9 +92,9 @@ for segmentNumber = segmentNumbers(:).'
         numberFailed = numberFailed + 1;
         warning( ...
             'extractBoneSurfacesFromSegmentation:RegularizationFallback', ...
-            ['Regularization failed for sourceIndex %g, segment %d: %s ' ...
+            ['Regularization failed for %s, segment %d: %s ' ...
             'The raw path was retained.'], ...
-            sourceIndex, segmentNumber, failureMessage);
+            frameIdentity, segmentNumber, failureMessage);
     end
 end
 
