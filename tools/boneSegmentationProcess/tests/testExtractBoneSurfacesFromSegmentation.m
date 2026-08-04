@@ -68,6 +68,134 @@ if testCase.TestData.addedSurfaceExtractionDirectory
 end
 end
 
+function testGroupedOutputCompositeMatchingAndEmptyGroups(testCase)
+%TESTGROUPEDOUTPUTCOMPOSITEMATCHINGANDEMPTYGROUPS Verify the public hierarchy.
+% Reordered outer groups and local ultrasound records must still match by exact
+% metadata and group-local sourceIndex, including a sourceIndex repeated in a
+% different group. Empty input groups must remain in the grouped output.
+%
+% Input:
+%   testCase - matlab.unittest.FunctionTestCase used for verification.
+%
+% Outputs:
+%   None. Test failures are reported through testCase.
+
+[segmentationGroups, ultrasoundGroups] = makeGroupedExtractionFixture();
+
+% Reorder ultrasound groups and reverse group A records to prove that neither
+% outer nor local array position is used as the matching identity.
+ultrasoundGroups = ultrasoundGroups([3, 1, 2]);
+ultrasoundGroups(3).data = ultrasoundGroups(3).data([2, 1]);
+[surfaceGroups, metadata] = extractBoneSurfacesFromSegmentation( ...
+    segmentationGroups, ultrasoundGroups, struct());
+
+verifyEqual(testCase, string({surfaceGroups.name}), ...
+    string({segmentationGroups.name}));
+verifyEqual(testCase, string({surfaceGroups.bone}), ...
+    string({segmentationGroups.bone}));
+verifyEqual(testCase, string({surfaceGroups.path}), ...
+    string({segmentationGroups.path}));
+verifyEqual(testCase, arrayfun( ...
+    @(group) numel(group.data), surfaceGroups), [0, 2, 1]);
+verifyEmpty(testCase, surfaceGroups(1).data);
+verifyEqual(testCase, [surfaceGroups(2).data.sourceIndex], [1, 2]);
+verifyEqual(testCase, surfaceGroups(3).data.sourceIndex, 1);
+verifySurfaceNearExpected(testCase, surfaceGroups(2).data(2), ...
+    repmat(47.5, 1, 71), 0.1, 0.4, 0.75);
+verifySurfaceNearExpected(testCase, surfaceGroups(3).data, ...
+    repmat(20.5, 1, 71), 0.1, 0.4, 0.75);
+verifyEqual(testCase, metadata.numberOfFrames, 3);
+verifyEqual(testCase, metadata.algorithmVersion, '1.2.0');
+end
+
+
+function testObsoleteFlatInputsAreRejected(testCase)
+%TESTOBSOLETEFLATINPUTSAREREJECTED Verify grouped-only public validation.
+% Rejecting flat records prevents repeated cross-group source indices from being
+% interpreted as one global namespace.
+%
+% Input:
+%   testCase - matlab.unittest.FunctionTestCase used for verification.
+%
+% Outputs:
+%   None.
+
+[segmentationResult, ultrasoundFrame] = makeSimpleFixture(201);
+verifyError(testCase, @() extractBoneSurfacesFromSegmentation( ...
+    segmentationResult, ultrasoundFrame, struct()), ...
+    'extractBoneSurfacesFromSegmentation:InvalidSegmentationResults');
+end
+
+
+function testDuplicateGroupIdentityRejected(testCase)
+%TESTDUPLICATEGROUPIDENTITYREJECTED Reject ambiguous outer group metadata.
+% Exact metadata matching cannot choose safely when two segmentation groups
+% advertise the same name, bone, and path tuple.
+%
+% Input:
+%   testCase - matlab.unittest.FunctionTestCase used for verification.
+%
+% Outputs:
+%   None.
+
+[segmentationGroups, ultrasoundGroups] = makeGroupedExtractionFixture();
+segmentationGroups(3).name = segmentationGroups(2).name;
+segmentationGroups(3).bone = segmentationGroups(2).bone;
+segmentationGroups(3).path = segmentationGroups(2).path;
+verifyError(testCase, @() extractBoneSurfacesFromSegmentation( ...
+    segmentationGroups, ultrasoundGroups, struct()), ...
+    ['extractBoneSurfacesFromSegmentation:' ...
+    'DuplicateSegmentationGroupIdentity']);
+end
+
+
+function testMissingGroupIdentityRejected(testCase)
+%TESTMISSINGGROUPIDENTITYREJECTED Reject artifacts from different group sets.
+% Changing one ultrasound path makes its metadata tuple unrelated even though
+% its source records remain numerically compatible.
+%
+% Input:
+%   testCase - matlab.unittest.FunctionTestCase used for verification.
+%
+% Outputs:
+%   None.
+
+[segmentationGroups, ultrasoundGroups] = makeGroupedExtractionFixture();
+ultrasoundGroups(3).path = 'synthetic://unrelated';
+verifyError(testCase, @() extractBoneSurfacesFromSegmentation( ...
+    segmentationGroups, ultrasoundGroups, struct()), ...
+    'extractBoneSurfacesFromSegmentation:GroupSetMismatch');
+end
+
+
+function testMalformedAndAllEmptyGroupsRejected(testCase)
+%TESTMALFORMEDANDALLEMPTYGROUPSREJECTED Verify grouped container invariants.
+% Outer metadata/data fields must exist, and extraction needs at least one
+% segmentation record even though individual groups may be empty.
+%
+% Input:
+%   testCase - matlab.unittest.FunctionTestCase used for verification.
+%
+% Outputs:
+%   None.
+
+[segmentationGroups, ultrasoundGroups] = makeGroupedExtractionFixture();
+malformedGroups = rmfield(segmentationGroups, 'data');
+verifyError(testCase, @() extractBoneSurfacesFromSegmentation( ...
+    malformedGroups, ultrasoundGroups, struct()), ...
+    'extractBoneSurfacesFromSegmentation:InvalidSegmentationResults');
+
+for groupIndex = 1:numel(segmentationGroups)
+    segmentationGroups(groupIndex).data = ...
+        segmentationGroups(groupIndex).data([]);
+    ultrasoundGroups(groupIndex).data = ...
+        ultrasoundGroups(groupIndex).data([]);
+end
+verifyError(testCase, @() extractBoneSurfacesFromSegmentation( ...
+    segmentationGroups, ultrasoundGroups, struct()), ...
+    'extractBoneSurfacesFromSegmentation:NoSegmentationRecords');
+end
+
 function testFlatBandSurface(testCase)
 % TESTFLATBANDSURFACE Verify a flat thick echo produces one accurate surface.
 %   TESTFLATBANDSURFACE(TESTCASE) extracts a horizontal bone response and
@@ -93,7 +221,7 @@ segmentationResults = makeSegmentationResult(11, 1, segmentationMask, 'processed
 ultrasoundSequence = makeUltrasoundFrame(11, displayedImage, xSpacingMm, ySpacingMm);
 
 % Run the public API with production defaults loaded by the extractor.
-surfaceResults = extractBoneSurfacesFromSegmentation( ...
+surfaceResults = extractSingleGroupSurfaceData( ...
     segmentationResults, ultrasoundSequence, struct());
 
 % Strong flat evidence should give broad coverage and sub-millimetre error.
@@ -128,7 +256,7 @@ thicknessRows = round(15 + 8 * (0.5 + 0.5 * cos(2 * columnPhase)));
 segmentationResults = makeSegmentationResult(12, 1, segmentationMask, 'processed');
 ultrasoundSequence = makeUltrasoundFrame(12, displayedImage, xSpacingMm, ySpacingMm);
 
-surfaceResults = extractBoneSurfacesFromSegmentation( ...
+surfaceResults = extractSingleGroupSurfaceData( ...
     segmentationResults, ultrasoundSequence, struct());
 
 % A gentle curve should survive continuity regularisation without being
@@ -174,7 +302,7 @@ options = struct();
 options.imageEvidence = struct( ...
     'weights', struct('shadow', 2.0, 'reflection', 0.5));
 options.surfaceTracing = struct('evidenceThreshold', 0.05);
-surfaceResults = extractBoneSurfacesFromSegmentation( ...
+surfaceResults = extractSingleGroupSurfaceData( ...
     segmentationResults, ultrasoundSequence, options);
 
 % The selected path should remain near the deeper bone run, not merely the
@@ -256,7 +384,7 @@ segmentationResults(2) = makeSegmentationResult(42, 2, nonEmptyMask, 'pending');
 ultrasoundSequence(1) = makeUltrasoundFrame(41, displayedImage, 0.1, 0.1);
 ultrasoundSequence(2) = makeUltrasoundFrame(42, displayedImage, 0.1, 0.1);
 
-surfaceResults = extractBoneSurfacesFromSegmentation( ...
+surfaceResults = extractSingleGroupSurfaceData( ...
     segmentationResults, ultrasoundSequence, struct());
 
 verifyEqual(testCase, string(surfaceResults(1).status), "noSurface");
@@ -294,7 +422,7 @@ segmentationResults(2) = makeSegmentationResult(52, 8, deepMask, 'processed');
 ultrasoundSequence(1) = makeUltrasoundFrame(52, deepImage, 0.1, 0.1);
 ultrasoundSequence(2) = makeUltrasoundFrame(51, shallowImage, 0.1, 0.1);
 
-surfaceResults = extractBoneSurfacesFromSegmentation( ...
+surfaceResults = extractSingleGroupSurfaceData( ...
     segmentationResults, ultrasoundSequence, struct());
 
 verifyEqual(testCase, [surfaceResults.sourceIndex], [51, 52]);
@@ -318,7 +446,7 @@ function testDuplicateSegmentationSourceIndexRejected(testCase)
 segmentationResults = [segmentationResult, segmentationResult];
 segmentationResults(2).sequencePosition = 2;
 
-verifyError(testCase, @() extractBoneSurfacesFromSegmentation( ...
+verifyError(testCase, @() extractSingleGroupSurfaceData( ...
     segmentationResults, ultrasoundFrame, struct()), ...
     'extractBoneSurfacesFromSegmentation:DuplicateSegmentationSourceIndex');
 end
@@ -337,15 +465,15 @@ function testDuplicateUltrasoundSourceIndexRejected(testCase)
 [segmentationResult, ultrasoundFrame] = makeSimpleFixture(62);
 ultrasoundSequence = [ultrasoundFrame, ultrasoundFrame];
 
-verifyError(testCase, @() extractBoneSurfacesFromSegmentation( ...
+verifyError(testCase, @() extractSingleGroupSurfaceData( ...
     segmentationResult, ultrasoundSequence, struct()), ...
     'extractBoneSurfacesFromSegmentation:DuplicateUltrasoundSourceIndex');
 end
 
-function testMissingSourceImageRejected(testCase)
-% TESTMISSINGSOURCEIMAGEREJECTED Reject segmentation without a source frame.
-%   TESTMISSINGSOURCEIMAGEREJECTED(TESTCASE) uses different source indices
-%   and verifies that extraction stops instead of silently pairing by order.
+function testMismatchedFrameSetRejected(testCase)
+% TESTMISMATCHEDFRAMESETREJECTED Reject unequal group-local source sets.
+%   TESTMISMATCHEDFRAMESETREJECTED(TESTCASE) uses different source indices
+%   and verifies that exact grouped inputs cannot be silently paired by order.
 %
 %   Inputs:
 %       testCase - matlab.unittest.FunctionTestCase used for verification.
@@ -356,9 +484,9 @@ function testMissingSourceImageRejected(testCase)
 [segmentationResult, ~] = makeSimpleFixture(63);
 [~, ultrasoundFrame] = makeSimpleFixture(64);
 
-verifyError(testCase, @() extractBoneSurfacesFromSegmentation( ...
+verifyError(testCase, @() extractSingleGroupSurfaceData( ...
     segmentationResult, ultrasoundFrame, struct()), ...
-    'extractBoneSurfacesFromSegmentation:MissingSourceImage');
+    'extractBoneSurfacesFromSegmentation:FrameSetMismatch');
 end
 
 function testSegmentationMasksAreNotRequired(testCase)
@@ -378,7 +506,7 @@ segmentationResult = rmfield(segmentationResult, { ...
     'segmentationMask', 'segmentationAreaMask', ...
     'usesCustomSegmentationArea'});
 
-surfaceResult = extractBoneSurfacesFromSegmentation( ...
+surfaceResult = extractSingleGroupSurfaceData( ...
     segmentationResult, ultrasoundFrame, struct());
 
 verifyEqual(testCase, string(surfaceResult.status), "extracted");
@@ -399,7 +527,7 @@ function testPixelCoordinatesAreAuthoritative(testCase)
 %       None. Test failures are reported through TESTCASE.
 
 [segmentationResult, ultrasoundFrame] = makeSimpleFixture(67);
-baselineResult = extractBoneSurfacesFromSegmentation( ...
+baselineResult = extractSingleGroupSurfaceData( ...
     segmentationResult, ultrasoundFrame, struct());
 
 % These masks directly contradict every exported coordinate. They remain in
@@ -408,7 +536,7 @@ contradictoryResult = segmentationResult;
 contradictoryResult.segmentationMask(:) = false;
 contradictoryResult.segmentationAreaMask(:) = false;
 contradictoryResult.usesCustomSegmentationArea = true;
-coordinateOnlyResult = extractBoneSurfacesFromSegmentation( ...
+coordinateOnlyResult = extractSingleGroupSurfaceData( ...
     contradictoryResult, ultrasoundFrame, struct());
 
 verifyEqual(testCase, coordinateOnlyResult, baselineResult);
@@ -427,7 +555,7 @@ function testCoordinateOrderAndDuplicatesDoNotChangeResult(testCase)
 %       None. Test failures are reported through TESTCASE.
 
 [segmentationResult, ultrasoundFrame] = makeSimpleFixture(68);
-baselineResult = extractBoneSurfacesFromSegmentation( ...
+baselineResult = extractSingleGroupSurfaceData( ...
     segmentationResult, ultrasoundFrame, struct());
 
 coordinates = segmentationResult.pixelCoordinates;
@@ -435,7 +563,7 @@ numberRepeated = min(20, size(coordinates, 1));
 reorderedResult = segmentationResult;
 reorderedResult.pixelCoordinates = [ ...
     flipud(coordinates); coordinates(1:numberRepeated, :)];
-actualResult = extractBoneSurfacesFromSegmentation( ...
+actualResult = extractSingleGroupSurfaceData( ...
     reorderedResult, ultrasoundFrame, struct());
 
 verifyEqual(testCase, actualResult, baselineResult);
@@ -473,13 +601,13 @@ for invalidIndex = 1:numel(invalidCoordinateArrays)
     invalidResult = segmentationResult;
     invalidResult.pixelCoordinates = ...
         invalidCoordinateArrays{invalidIndex};
-    verifyError(testCase, @() extractBoneSurfacesFromSegmentation( ...
+    verifyError(testCase, @() extractSingleGroupSurfaceData( ...
         invalidResult, ultrasoundFrame, struct()), ...
         'extractBoneSurfacesFromSegmentation:InvalidPixelCoordinates');
 end
 
 missingCoordinateResult = rmfield(segmentationResult, 'pixelCoordinates');
-verifyError(testCase, @() extractBoneSurfacesFromSegmentation( ...
+verifyError(testCase, @() extractSingleGroupSurfaceData( ...
     missingCoordinateResult, ultrasoundFrame, struct()), ...
     'extractBoneSurfacesFromSegmentation:InvalidSegmentationResults');
 end
@@ -498,7 +626,7 @@ function testInvalidPlaneGeometryRejected(testCase)
 [segmentationResult, ultrasoundFrame] = makeSimpleFixture(66);
 ultrasoundFrame.plane.W = 0;
 
-verifyError(testCase, @() extractBoneSurfacesFromSegmentation( ...
+verifyError(testCase, @() extractSingleGroupSurfaceData( ...
     segmentationResult, ultrasoundFrame, struct()), ...
     'extractBoneSurfacesFromSegmentation:InvalidPlaneGeometry');
 end
@@ -522,7 +650,7 @@ expectedRows = repmat(80.5, 1, nColumns);
 segmentationResults = makeSegmentationResult(71, 1, segmentationMask, 'processed');
 ultrasoundSequence = makeUltrasoundFrame(71, displayedImage, 0.1, 0.1);
 
-surfaceResults = extractBoneSurfacesFromSegmentation( ...
+surfaceResults = extractSingleGroupSurfaceData( ...
     segmentationResults, ultrasoundSequence, struct());
 
 % A clipped shadow window carries less evidence but must not cause indexing
@@ -586,7 +714,7 @@ options = struct( ...
         'evidenceThreshold', 0.05, ...
         'minimumMeanSegmentConfidence', 0.05));
 
-surfaceResult = extractBoneSurfacesFromSegmentation( ...
+surfaceResult = extractSingleGroupSurfaceData( ...
     segmentationResult, ultrasoundFrame, options);
 
 artificialCutPairs = [ ...
@@ -623,14 +751,14 @@ segmentationResult = makeSegmentationResult(80, 1, ...
     segmentationMask, 'processed');
 ultrasoundFrame = makeUltrasoundFrame( ...
     80, displayedImage, 0.1, 0.1);
-baselineResult = extractBoneSurfacesFromSegmentation( ...
+baselineResult = extractSingleGroupSurfaceData( ...
     segmentationResult, ultrasoundFrame, struct());
 
 maskGapColumns = 61:111;
 maskedResult = segmentationResult;
 maskedResult.segmentationMask(:, maskGapColumns) = false;
 maskedResult.segmentationAreaMask(:, maskGapColumns) = false;
-actualResult = extractBoneSurfacesFromSegmentation( ...
+actualResult = extractSingleGroupSurfaceData( ...
     maskedResult, ultrasoundFrame, struct());
 
 verifyEqual(testCase, actualResult, baselineResult);
@@ -658,7 +786,7 @@ function testBranchingDeepValleyRegularization(testCase)
     makeErraticRefinementFixture(72, 0.1);
 options = makeRefinementTestOptions();
 
-surfaceResult = extractBoneSurfacesFromSegmentation( ...
+surfaceResult = extractSingleGroupSurfaceData( ...
     segmentationResult, ultrasoundFrame, options);
 
 % This fixture is intentionally rough enough that a skipped or ineffective
@@ -704,7 +832,7 @@ segmentationResult = makeSegmentationResult(73, 1, ...
 ultrasoundFrame = makeUltrasoundFrame(73, displayedImage, ...
     xSpacingMm, ySpacingMm);
 
-surfaceResult = extractBoneSurfacesFromSegmentation( ...
+surfaceResult = extractSingleGroupSurfaceData( ...
     segmentationResult, ultrasoundFrame, struct());
 validMask = isfinite(surfaceResult.surfaceRowByColumn);
 rawDepthMm = surfaceResult.rawSurfaceRowByColumn(validMask) * ySpacingMm;
@@ -746,7 +874,7 @@ segmentationResult = makeSegmentationResult(74, 1, ...
 ultrasoundFrame = makeUltrasoundFrame(74, displayedImage, ...
     xSpacingMm, ySpacingMm);
 
-surfaceResult = extractBoneSurfacesFromSegmentation( ...
+surfaceResult = extractSingleGroupSurfaceData( ...
     segmentationResult, ultrasoundFrame, struct());
 validMask = isfinite(surfaceResult.surfaceRowByColumn);
 rawAmplitudeMm = estimatePeriodicAmplitude( ...
@@ -814,9 +942,9 @@ enabledOptions = makeRefinementTestOptions();
 disabledOptions = enabledOptions;
 disabledOptions.regularization.enabled = false;
 
-enabledResult = extractBoneSurfacesFromSegmentation( ...
+enabledResult = extractSingleGroupSurfaceData( ...
     segmentationResult, ultrasoundFrame, enabledOptions);
-[disabledResult, disabledMetadata] = extractBoneSurfacesFromSegmentation( ...
+[disabledResult, disabledMetadata] = extractSingleGroupSurfaceData( ...
     segmentationResult, ultrasoundFrame, disabledOptions);
 
 verifyEqual(testCase, string(disabledResult.regularizationStatus), "disabled");
@@ -867,7 +995,7 @@ ultrasoundFrame = makeUltrasoundFrame(78, displayedImage, ...
     xSpacingMm, ySpacingMm);
 options = makeRefinementTestOptions();
 
-surfaceResult = extractBoneSurfacesFromSegmentation( ...
+surfaceResult = extractSingleGroupSurfaceData( ...
     segmentationResult, ultrasoundFrame, options);
 observedMask = logical(surfaceResult.observedColumnMask);
 
@@ -919,7 +1047,7 @@ rehash path;
 clear quadprog;
 
 lastwarn('');
-surfaceResult = extractBoneSurfacesFromSegmentation( ...
+surfaceResult = extractSingleGroupSurfaceData( ...
     segmentationResult, ultrasoundFrame, struct());
 [warningMessage, warningIdentifier] = lastwarn;
 
@@ -966,7 +1094,7 @@ segmentationResults.pixelCoordinates = ...
 segmentationResultsBeforeExtraction = segmentationResults;
 ultrasoundSequence = makeUltrasoundFrame(81, displayedImage, 0.1, 0.1);
 
-[surfaceResults, extractionMetadata] = extractBoneSurfacesFromSegmentation( ...
+[surfaceResults, extractionMetadata] = extractSingleGroupSurfaceData( ...
     segmentationResults, ultrasoundSequence, struct());
 
 % The second-stage extractor must not rewrite the semi-automatic result.
@@ -1305,7 +1433,7 @@ segmentationResult = makeSegmentationResult( ...
 ultrasoundFrame = makeUltrasoundFrame( ...
     sourceIndex, displayedImage, xSpacingMm, ySpacingMm);
 
-surfaceResult = extractBoneSurfacesFromSegmentation( ...
+surfaceResult = extractSingleGroupSurfaceData( ...
     segmentationResult, ultrasoundFrame, makeRefinementTestOptions());
 end
 
@@ -1349,9 +1477,100 @@ segmentationResults.pixelCoordinates = ...
     segmentationResults.pixelCoordinates(keepCoordinate, :);
 ultrasoundSequence = makeUltrasoundFrame( ...
     sourceIndex, displayedImage, 0.1, 0.1);
-surfaceResult = extractBoneSurfacesFromSegmentation( ...
+surfaceResult = extractSingleGroupSurfaceData( ...
     segmentationResults, ultrasoundSequence, options);
 end
+
+function [segmentationGroups, ultrasoundGroups] = ...
+        makeGroupedExtractionFixture()
+%MAKEGROUPEDEXTRACTIONFIXTURE Build empty and repeated-index source groups.
+% The fixture contains group counts 0, 2, and 1. Source index 1 appears in both
+% populated groups so tests exercise composite identity rather than global keys.
+%
+% Inputs:
+%   None.
+%
+% Outputs:
+%   segmentationGroups : Three grouped synthetic segmentation inputs.
+%   ultrasoundGroups   : Three matching grouped ultrasound inputs.
+
+[segmentationA1, ultrasoundA1] = makeSimpleFixture(1);
+
+% Use distinct depths for the reordered local record and repeated cross-group
+% source index so positional or global matching errors change the result.
+nRows = 70;
+nColumns = 71;
+deepRows = repmat(47.5, 1, nColumns);
+[deepImage, deepMask] = makeBoneBandImage( ...
+    nRows, nColumns, deepRows, 12, 18);
+segmentationA2 = makeSegmentationResult(2, 2, deepMask, 'processed');
+ultrasoundA2 = makeUltrasoundFrame(2, deepImage, 0.1, 0.1);
+shallowRows = repmat(20.5, 1, nColumns);
+[shallowImage, shallowMask] = makeBoneBandImage( ...
+    nRows, nColumns, shallowRows, 12, 38);
+segmentationB1 = makeSegmentationResult(1, 1, shallowMask, 'processed');
+ultrasoundB1 = makeUltrasoundFrame(1, shallowImage, 0.1, 0.1);
+
+segmentationTemplate = struct( ...
+    'name', '', 'bone', '', 'path', '', ...
+    'data', segmentationA1([]));
+ultrasoundTemplate = struct( ...
+    'name', '', 'bone', '', 'path', '', ...
+    'data', ultrasoundA1([]));
+segmentationGroups = repmat(segmentationTemplate, 1, 3);
+ultrasoundGroups = repmat(ultrasoundTemplate, 1, 3);
+
+groupNames = {'empty_group', 'group_a', 'group_b'};
+groupBones = {'F', 'T', 'T'};
+groupPaths = { ...
+    'synthetic://empty', 'synthetic://group_a', 'synthetic://group_b'};
+for groupIndex = 1:3
+    segmentationGroups(groupIndex).name = groupNames{groupIndex};
+    segmentationGroups(groupIndex).bone = groupBones{groupIndex};
+    segmentationGroups(groupIndex).path = groupPaths{groupIndex};
+    ultrasoundGroups(groupIndex).name = groupNames{groupIndex};
+    ultrasoundGroups(groupIndex).bone = groupBones{groupIndex};
+    ultrasoundGroups(groupIndex).path = groupPaths{groupIndex};
+end
+
+segmentationGroups(2).data = [segmentationA1, segmentationA2];
+ultrasoundGroups(2).data = [ultrasoundA1, ultrasoundA2];
+segmentationGroups(3).data = segmentationB1;
+ultrasoundGroups(3).data = ultrasoundB1;
+end
+
+
+function [surfaceData, extractionMetadata] = extractSingleGroupSurfaceData( ...
+        segmentationData, ultrasoundData, options)
+%EXTRACTSINGLEGROUPSURFACEDATA Exercise grouped extraction for algorithm tests.
+% Existing numerical tests work with scalar or flat per-frame records. Wrapping
+% them in one source group keeps those assertions focused on the algorithm while
+% the public extractor is exercised through its grouped-only contract.
+%
+% Inputs:
+%   segmentationData : Scalar or vector of synthetic segmentation records.
+%   ultrasoundData   : Scalar or vector of matching ultrasound records.
+%   options          : Extraction configuration overrides used by the test.
+%
+% Outputs:
+%   surfaceData       : Unwrapped per-frame records from the one output group.
+%   extractionMetadata: Metadata returned by the grouped public extractor.
+
+groupMetadata = struct( ...
+    'name', 'synthetic_group', ...
+    'bone', 'T', ...
+    'path', 'synthetic://group');
+segmentationGroup = groupMetadata;
+segmentationGroup.data = segmentationData;
+ultrasoundGroup = groupMetadata;
+ultrasoundGroup.data = ultrasoundData;
+
+[groupedSurfaceResults, extractionMetadata] = ...
+    extractBoneSurfacesFromSegmentation( ...
+        segmentationGroup, ultrasoundGroup, options);
+surfaceData = groupedSurfaceResults.data;
+end
+
 
 function [segmentationResult, ultrasoundFrame] = makeSimpleFixture(sourceIndex)
 % MAKESIMPLEFIXTURE Create one valid extraction input pair for error tests.

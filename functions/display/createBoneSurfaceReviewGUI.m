@@ -2,31 +2,38 @@ function reviewFigure = createBoneSurfaceReviewGUI( ...
         surfaceResults, segmentationResults, ultrasoundSequence, ...
         extractionOptions, configurationFilePath)
 %CREATEBONESURFACEREVIEWGUI Open an interactive bone-surface review window.
-% The GUI keeps all extraction results in one sortable table. Selecting a row
-% redraws only its matching ultrasound image, segmentation, and extracted
-% surface, which makes large result sets practical to inspect back and forth.
-% The right-hand table documents the JSON settings without allowing edits.
+% The GUI keeps each source directory in its own sortable table tab. Selecting
+% a row redraws only its matching ultrasound image, segmentation, and extracted
+% surface. The right-hand controls document JSON settings without allowing edits.
 %
 % Inputs:
-%   surfaceResults        : Extracted surface result struct vector.
-%   segmentationResults   : Matching segmentation result struct vector.
-%   ultrasoundSequence    : Source image struct vector matched by sourceIndex.
+%   surfaceResults        : Grouped extracted surface result struct vector.
+%   segmentationResults   : Matching grouped segmentation result struct vector.
+%   ultrasoundSequence    : Grouped source images matched within each group.
 %   extractionOptions     : Scalar struct decoded from the extraction JSON.
 %   configurationFilePath : Path of the JSON file shown in the GUI.
 %
 % Outputs:
 %   reviewFigure          : Handle to the non-blocking review uifigure.
 
-numberOfResults = numel(surfaceResults);
+% Align all grouped inputs once. The renderer can then reuse compact flat arrays
+% while tabs retain the public group/local identity and tolerate reordered input.
+[flatSurfaceResults, flatSegmentationResults, flatUltrasoundSequence, ...
+    groupMetadata, stateIndicesByGroup] = ...
+    normalizeGroupedReviewInputs( ...
+        surfaceResults, segmentationResults, ultrasoundSequence);
+numberOfGroups = numel(groupMetadata);
+numberOfResultsByGroup = cellfun(@numel, stateIndicesByGroup);
+numberOfResults = sum(numberOfResultsByGroup);
+firstNonemptyGroupIndex = find(numberOfResultsByGroup > 0, 1);
 
-% Reject malformed direct calls early. The extraction script supplies these
-% shapes, but clear messages make the display helper safe to reuse elsewhere.
-if ~isstruct(surfaceResults) || ~isstruct(segmentationResults) || ...
-        ~isstruct(ultrasoundSequence)
-    error('createBoneSurfaceReviewGUI:InvalidReviewData', ...
-        ['surfaceResults, segmentationResults, and ultrasoundSequence ' ...
-         'must be struct vectors.']);
-end
+% Use aligned internal arrays below so repeated sourceIndex values in different
+% groups can never be mistaken for global identifiers.
+surfaceResults = flatSurfaceResults;
+segmentationResults = flatSegmentationResults;
+ultrasoundSequence = flatUltrasoundSequence;
+
+% Reject malformed configuration inputs before creating a partial figure.
 if ~isstruct(extractionOptions) || ~isscalar(extractionOptions)
     error('createBoneSurfaceReviewGUI:InvalidOptions', ...
         'extractionOptions must be a scalar struct decoded from JSON.');
@@ -37,65 +44,42 @@ if ~(ischar(configurationFilePath) || ...
         'configurationFilePath must be a character vector or string scalar.');
 end
 
-% Match every result to its image once. Row changes can then remain fast even
-% when the table contains hundreds of extraction results.
-if numberOfResults > 0
-    requiredSurfaceFields = { ...
-        'sequencePosition', 'sourceIndex', 'status', 'numberOfSegments', ...
-        'observedLengthMm', 'interpolatedLengthMm', 'meanConfidence'};
-    if ~all(isfield(surfaceResults, requiredSurfaceFields))
-        error('createBoneSurfaceReviewGUI:InvalidSurfaceResults', ...
-            'surfaceResults is missing one or more fields needed by the GUI.');
-    end
-    if ~isfield(ultrasoundSequence, 'sourceIndex')
-        error('createBoneSurfaceReviewGUI:InvalidUltrasoundSequence', ...
-            'ultrasoundSequence must contain sourceIndex.');
+% Build one table per group. LocalResultIndex remains stable after sorting and
+% maps through stateIndicesByGroup to the aligned internal flat record.
+reviewTableDataByGroup = cell(1, numberOfGroups);
+for groupIndex = 1:numberOfGroups
+    groupStateIndices = stateIndicesByGroup{groupIndex};
+    numberOfGroupResults = numel(groupStateIndices);
+    localResultIndices = (1:numberOfGroupResults).';
+    if numberOfGroupResults > 0
+        groupSurfaceResults = surfaceResults(groupStateIndices);
+        sequencePositions = [groupSurfaceResults.sequencePosition].';
+        sourceIndices = [groupSurfaceResults.sourceIndex].';
+        statusValues = string({groupSurfaceResults.status}).';
+        segmentCounts = [groupSurfaceResults.numberOfSegments].';
+        observedLengthsMm = [groupSurfaceResults.observedLengthMm].';
+        interpolatedLengthsMm = ...
+            [groupSurfaceResults.interpolatedLengthMm].';
+        meanConfidences = [groupSurfaceResults.meanConfidence].';
+    else
+        sequencePositions = zeros(0, 1);
+        sourceIndices = zeros(0, 1);
+        statusValues = strings(0, 1);
+        segmentCounts = zeros(0, 1);
+        observedLengthsMm = zeros(0, 1);
+        interpolatedLengthsMm = zeros(0, 1);
+        meanConfidences = zeros(0, 1);
     end
 
-    surfaceSourceIndices = [surfaceResults.sourceIndex];
-    ultrasoundSourceIndices = [ultrasoundSequence.sourceIndex];
-    [hasUltrasoundImage, ultrasoundIndexByResult] = ismember( ...
-        surfaceSourceIndices, ultrasoundSourceIndices);
-    if ~all(hasUltrasoundImage)
-        firstMissingResult = find(~hasUltrasoundImage, 1, 'first');
-        error('createBoneSurfaceReviewGUI:MissingUltrasoundImage', ...
-            'No ultrasound image matches sourceIndex %g.', ...
-            surfaceSourceIndices(firstMissingResult));
-    end
-else
-    surfaceSourceIndices = zeros(1, 0);
-    ultrasoundIndexByResult = zeros(1, 0);
+    reviewTableDataByGroup{groupIndex} = table( ...
+        localResultIndices, sequencePositions, sourceIndices, ...
+        statusValues, segmentCounts, observedLengthsMm, ...
+        interpolatedLengthsMm, meanConfidences, ...
+        'VariableNames', { ...
+            'LocalResultIndex', 'SequencePosition', 'SourceIndex', ...
+            'Status', 'Segments', 'ObservedLengthMm', ...
+            'InterpolatedLengthMm', 'MeanConfidence'});
 end
-
-% Include a permanent result index because the visible row position changes
-% whenever the user sorts the table.
-resultIndices = (1:numberOfResults).';
-if numberOfResults > 0
-    sequencePositions = [surfaceResults.sequencePosition].';
-    sourceIndices = surfaceSourceIndices.';
-    statusValues = string({surfaceResults.status}).';
-    segmentCounts = [surfaceResults.numberOfSegments].';
-    observedLengthsMm = [surfaceResults.observedLengthMm].';
-    interpolatedLengthsMm = [surfaceResults.interpolatedLengthMm].';
-    meanConfidences = [surfaceResults.meanConfidence].';
-else
-    sequencePositions = zeros(0, 1);
-    sourceIndices = zeros(0, 1);
-    statusValues = strings(0, 1);
-    segmentCounts = zeros(0, 1);
-    observedLengthsMm = zeros(0, 1);
-    interpolatedLengthsMm = zeros(0, 1);
-    meanConfidences = zeros(0, 1);
-end
-
-reviewTableData = table( ...
-    resultIndices, sequencePositions, sourceIndices, statusValues, ...
-    segmentCounts, observedLengthsMm, interpolatedLengthsMm, ...
-    meanConfidences, ...
-    'VariableNames', { ...
-        'ResultIndex', 'SequencePosition', 'SourceIndex', 'Status', ...
-        'Segments', 'ObservedLengthMm', 'InterpolatedLengthMm', ...
-        'MeanConfidence'});
 
 % Flatten the nested JSON hierarchy while retaining the algorithm group. The
 % resulting display data drives the individual read-only parameter controls.
@@ -115,29 +99,46 @@ mainGrid = uigridlayout(reviewFigure, [1, 3], ...
     'Padding', [10, 10, 10, 10], ...
     'ColumnSpacing', 10);
 
-% The left panel contains only navigation and result summaries. Users can sort
-% any column, then click a row to redraw the permanent matching result index.
+% The left panel separates source directories into tabs. Users can sort any
+% group-local table, then click a row to redraw its stable matching result.
 dataPanel = uipanel(mainGrid, ...
-    'Title', 'Data Table', ...
+    'Title', 'Data Tables by Source Directory', ...
     'Tag', 'bone_surface_review_data_panel');
 dataPanel.Layout.Row = 1;
 dataPanel.Layout.Column = 1;
 dataGrid = uigridlayout(dataPanel, [1, 1], ...
     'Padding', [5, 5, 5, 5]);
 
-resultsTable = uitable(dataGrid, ...
-    'Data', reviewTableData, ...
-    'ColumnName', { ...
-        '#', 'Sequence', 'Source', 'Status', 'Segments', ...
-        'Observed mm', 'Filled mm', 'Confidence'}, ...
-    'ColumnWidth', {40, 60, 55, 100, 60, 78, 70, 78}, ...
-    'ColumnEditable', false(1, width(reviewTableData)), ...
-    'ColumnSortable', true(1, width(reviewTableData)), ...
-    'SelectionType', 'row', ...
-    'Multiselect', 'off', ...
-    'Tag', 'bone_surface_review_data_table');
-resultsTable.Layout.Row = 1;
-resultsTable.Layout.Column = 1;
+resultsTabGroup = uitabgroup(dataGrid, ...
+    'Tag', 'bone_surface_review_tab_group');
+resultTabs = gobjects(1, numberOfGroups);
+resultsTables = gobjects(1, numberOfGroups);
+for groupIndex = 1:numberOfGroups
+    resultTabs(groupIndex) = uitab(resultsTabGroup, ...
+        'Title', char(string(groupMetadata(groupIndex).name)), ...
+        'Tag', sprintf('bone_surface_review_tab_%d', groupIndex));
+    resultTabs(groupIndex).UserData = groupIndex;
+    tabGrid = uigridlayout(resultTabs(groupIndex), [1, 1], ...
+        'Padding', [0, 0, 0, 0]);
+    currentTableData = reviewTableDataByGroup{groupIndex};
+    resultsTables(groupIndex) = uitable(tabGrid, ...
+        'Data', currentTableData, ...
+        'ColumnName', { ...
+            '#', 'Sequence', 'Source', 'Status', 'Segments', ...
+            'Observed mm', 'Filled mm', 'Confidence'}, ...
+        'ColumnWidth', {40, 60, 55, 100, 60, 78, 70, 78}, ...
+        'ColumnEditable', false(1, width(currentTableData)), ...
+        'ColumnSortable', true(1, width(currentTableData)), ...
+        'SelectionType', 'row', ...
+        'Multiselect', 'off', ...
+        'Tag', sprintf('bone_surface_review_data_table_%d', groupIndex));
+    resultsTables(groupIndex).UserData = groupIndex;
+
+    % Empty groups remain visible as tabs but cannot produce a row selection.
+    if numberOfResultsByGroup(groupIndex) == 0
+        resultsTables(groupIndex).Enable = 'off';
+    end
+end
 
 % Reuse one central axes so selecting among hundreds of rows does not create
 % hundreds of graphics objects or separate figure windows.
@@ -235,25 +236,29 @@ drawnow;
 scroll(parameterScrollPanel, 'top');
 drawnow limitrate;
 
+% Keep one remembered local selection per tab. Rendering uses an aligned flat
+% result index only after resolving the active group/local composite identity.
+lastSelectedLocalIndexByGroup = zeros(1, numberOfGroups);
+isSynchronizingSelection = false;
 if numberOfResults == 0
-    % An empty extraction still gets a clear GUI state instead of failing while
-    % trying to select the first row.
-    resultsTable.Enable = 'off';
-    axis(imageAxes, 'off');
-    text(imageAxes, 0.5, 0.5, ...
-        'No bone-surface results are available for review.', ...
-        'Units', 'normalized', ...
-        'HorizontalAlignment', 'center', ...
-        'VerticalAlignment', 'middle', ...
-        'Interpreter', 'none');
-    resultSummaryLabel.Text = 'No result selected.';
+    activeGroupIndex = 1;
+    resultsTabGroup.SelectedTab = resultTabs(activeGroupIndex);
+    renderEmptyGroup(activeGroupIndex);
 else
-    % Render the first result before registering the callback so initial setup
-    % is not treated as a user-generated table selection.
-    resultsTable.Selection = 1;
-    renderSelectedResult(1);
-    resultsTable.SelectionChangedFcn = @handleTableSelection;
+    activeGroupIndex = firstNonemptyGroupIndex;
+    lastSelectedLocalIndexByGroup(activeGroupIndex) = 1;
+    resultsTabGroup.SelectedTab = resultTabs(activeGroupIndex);
+    resultsTables(activeGroupIndex).Selection = 1;
+    renderSelectedResult( ...
+        stateIndicesByGroup{activeGroupIndex}(1), activeGroupIndex, 1);
 end
+
+% Register callbacks only after initial selection so setup is not interpreted
+% as user navigation.
+for groupIndex = 1:numberOfGroups
+    resultsTables(groupIndex).SelectionChangedFcn = @handleTableSelection;
+end
+resultsTabGroup.SelectionChangedFcn = @handleTabSelection;
 
     function resizeParameterContent(~, ~)
         %RESIZEPARAMETERCONTENT Fit grouped controls to the narrow viewport.
@@ -277,46 +282,116 @@ end
         parameterContentPanel.Position = contentPosition;
     end
 
-    function handleTableSelection(~, eventData)
-        %HANDLETABLESELECTION Render the permanent result behind a selected row.
-        % MATLAB reports a row in the table Data even after visual sorting. The
-        % stored ResultIndex therefore remains a safe key into surfaceResults.
+    function handleTabSelection(~, eventData)
+        %HANDLETABSELECTION Restore the remembered result for one source group.
+        % Empty tabs deliberately clear the prior group's image so no overlay is
+        % presented under the wrong source-directory label.
         %
         % Inputs:
-        %   ~         : Unused table source supplied by MATLAB.
-        %   eventData : Selection event containing the selected data row.
+        %   ~         : Unused tab-group source supplied by MATLAB.
+        %   eventData : Tab event whose NewValue identifies the selected group.
+        %
+        % Outputs:
+        %   None. The callback restores a table row or renders an empty state.
+
+        if isSynchronizingSelection || isempty(eventData.NewValue)
+            return;
+        end
+        activeGroupIndex = eventData.NewValue.UserData;
+        if numberOfResultsByGroup(activeGroupIndex) == 0
+            renderEmptyGroup(activeGroupIndex);
+            return;
+        end
+
+        localResultIndex = ...
+            lastSelectedLocalIndexByGroup(activeGroupIndex);
+        if localResultIndex < 1 || ...
+                localResultIndex > numberOfResultsByGroup(activeGroupIndex)
+            localResultIndex = 1;
+        end
+        lastSelectedLocalIndexByGroup(activeGroupIndex) = localResultIndex;
+        isSynchronizingSelection = true;
+        resultsTables(activeGroupIndex).Selection = localResultIndex;
+        isSynchronizingSelection = false;
+        resultIndex = ...
+            stateIndicesByGroup{activeGroupIndex}(localResultIndex);
+        renderSelectedResult( ...
+            resultIndex, activeGroupIndex, localResultIndex);
+    end
+
+    function handleTableSelection(sourceTable, eventData)
+        %HANDLETABLESELECTION Render the stable result behind a selected row.
+        % MATLAB reports the underlying Data row after visual sorting, so the
+        % stored local index remains safe within its owning source group.
+        %
+        % Inputs:
+        %   sourceTable : Table whose UserData stores its source group index.
+        %   eventData   : Selection event containing the selected data row.
         %
         % Outputs:
         %   None. The callback redraws the selected image and overlays.
 
-        if isempty(eventData.Selection)
+        if isSynchronizingSelection || isempty(eventData.Selection)
             return;
         end
 
         selectedDataRow = eventData.Selection(1);
-        currentTableData = resultsTable.Data;
+        currentTableData = sourceTable.Data;
         if selectedDataRow < 1 || selectedDataRow > height(currentTableData)
             return;
         end
 
-        stableResultIndex = currentTableData.ResultIndex(selectedDataRow);
-        renderSelectedResult(stableResultIndex);
+        targetGroupIndex = sourceTable.UserData;
+        localResultIndex = ...
+            currentTableData.LocalResultIndex(selectedDataRow);
+        resultIndex = stateIndicesByGroup{targetGroupIndex}(localResultIndex);
+        activeGroupIndex = targetGroupIndex;
+        lastSelectedLocalIndexByGroup(targetGroupIndex) = localResultIndex;
+        renderSelectedResult( ...
+            resultIndex, targetGroupIndex, localResultIndex);
     end
 
-    function renderSelectedResult(resultIndex)
+    function renderEmptyGroup(groupIndexToRender)
+        %RENDEREMPTYGROUP Clear the image for a source group without results.
+        % Keeping the empty tab selectable makes the GUI mirror the complete
+        % extraction hierarchy rather than hiding source directories.
+        %
+        % Input:
+        %   groupIndexToRender : One-based empty source group index.
+        %
+        % Outputs:
+        %   None. The axes and summary are replaced with an empty-group message.
+
+        cla(imageAxes);
+        axis(imageAxes, 'off');
+        text(imageAxes, 0.5, 0.5, sprintf( ...
+            'No bone-surface results are available in "%s".', ...
+            char(string(groupMetadata(groupIndexToRender).name))), ...
+            'Units', 'normalized', ...
+            'HorizontalAlignment', 'center', ...
+            'VerticalAlignment', 'middle', ...
+            'Interpreter', 'none');
+        resultSummaryLabel.Text = sprintf( ...
+            '%s: no result selected.', ...
+            char(string(groupMetadata(groupIndexToRender).name)));
+    end
+
+    function renderSelectedResult( ...
+            resultIndex, groupIndexToRender, localResultIndex)
         %RENDERSELECTEDRESULT Draw one image, segmentation, and surface result.
         % Redrawing one shared axes keeps navigation fast and ensures overlays
         % from the previously selected row cannot remain visible.
         %
         % Inputs:
-        %   resultIndex : Permanent positive index into surfaceResults.
+        %   resultIndex       : Permanent flat index into aligned internal data.
+        %   groupIndexToRender: One-based source group owning the result.
+        %   localResultIndex  : One-based result position inside that group.
         %
         % Outputs:
         %   None. The central axes and summary label are updated in place.
 
         currentResult = surfaceResults(resultIndex);
-        ultrasoundIndex = ultrasoundIndexByResult(resultIndex);
-        currentPlane = ultrasoundSequence(ultrasoundIndex).plane;
+        currentPlane = ultrasoundSequence(resultIndex).plane;
         displayedImage = currentPlane.image.';
 
         % plane.W and plane.H describe the distances between the first and
@@ -331,6 +406,7 @@ end
             imageHeightMm / (numberOfImageRows - 1)];
 
         cla(imageAxes);
+        axis(imageAxes, 'on');
         imagesc(imageAxes, ...
             [0, imageWidthMm], [0, imageHeightMm], displayedImage);
         axis(imageAxes, 'image');
@@ -340,24 +416,22 @@ end
         colormap(imageAxes, gray(256));
         hold(imageAxes, 'on');
 
-        % Match segmentation independently by sourceIndex because stored result
-        % arrays may be reordered before this reusable display helper is called.
-        [segmentationEntry, hasSegmentationEntry] = ...
-            getMatchingSegmentationEntry( ...
-                segmentationResults, currentResult.sourceIndex);
-        if hasSegmentationEntry
-            segmentationDisplayStatus = plotSegmentationOverlay( ...
-                imageAxes, segmentationEntry, size(displayedImage), ...
-                pixelSpacingXYMm);
-        else
-            segmentationDisplayStatus = "unavailable";
-        end
+        % Normalization already aligned this segmentation record by exact group
+        % metadata and group-local sourceIndex.
+        segmentationEntry = segmentationResults(resultIndex);
+        segmentationDisplayStatus = plotSegmentationOverlay( ...
+            imageAxes, segmentationEntry, size(displayedImage), ...
+            pixelSpacingXYMm);
 
         plotSurfaceResult(imageAxes, currentResult, pixelSpacingXYMm);
         hold(imageAxes, 'off');
 
         title(imageAxes, sprintf( ...
-            'Result %d of %d | sequence %g | source %g | %s', ...
+            ['%s: %d/%d | Overall %d/%d | sequence %g | ' ...
+            'source %g | %s'], ...
+            char(string(groupMetadata(groupIndexToRender).name)), ...
+            localResultIndex, ...
+            numberOfResultsByGroup(groupIndexToRender), ...
             resultIndex, numberOfResults, currentResult.sequencePosition, ...
             currentResult.sourceIndex, currentResult.status), ...
             'Interpreter', 'none');
@@ -375,36 +449,437 @@ end
 end
 
 
-function [segmentationEntry, hasMatch] = getMatchingSegmentationEntry( ...
-        segmentationResults, sourceIndex)
-%GETMATCHINGSEGMENTATIONENTRY Find display data with the requested source key.
-% Matching by sourceIndex prevents an image from being paired with a different
-% segmentation when either input struct vector has been reordered.
+function [flatSurfaceResults, flatSegmentationResults, ...
+        flatUltrasoundSequence, groupMetadata, stateIndicesByGroup] = ...
+        normalizeGroupedReviewInputs( ...
+            surfaceResults, segmentationResults, ultrasoundSequence)
+%NORMALIZEGROUPEDREVIEWINPUTS Validate groups and align records for rendering.
+% The GUI retains group tabs publicly but uses three identically ordered flat
+% arrays internally so row selection does not repeat metadata searches.
 %
 % Inputs:
-%   segmentationResults : Segmentation result struct vector.
-%   sourceIndex         : Scalar source identifier requested for display.
+%   surfaceResults      : Grouped extracted surface results.
+%   segmentationResults : Grouped segmentation results.
+%   ultrasoundSequence  : Grouped source ultrasound records.
 %
 % Outputs:
-%   segmentationEntry   : Matching scalar struct, or an empty struct.
-%   hasMatch            : True when exactly one usable entry was found.
+%   flatSurfaceResults      : Surface records in group/local display order.
+%   flatSegmentationResults : Segmentation records aligned to surface records.
+%   flatUltrasoundSequence  : Ultrasound records aligned to surface records.
+%   groupMetadata           : Surface group name, bone, and path metadata.
+%   stateIndicesByGroup     : Flat record indices for every surface group.
 
-segmentationEntry = struct([]);
-hasMatch = false;
+requiredGroupFields = {'name', 'bone', 'path', 'data'};
+validateReviewGroupedArray( ...
+    surfaceResults, requiredGroupFields, ...
+    'createBoneSurfaceReviewGUI:InvalidSurfaceResults', 'surfaceResults');
+validateReviewGroupedArray( ...
+    segmentationResults, requiredGroupFields, ...
+    'createBoneSurfaceReviewGUI:InvalidSegmentationResults', ...
+    'segmentationResults');
+validateReviewGroupedArray( ...
+    ultrasoundSequence, requiredGroupFields, ...
+    'createBoneSurfaceReviewGUI:InvalidUltrasoundSequence', ...
+    'ultrasoundSequence');
 
-if isempty(segmentationResults) || ...
-        ~isfield(segmentationResults, 'sourceIndex')
-    return;
+numberOfGroups = numel(surfaceResults);
+if numel(segmentationResults) ~= numberOfGroups || ...
+        numel(ultrasoundSequence) ~= numberOfGroups
+    error('createBoneSurfaceReviewGUI:GroupSetMismatch', ...
+        'All review inputs must contain the same source-directory group set.');
 end
 
-segmentationSourceIndices = [segmentationResults.sourceIndex];
-matchingIndex = find(segmentationSourceIndices == sourceIndex, 1, 'first');
-if isempty(matchingIndex)
-    return;
+[surfaceNames, surfaceBones, surfacePaths] = readReviewGroupMetadata( ...
+    surfaceResults, 'createBoneSurfaceReviewGUI:InvalidSurfaceResults', ...
+    'surfaceResults');
+[segmentationNames, segmentationBones, segmentationPaths] = ...
+    readReviewGroupMetadata( ...
+        segmentationResults, ...
+        'createBoneSurfaceReviewGUI:InvalidSegmentationResults', ...
+        'segmentationResults');
+[ultrasoundNames, ultrasoundBones, ultrasoundPaths] = ...
+    readReviewGroupMetadata( ...
+        ultrasoundSequence, ...
+        'createBoneSurfaceReviewGUI:InvalidUltrasoundSequence', ...
+        'ultrasoundSequence');
+
+validateUniqueReviewGroupIdentities( ...
+    surfaceNames, surfaceBones, surfacePaths, 'surfaceResults');
+validateUniqueReviewGroupIdentities( ...
+    segmentationNames, segmentationBones, segmentationPaths, ...
+    'segmentationResults');
+validateUniqueReviewGroupIdentities( ...
+    ultrasoundNames, ultrasoundBones, ultrasoundPaths, ...
+    'ultrasoundSequence');
+
+% Preserve only outer metadata here; aligned record data is stored separately.
+groupMetadataTemplate = struct('name', '', 'bone', '', 'path', '');
+groupMetadata = repmat(groupMetadataTemplate, 1, numberOfGroups);
+stateIndicesByGroup = cell(1, numberOfGroups);
+flatSurfaceResults = struct([]);
+flatSegmentationResults = struct([]);
+flatUltrasoundSequence = struct([]);
+nextStateIndex = 1;
+usedSegmentationGroups = false(1, numberOfGroups);
+usedUltrasoundGroups = false(1, numberOfGroups);
+
+requiredSurfaceFields = { ...
+    'sequencePosition', 'sourceIndex', 'status', 'numberOfSegments', ...
+    'observedLengthMm', 'interpolatedLengthMm', 'meanConfidence', ...
+    'surfaceRowByColumn', 'observedColumnMask', ...
+    'interpolatedColumnMask', 'segmentIdByColumn'};
+requiredSegmentationFields = {'sourceIndex', 'pixelCoordinates'};
+requiredUltrasoundFields = {'sourceIndex', 'plane'};
+
+for surfaceGroupIndex = 1:numberOfGroups
+    matchingSegmentationGroup = find( ...
+        segmentationNames == surfaceNames(surfaceGroupIndex) & ...
+        segmentationBones == surfaceBones(surfaceGroupIndex) & ...
+        segmentationPaths == surfacePaths(surfaceGroupIndex));
+    matchingUltrasoundGroup = find( ...
+        ultrasoundNames == surfaceNames(surfaceGroupIndex) & ...
+        ultrasoundBones == surfaceBones(surfaceGroupIndex) & ...
+        ultrasoundPaths == surfacePaths(surfaceGroupIndex));
+    if numel(matchingSegmentationGroup) ~= 1 || ...
+            numel(matchingUltrasoundGroup) ~= 1
+        error('createBoneSurfaceReviewGUI:GroupSetMismatch', ...
+            'No unique input groups match surfaceResults group %d.', ...
+            surfaceGroupIndex);
+    end
+    usedSegmentationGroups(matchingSegmentationGroup) = true;
+    usedUltrasoundGroups(matchingUltrasoundGroup) = true;
+
+    surfaceGroupData = surfaceResults(surfaceGroupIndex).data;
+    segmentationGroupData = ...
+        segmentationResults(matchingSegmentationGroup).data;
+    ultrasoundGroupData = ultrasoundSequence(matchingUltrasoundGroup).data;
+    surfaceSourceIndices = validateReviewGroupRecords( ...
+        surfaceGroupData, requiredSurfaceFields, ...
+        'createBoneSurfaceReviewGUI:InvalidSurfaceResults', ...
+        'surfaceResults', surfaceGroupIndex);
+    segmentationSourceIndices = validateReviewGroupRecords( ...
+        segmentationGroupData, requiredSegmentationFields, ...
+        'createBoneSurfaceReviewGUI:InvalidSegmentationResults', ...
+        'segmentationResults', matchingSegmentationGroup);
+    ultrasoundSourceIndices = validateReviewGroupRecords( ...
+        ultrasoundGroupData, requiredUltrasoundFields, ...
+        'createBoneSurfaceReviewGUI:InvalidUltrasoundSequence', ...
+        'ultrasoundSequence', matchingUltrasoundGroup);
+
+    [hasSegmentation, segmentationLocalIndices] = ismember( ...
+        surfaceSourceIndices, segmentationSourceIndices);
+    [hasUltrasound, ultrasoundLocalIndices] = ismember( ...
+        surfaceSourceIndices, ultrasoundSourceIndices);
+    hasExactRecordSets = ...
+        numel(surfaceSourceIndices) == numel(segmentationSourceIndices) && ...
+        numel(surfaceSourceIndices) == numel(ultrasoundSourceIndices) && ...
+        all(hasSegmentation) && all(hasUltrasound) && ...
+        all(ismember(segmentationSourceIndices, surfaceSourceIndices)) && ...
+        all(ismember(ultrasoundSourceIndices, surfaceSourceIndices));
+    if ~hasExactRecordSets
+        error('createBoneSurfaceReviewGUI:FrameSetMismatch', ...
+            ['Surface, segmentation, and ultrasound records in group "%s" ' ...
+            'must contain identical sourceIndex sets.'], ...
+            surfaceNames(surfaceGroupIndex));
+    end
+
+    numberOfGroupResults = numel(surfaceGroupData);
+    currentStateIndices = ...
+        nextStateIndex:(nextStateIndex + numberOfGroupResults - 1);
+    stateIndicesByGroup{surfaceGroupIndex} = currentStateIndices;
+    groupMetadata(surfaceGroupIndex).name = ...
+        surfaceResults(surfaceGroupIndex).name;
+    groupMetadata(surfaceGroupIndex).bone = ...
+        surfaceResults(surfaceGroupIndex).bone;
+    groupMetadata(surfaceGroupIndex).path = ...
+        surfaceResults(surfaceGroupIndex).path;
+    if numberOfGroupResults == 0
+        continue;
+    end
+
+    % Reorder matching records into surface local order before appending. The
+    % producer-owned record structs retain their complete optional fields.
+    surfaceDataRow = reshape(surfaceGroupData, 1, []);
+    segmentationDataRow = reshape( ...
+        segmentationGroupData(segmentationLocalIndices), 1, []);
+    ultrasoundDataRow = reshape( ...
+        ultrasoundGroupData(ultrasoundLocalIndices), 1, []);
+    if isempty(flatSurfaceResults)
+        flatSurfaceResults = surfaceDataRow;
+        flatSegmentationResults = segmentationDataRow;
+        flatUltrasoundSequence = ultrasoundDataRow;
+    else
+        flatSurfaceResults = [flatSurfaceResults, surfaceDataRow]; %#ok<AGROW>
+        flatSegmentationResults = ...
+            [flatSegmentationResults, segmentationDataRow]; %#ok<AGROW>
+        flatUltrasoundSequence = ...
+            [flatUltrasoundSequence, ultrasoundDataRow]; %#ok<AGROW>
+    end
+    nextStateIndex = nextStateIndex + numberOfGroupResults;
 end
 
-segmentationEntry = segmentationResults(matchingIndex);
-hasMatch = true;
+if ~all(usedSegmentationGroups) || ~all(usedUltrasoundGroups)
+    error('createBoneSurfaceReviewGUI:GroupSetMismatch', ...
+        'All review inputs must contain the same source-directory group set.');
+end
+end
+
+
+function validateReviewGroupedArray( ...
+        groupedData, requiredFields, errorIdentifier, inputName)
+%VALIDATEREVIEWGROUPEDARRAY Require a nonempty grouped outer struct vector.
+% Flat legacy arrays are rejected before any sourceIndex can be treated as a
+% global key.
+%
+% Inputs:
+%   groupedData     : Candidate grouped review input.
+%   requiredFields  : Required outer group field names.
+%   errorIdentifier : Public error identifier for this input.
+%   inputName       : Input name used in the validation message.
+%
+% Outputs:
+%   None. The function throws for malformed or flat input.
+
+if ~isstruct(groupedData) || ~isvector(groupedData) || ...
+        isempty(groupedData) || ~all(isfield(groupedData, requiredFields))
+    error(errorIdentifier, ...
+        ['%s must be a non-empty grouped struct vector containing name, ' ...
+        'bone, path, and data. Flat input is unsupported.'], inputName);
+end
+end
+
+
+function [groupNames, groupBones, groupPaths] = readReviewGroupMetadata( ...
+        groupedData, errorIdentifier, inputName)
+%READREVIEWGROUPMETADATA Validate and normalize exact group identity fields.
+% Normalization supports character vectors and scalar strings without changing
+% the original metadata shown in tabs or returned by extraction.
+%
+% Inputs:
+%   groupedData     : Grouped review input whose metadata is being read.
+%   errorIdentifier : Public error identifier for malformed metadata.
+%   inputName       : Input name used in validation messages.
+%
+% Outputs:
+%   groupNames : Row string vector of group names.
+%   groupBones : Row string vector of bone labels.
+%   groupPaths : Row string vector of source paths.
+
+numberOfGroups = numel(groupedData);
+groupNames = strings(1, numberOfGroups);
+groupBones = strings(1, numberOfGroups);
+groupPaths = strings(1, numberOfGroups);
+for groupIndex = 1:numberOfGroups
+    metadataValues = { ...
+        groupedData(groupIndex).name, groupedData(groupIndex).bone, ...
+        groupedData(groupIndex).path};
+    if ~all(cellfun(@isReviewTextScalar, metadataValues))
+        error(errorIdentifier, ...
+            '%s group %d has invalid name, bone, or path metadata.', ...
+            inputName, groupIndex);
+    end
+    normalizedMetadata = string(metadataValues);
+    if any(ismissing(normalizedMetadata)) || ...
+            strlength(string(groupedData(groupIndex).name)) == 0 || ...
+            strlength(string(groupedData(groupIndex).bone)) == 0
+        error(errorIdentifier, ...
+            '%s group %d has invalid name, bone, or path metadata.', ...
+            inputName, groupIndex);
+    end
+    groupNames(groupIndex) = string(groupedData(groupIndex).name);
+    groupBones(groupIndex) = string(groupedData(groupIndex).bone);
+    groupPaths(groupIndex) = string(groupedData(groupIndex).path);
+end
+end
+
+
+function validateUniqueReviewGroupIdentities( ...
+        groupNames, groupBones, groupPaths, inputName)
+%VALIDATEUNIQUEREVIEWGROUPIDENTITIES Reject duplicate metadata tuples.
+% A unique `(name,bone,path)` tuple is required to align reordered outer groups.
+%
+% Inputs:
+%   groupNames : Normalized group-name string vector.
+%   groupBones : Normalized bone-label string vector.
+%   groupPaths : Normalized source-path string vector.
+%   inputName  : Input name used in the validation message.
+%
+% Outputs:
+%   None. The function throws when a duplicate identity is found.
+
+for groupIndex = 1:numel(groupNames)
+    duplicateMask = groupNames == groupNames(groupIndex) & ...
+        groupBones == groupBones(groupIndex) & ...
+        groupPaths == groupPaths(groupIndex);
+    if nnz(duplicateMask) > 1
+        error('createBoneSurfaceReviewGUI:DuplicateGroupIdentity', ...
+            '%s contains a duplicate group identity at position %d.', ...
+            inputName, groupIndex);
+    end
+end
+end
+
+
+function sourceIndices = validateReviewGroupRecords( ...
+        groupData, requiredFields, errorIdentifier, inputName, groupIndex)
+%VALIDATEREVIEWGROUPRECORDS Validate one group and its local source keys.
+% Duplicate source indices are rejected only within the group, allowing the
+% same sourceIndex to appear safely in another source-directory tab.
+%
+% Inputs:
+%   groupData      : Candidate group-local record struct vector.
+%   requiredFields : Fields needed from every record by the review GUI.
+%   errorIdentifier: Public error identifier for this input type.
+%   inputName      : Input name used in validation messages.
+%   groupIndex     : One-based input group index used in messages.
+%
+% Output:
+%   sourceIndices : Row vector of validated group-local source indices.
+
+if ~isstruct(groupData) || (~isempty(groupData) && ~isvector(groupData)) || ...
+        (~isempty(groupData) && ~all(isfield(groupData, requiredFields)))
+    error(errorIdentifier, ...
+        '%s group %d data records are missing required review fields.', ...
+        inputName, groupIndex);
+end
+
+sourceIndices = zeros(1, numel(groupData));
+for localIndex = 1:numel(groupData)
+    sourceIndex = groupData(localIndex).sourceIndex;
+    if ~isnumeric(sourceIndex) || ~isscalar(sourceIndex) || ...
+            ~isreal(sourceIndex) || ~isfinite(sourceIndex)
+        error(errorIdentifier, ...
+            '%s group %d local sourceIndex %d must be finite and scalar.', ...
+            inputName, groupIndex, localIndex);
+    end
+    sourceIndices(localIndex) = double(sourceIndex);
+    validateReviewRecordDetails( ...
+        groupData(localIndex), inputName, groupIndex, localIndex, ...
+        errorIdentifier);
+end
+if numel(unique(sourceIndices)) ~= numel(sourceIndices)
+    error(errorIdentifier, ...
+        '%s group %d contains duplicate sourceIndex values.', ...
+        inputName, groupIndex);
+end
+end
+
+
+function validateReviewRecordDetails( ...
+        record, inputName, groupIndex, localIndex, errorIdentifier)
+%VALIDATEREVIEWRECORDDETAILS Check fields consumed after group matching.
+% Running these checks during normalization prevents malformed image or surface
+% values from creating a figure that fails only when its row is selected.
+%
+% Inputs:
+%   record          : One surface, segmentation, or ultrasound record.
+%   inputName       : Input category selecting the relevant validation branch.
+%   groupIndex      : One-based outer input group index used in messages.
+%   localIndex      : One-based local record index used in messages.
+%   errorIdentifier : Public error identifier for this input category.
+%
+% Outputs:
+%   None. The function throws when display data is malformed.
+
+switch inputName
+    case 'surfaceResults'
+        hasValidSequencePosition = ...
+            isnumeric(record.sequencePosition) && ...
+            isscalar(record.sequencePosition) && ...
+            isreal(record.sequencePosition) && ...
+            isfinite(record.sequencePosition);
+        hasValidStatus = isReviewTextScalar(record.status) && ...
+            ~ismissing(string(record.status));
+        scalarSummaryValues = [ ...
+            record.numberOfSegments, record.observedLengthMm, ...
+            record.interpolatedLengthMm, record.meanConfidence];
+        hasValidSummaries = isnumeric(scalarSummaryValues) && ...
+            isreal(scalarSummaryValues) && numel(scalarSummaryValues) == 4 && ...
+            all(~isinf(scalarSummaryValues));
+        surfaceRows = record.surfaceRowByColumn;
+        observedMask = record.observedColumnMask;
+        interpolatedMask = record.interpolatedColumnMask;
+        segmentIds = record.segmentIdByColumn;
+        hasValidColumnData = ...
+            isnumeric(surfaceRows) && isvector(surfaceRows) && ...
+            isreal(surfaceRows) && ...
+            (islogical(observedMask) || isnumeric(observedMask)) && ...
+            isvector(observedMask) && ...
+            (islogical(interpolatedMask) || ...
+            isnumeric(interpolatedMask)) && ...
+            isvector(interpolatedMask) && isnumeric(segmentIds) && ...
+            isvector(segmentIds) && ...
+            numel(observedMask) == numel(surfaceRows) && ...
+            numel(interpolatedMask) == numel(surfaceRows) && ...
+            numel(segmentIds) == numel(surfaceRows);
+        if ~(hasValidSequencePosition && hasValidStatus && ...
+                hasValidSummaries && hasValidColumnData)
+            error(errorIdentifier, ...
+                ['surfaceResults group %d, local position %d contains ' ...
+                'invalid table or surface-overlay values.'], ...
+                groupIndex, localIndex);
+        end
+
+    case 'segmentationResults'
+        pixelCoordinates = record.pixelCoordinates;
+        if ~isnumeric(pixelCoordinates) || ~isreal(pixelCoordinates) || ...
+                ~ismatrix(pixelCoordinates) || ...
+                size(pixelCoordinates, 2) ~= 2 || ...
+                any(~isfinite(pixelCoordinates(:)))
+            error(errorIdentifier, ...
+                ['segmentationResults group %d, local position %d must ' ...
+                'contain finite N-by-2 pixelCoordinates.'], ...
+                groupIndex, localIndex);
+        end
+
+    case 'ultrasoundSequence'
+        plane = record.plane;
+        requiredPlaneFields = {'image', 'W', 'H', 'nRows', 'nCols'};
+        if ~isstruct(plane) || ~isscalar(plane) || ...
+                ~all(isfield(plane, requiredPlaneFields))
+            error(errorIdentifier, ...
+                ['ultrasoundSequence group %d, local position %d has an ' ...
+                'invalid plane.'], groupIndex, localIndex);
+        end
+        hasValidImage = isnumeric(plane.image) && ismatrix(plane.image) && ...
+            ~isempty(plane.image) && isreal(plane.image) && ...
+            all(isfinite(double(plane.image(:))));
+        if hasValidImage
+            displayedImageSize = size(plane.image.');
+        else
+            displayedImageSize = [nan, nan];
+        end
+        hasValidGeometry = ...
+            isnumeric(plane.W) && isscalar(plane.W) && isreal(plane.W) && ...
+            isfinite(plane.W) && plane.W > 0 && ...
+            isnumeric(plane.H) && isscalar(plane.H) && isreal(plane.H) && ...
+            isfinite(plane.H) && plane.H > 0 && ...
+            isnumeric(plane.nRows) && isscalar(plane.nRows) && ...
+            isnumeric(plane.nCols) && isscalar(plane.nCols) && ...
+            isequal(displayedImageSize, [plane.nRows, plane.nCols]) && ...
+            plane.nRows > 1 && plane.nCols > 1;
+        if ~(hasValidImage && hasValidGeometry)
+            error(errorIdentifier, ...
+                ['ultrasoundSequence group %d, local position %d has ' ...
+                'invalid image geometry.'], groupIndex, localIndex);
+        end
+end
+end
+
+
+function isScalarText = isReviewTextScalar(value)
+%ISREVIEWTEXTSCALAR Return whether a value is one text scalar.
+% This helper prevents vector strings from reaching exact group comparisons.
+%
+% Input:
+%   value : Candidate character or string value.
+%
+% Output:
+%   isScalarText : True for a character row or scalar string.
+
+isScalarText = ...
+    (ischar(value) && (isrow(value) || isempty(value))) || ...
+    (isstring(value) && isscalar(value));
 end
 
 

@@ -1,6 +1,6 @@
 function frameSurface = traceSurfacePaths( ...
         candidateConfidence, candidateMask, pixelSpacingXYMm, options, ...
-        sourceIndex)
+        frameIdentity)
 %TRACESURFACEPATHS Select, interpolate, and curvature-refine surface paths.
 % Active columns separated by at most the configured physical gap remain in
 % one dynamic-programming problem so continuity constrains both sides. A
@@ -12,7 +12,7 @@ function frameSurface = traceSurfacePaths( ...
 %   candidateMask       : Sparse raster of authoritative boundary candidates.
 %   pixelSpacingXYMm    : [xSpacing,ySpacing] in millimetres.
 %   options             : Validated extraction configuration.
-%   sourceIndex         : Source-frame identifier used in fallback warnings.
+%   frameIdentity       : Composite group/local/source text for warnings.
 %
 % Output:
 %   frameSurface        : Scalar struct containing column-wise surface data.
@@ -89,7 +89,7 @@ assert(all(candidateMask(observedLinearIndices)), ...
 [surfaceRows, confidenceByColumn, regularizationDiagnostics] = ...
     regularizeSurfaceSegments(rawSurfaceRows, rawConfidenceByColumn, ...
     observedMask, interpolatedMask, segmentIds, numberOfRows, ...
-    pixelSpacingXYMm, options, sourceIndex);
+    pixelSpacingXYMm, options, frameIdentity);
 validMask = isfinite(surfaceRows);
 
 observedConfidenceValues = confidenceByColumn(observedMask);

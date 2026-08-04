@@ -3,7 +3,7 @@ clear; clc; close all;
 %% LOAD THE ULTRASOUND IMAGE DATA
 
 filepath_ultrasoundimage = 'D:\Documents\BELANDA\SonoSkin\codes\matlab\bmodeimage_3dspace\tools\snapshotProcess\outputs';
-filename_ultrasoundimage = 'validSnapshots_20260721_145143.mat';
+filename_ultrasoundimage = 'validSnapshots_20260804_152821.mat';
 
 % Load the MAT-file into a structure so its saved variable does not appear
 % directly in the script workspace under an unknown name.
