@@ -260,20 +260,9 @@ if ~isempty(T_ref_global_override)
         {'size', [4, 4], 'finite'}, mfilename, 'T_global_ref_override');
 end
 
-% Count every packet before the display loop so the plane array can be
-% allocated once. Packets with invalid tracking will be removed afterward.
-maximumSnapshotPlaneCount = 0;
-for snapshotIndex = 1:numel(snapshotData)
-    currentSnapshotSequences = snapshotData(snapshotIndex).sequences;
-    for sequenceIndex = 1:numel(currentSnapshotSequences)
-        maximumSnapshotPlaneCount = maximumSnapshotPlaneCount + ...
-            numel(currentSnapshotSequences(sequenceIndex).packets);
-    end
-end
-
-% Prepare one flat record per valid image plane. The geometry fields follow
-% meshPlaneIntersectionPixels, while the metadata keeps each result linked
-% to the source snapshot after the browser table is sorted.
+% Prepare the record stored for each valid image plane. The geometry fields
+% follow meshPlaneIntersectionPixels, while the metadata keeps each result
+% linked to its source packet after a browser table is sorted.
 snapshotPlaneTemplate = struct( ...
     'T_image_ref', [], ...      % 4x4 rigid transform from the image frame to the reference frame.
     'p0', [], ...               % 3D position of the image plane's top-left corner.
@@ -291,14 +280,40 @@ snapshotPlaneTemplate = struct( ...
     'snapshotIndex', 0, ...     % Index of the source snapshot group.
     'sequenceIndex', 0, ...     % Index of the source sequence within the snapshot.
     'packetIndex', 0);          % Index of the source packet within the sequence.
-snapshotPlanes = repmat(snapshotPlaneTemplate, 1, maximumSnapshotPlaneCount);
-snapshotPlaneCount = 0;
+
+% Give every source directory its own plane array. Keeping the same group
+% metadata beside data makes it clear which bone and sensor location produced
+% each set, including when all packets in a directory have invalid tracking.
+emptySnapshotPlaneData = repmat(snapshotPlaneTemplate, 1, 0);
+snapshotPlaneGroupTemplate = struct( ...
+    'name', '', ...
+    'bone', 'U', ...
+    'path', '', ...
+    'data', emptySnapshotPlaneData);
+snapshotPlanes = repmat( ...
+    snapshotPlaneGroupTemplate, 1, numel(snapshotData));
 
 % Visit every anatomical snapshot group because each directory stores a separate set of measurements.
 for snapshotIndex = 1:numel(snapshotData)
 
-    % Read the sequences from the current directory while keeping the outer loop easy to follow.
-    currentSnapshotSequences = snapshotData(snapshotIndex).sequences;
+    % Copy source-directory metadata before processing so an empty or fully
+    % rejected group is still represented in the grouped result.
+    currentSnapshotData = snapshotData(snapshotIndex);
+    snapshotPlanes(snapshotIndex).name = currentSnapshotData.name;
+    snapshotPlanes(snapshotIndex).bone = currentSnapshotData.bone;
+    snapshotPlanes(snapshotIndex).path = currentSnapshotData.path;
+
+    % Count this directory's packets so only its local plane array is
+    % preallocated. Invalid packets are trimmed from this array below.
+    currentSnapshotSequences = currentSnapshotData.sequences;
+    maximumGroupPlaneCount = 0;
+    for sequenceIndex = 1:numel(currentSnapshotSequences)
+        maximumGroupPlaneCount = maximumGroupPlaneCount + ...
+            numel(currentSnapshotSequences(sequenceIndex).packets);
+    end
+    currentGroupPlanes = repmat( ...
+        snapshotPlaneTemplate, 1, maximumGroupPlaneCount);
+    currentGroupPlaneCount = 0;
 
     % Visit every MHA file stored in the current snapshot directory.
     for sequenceIndex = 1:numel(currentSnapshotSequences)
@@ -369,40 +384,41 @@ for snapshotIndex = 1:numel(snapshotData)
 
             % Store the valid packet as a finite image plane so the later
             % intersection section does not need to repeat pose propagation.
-            snapshotPlaneCount = snapshotPlaneCount + 1;
-            snapshotPlanes(snapshotPlaneCount).T_image_ref = T_image_ref;
-            snapshotPlanes(snapshotPlaneCount).p0 = T_image_ref(1:3, 4);
-            snapshotPlanes(snapshotPlaneCount).ex = T_image_ref(1:3, 1);
-            snapshotPlanes(snapshotPlaneCount).ey = T_image_ref(1:3, 2);
-            snapshotPlanes(snapshotPlaneCount).n  = T_image_ref(1:3, 3);
+            currentGroupPlaneCount = currentGroupPlaneCount + 1;
+            currentGroupPlanes(currentGroupPlaneCount).T_image_ref = T_image_ref;
+            currentGroupPlanes(currentGroupPlaneCount).p0 = T_image_ref(1:3, 4);
+            currentGroupPlanes(currentGroupPlaneCount).ex = T_image_ref(1:3, 1);
+            currentGroupPlanes(currentGroupPlaneCount).ey = T_image_ref(1:3, 2);
+            currentGroupPlanes(currentGroupPlaneCount).n  = T_image_ref(1:3, 3);
 
             % Packet images use [width, height] storage, so width follows
             % the first dimension and rows follow the second dimension.
-            snapshotPlanes(snapshotPlaneCount).W             = (size(current_packet.Image, 1) - 1) * S_image_probecalib(1);
-            snapshotPlanes(snapshotPlaneCount).H             = (size(current_packet.Image, 2) - 1) * S_image_probecalib(2);
-            snapshotPlanes(snapshotPlaneCount).nRows         = size(current_packet.Image, 2);
-            snapshotPlanes(snapshotPlaneCount).nCols         = size(current_packet.Image, 1);
-            snapshotPlanes(snapshotPlaneCount).image         = current_packet.Image;
-            snapshotPlanes(snapshotPlaneCount).timestamp     = current_packet.Timestamp;
+            currentGroupPlanes(currentGroupPlaneCount).W         = (size(current_packet.Image, 1) - 1) * S_image_probecalib(1);
+            currentGroupPlanes(currentGroupPlaneCount).H         = (size(current_packet.Image, 2) - 1) * S_image_probecalib(2);
+            currentGroupPlanes(currentGroupPlaneCount).nRows     = size(current_packet.Image, 2);
+            currentGroupPlanes(currentGroupPlaneCount).nCols     = size(current_packet.Image, 1);
+            currentGroupPlanes(currentGroupPlaneCount).image     = current_packet.Image;
+            currentGroupPlanes(currentGroupPlaneCount).timestamp = current_packet.Timestamp;
 
             % Preserve source identifiers because a sortable table cannot
             % rely on its visible row number to identify the original data.
-            snapshotPlanes(snapshotPlaneCount).bone          = snapshotData(snapshotIndex).bone;
-            snapshotPlanes(snapshotPlaneCount).snapshotName  = snapshotData(snapshotIndex).name;
-            snapshotPlanes(snapshotPlaneCount).snapshotIndex = snapshotIndex;
-            snapshotPlanes(snapshotPlaneCount).sequenceIndex = sequenceIndex;
-            snapshotPlanes(snapshotPlaneCount).packetIndex   = packetIndex;
+            currentGroupPlanes(currentGroupPlaneCount).bone             = currentSnapshotData.bone;
+            currentGroupPlanes(currentGroupPlaneCount).snapshotName     = currentSnapshotData.name;
+            currentGroupPlanes(currentGroupPlaneCount).snapshotIndex    = snapshotIndex;
+            currentGroupPlanes(currentGroupPlaneCount).sequenceIndex    = sequenceIndex;
+            currentGroupPlanes(currentGroupPlaneCount).packetIndex      = packetIndex;
 
             % Update the figure during the loop so MATLAB shows progress while loading all snapshots.
             % drawnow;
 
         end
     end
-end
 
-% Discard unused preallocated entries created for packets that failed the
-% existing probe or reference tracking checks.
-snapshotPlanes = snapshotPlanes(1:snapshotPlaneCount);
+    % Remove unused preallocation only inside this source directory. The outer
+    % group remains present even when no packet passed the tracking checks.
+    snapshotPlanes(snapshotIndex).data = ...
+        currentGroupPlanes(1:currentGroupPlaneCount);
+end
 
 
 %% READ THE POST-PROCESS CT-SCAN DATA (BONES AND PINS)
@@ -648,68 +664,103 @@ intersectionTemplate = struct( ...
     'segmentFacingScore', [], ...       % How strongly each segment's face faces the probe.
     'timestamp', [], ...                % Timestamp of the source ultrasound image.
     'status', 'Not computed');          % Text describing the calculation state.
-intersections = repmat(intersectionTemplate, 1, numel(snapshotPlanes));
 
-% Compute every result once so table browsing only redraws the selected
-% image and never repeats the expensive mesh-plane intersection calculation.
-for planeIndex = 1:numel(snapshotPlanes)
+% Mirror the plane groups exactly so the same pair of group and local indices
+% always identifies an image plane and its intersection result.
+emptyIntersectionData = repmat(intersectionTemplate, 1, 0);
+intersectionGroupTemplate = struct( ...
+    'name', '', ...
+    'bone', 'U', ...
+    'path', '', ...
+    'data', emptyIntersectionData);
+intersections = repmat(intersectionGroupTemplate, 1, numel(snapshotPlanes));
 
-    % Get the current plane and bone
-    currentPlane    = snapshotPlanes(planeIndex);
-    currentBoneCode = char(currentPlane.bone);
-    intersections(planeIndex).timestamp = currentPlane.timestamp;
+% Count all local records only for progress reporting. This does not flatten
+% the stored data or change the directory-based indexing contract.
+totalSnapshotPlaneCount = sum(arrayfun(@(snapshotGroup) numel(snapshotGroup.data), snapshotPlanes));
+processedSnapshotPlaneCount = 0;
 
-    % Keep unknown bone groups visible in the table, but do not intersect
-    % them with an arbitrary anatomical mesh.
-    if isempty(currentBoneCode) || ~isvarname(currentBoneCode) || ~isfield(boneMeshesRefByCode, currentBoneCode)
+% Compute every result once so table browsing only redraws the selected image
+% and never repeats the expensive mesh-plane intersection calculation.
+for groupIndex = 1:numel(snapshotPlanes)
+    currentPlaneGroup = snapshotPlanes(groupIndex);
 
-        % Store the status for future debugging
-        intersections(planeIndex).status = sprintf('Skipped: no reference-frame mesh for bone code "%s".', currentBoneCode);
-        % Display the status for the user
-        fprintf('[Snapshot %d/%d, %s] %s\n', planeIndex, numel(snapshotPlanes), currentPlane.snapshotName, intersections(planeIndex).status);
+    % Copy the group metadata so both result containers expose the same outer
+    % structure, including source directories that contain no valid planes.
+    intersections(groupIndex).name = currentPlaneGroup.name;
+    intersections(groupIndex).bone = currentPlaneGroup.bone;
+    intersections(groupIndex).path = currentPlaneGroup.path;
+    intersections(groupIndex).data = repmat( ...
+        intersectionTemplate, 1, numel(currentPlaneGroup.data));
 
-        % Skip this plane.
-        continue;
+    for planeIndex = 1:numel(currentPlaneGroup.data)
+        processedSnapshotPlaneCount = processedSnapshotPlaneCount + 1;
+
+        % Read the aligned plane and initialize its timestamp before geometry
+        % checks so skipped results still remain linked to their source image.
+        currentPlane    = currentPlaneGroup.data(planeIndex);
+        currentBoneCode = char(currentPlane.bone);
+        intersections(groupIndex).data(planeIndex).timestamp = currentPlane.timestamp;
+
+        % Keep unknown bone groups visible in the table, but do not intersect
+        % them with an arbitrary anatomical mesh.
+        if isempty(currentBoneCode) || ~isvarname(currentBoneCode) || ~isfield(boneMeshesRefByCode, currentBoneCode)
+            intersections(groupIndex).data(planeIndex).status = sprintf( ...
+                'Skipped: no reference-frame mesh for bone code "%s".', ...
+                currentBoneCode);
+            fprintf('[Group %d/%d, %s, snapshot %d/%d, overall %d/%d] %s\n', ...
+                groupIndex, numel(snapshotPlanes), currentPlaneGroup.name, ...
+                planeIndex, numel(currentPlaneGroup.data), ...
+                processedSnapshotPlaneCount, totalSnapshotPlaneCount, ...
+                intersections(groupIndex).data(planeIndex).status);
+            continue;
+        end
+
+        % Select the transformed femur or tibia mesh that matches this plane's
+        % snapshot group before running the shared geometry helper.
+        currentMesh = boneMeshesRefByCode.(currentBoneCode);
+        [mask, pixelList, segments3D, segmentsUV, segmentFaceIdx] = meshPlaneIntersectionPixels(currentMesh, currentPlane);
+
+        % Use the same plane-to-pixel conversion as the validated intersection
+        % example and the optimization geometry pipeline.
+        du = currentPlane.W / currentPlane.nCols;
+        dv = currentPlane.H / currentPlane.nRows;
+
+        % Filter the raw intersection to mesh faces whose normals point toward
+        % the ultrasound probe within the configured angular tolerance.
+        [probeFacingSegmentMask, probeFacingSegments3D, ...
+            probeFacingSegmentsUV, probeFacingPixels, segmentFacingScore] = ...
+            selectProbeFacingIntersectionSegments( ...
+                currentMesh, segments3D, segmentsUV, segmentFaceIdx, ...
+                currentPlane, du, dv, currentPlane.nRows, ...
+                currentPlane.nCols, normalFacingToleranceDeg);
+
+        % Store all geometry outputs at the same group and local indices as
+        % the source plane so browser callbacks never need a flattened lookup.
+        intersections(groupIndex).data(planeIndex).mask                  = mask;
+        intersections(groupIndex).data(planeIndex).pixelList              = pixelList;
+        intersections(groupIndex).data(planeIndex).segments3D             = segments3D;
+        intersections(groupIndex).data(planeIndex).segmentsUV             = segmentsUV;
+        intersections(groupIndex).data(planeIndex).segmentFaceIdx         = segmentFaceIdx;
+        intersections(groupIndex).data(planeIndex).probeFacingSegmentMask = probeFacingSegmentMask;
+        intersections(groupIndex).data(planeIndex).probeFacingSegments3D  = probeFacingSegments3D;
+        intersections(groupIndex).data(planeIndex).probeFacingSegmentsUV  = probeFacingSegmentsUV;
+        intersections(groupIndex).data(planeIndex).probeFacingPixels      = probeFacingPixels;
+        intersections(groupIndex).data(planeIndex).segmentFacingScore     = segmentFacingScore;
+        intersections(groupIndex).data(planeIndex).status                 = 'Computed';
+
+        % Print group-local and total progress so the directory separation is
+        % visible without losing an overall estimate for long calculations.
+        fprintf(['[Group %d/%d, %s, snapshot %d/%d, overall %d/%d, ' ...
+                 't = %.3f] %d hit pixels, %d segments, %d probe-facing ' ...
+                 'segments, %d probe-facing pixels.\n'], ...
+                 groupIndex, numel(snapshotPlanes), currentPlaneGroup.name, ...
+                 planeIndex, numel(currentPlaneGroup.data), ...
+                 processedSnapshotPlaneCount, totalSnapshotPlaneCount, ...
+                 double(currentPlane.timestamp), size(pixelList, 1), ...
+                 numel(segments3D), numel(probeFacingSegments3D), ...
+                 size(probeFacingPixels, 1));
     end
-
-    % Select the transformed femur or tibia mesh that matches this plane's
-    % snapshot group before running the shared geometry helper.
-    currentMesh = boneMeshesRefByCode.(currentBoneCode);
-    [mask, pixelList, segments3D, segmentsUV, segmentFaceIdx] = meshPlaneIntersectionPixels(currentMesh, currentPlane);
-
-    % Use the same plane-to-pixel conversion as the validated intersection
-    % example and the optimization geometry pipeline.
-    du = currentPlane.W / currentPlane.nCols;
-    dv = currentPlane.H / currentPlane.nRows;
-
-    % Filter the raw intersection to mesh faces whose normals point toward
-    % the ultrasound probe within the configured angular tolerance.
-    [probeFacingSegmentMask, probeFacingSegments3D, probeFacingSegmentsUV, probeFacingPixels, segmentFacingScore] = ...
-        selectProbeFacingIntersectionSegments( ...
-            currentMesh, segments3D, segmentsUV, segmentFaceIdx, currentPlane, ...
-            du, dv, currentPlane.nRows, currentPlane.nCols, normalFacingToleranceDeg);
-
-    % Store all geometry outputs in the same order as snapshotPlanes so one
-    % stable result index can drive both the table and image display.
-    intersections(planeIndex).mask                      = mask;
-    intersections(planeIndex).pixelList                 = pixelList;
-    intersections(planeIndex).segments3D                = segments3D;
-    intersections(planeIndex).segmentsUV                = segmentsUV;
-    intersections(planeIndex).segmentFaceIdx            = segmentFaceIdx;
-    intersections(planeIndex).probeFacingSegmentMask    = probeFacingSegmentMask;
-    intersections(planeIndex).probeFacingSegments3D     = probeFacingSegments3D;
-    intersections(planeIndex).probeFacingSegmentsUV     = probeFacingSegmentsUV;
-    intersections(planeIndex).probeFacingPixels         = probeFacingPixels;
-    intersections(planeIndex).segmentFacingScore        = segmentFacingScore;
-    intersections(planeIndex).status                    = 'Computed';
-
-    % Print compact progress because processing many snapshots can take long
-    % enough that users need to see which input is currently being evaluated.
-    fprintf(['[Snapshot %d/%d, %s, t = %.3f] %d hit pixels, ' ...
-        '%d segments, %d probe-facing segments, %d probe-facing pixels.\n'], ...
-        planeIndex, numel(snapshotPlanes), currentPlane.snapshotName, ...
-        double(currentPlane.timestamp), size(pixelList, 1), numel(segments3D), ...
-        numel(probeFacingSegments3D), size(probeFacingPixels, 1));
 end
 
 % Open the existing results-first browser in the configured mode after all

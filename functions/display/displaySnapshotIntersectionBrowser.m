@@ -8,12 +8,14 @@ function [figBrowser, validSnapshots, outputFilePath] = displaySnapshotIntersect
 % review mode adds snapshot approval and export controls to the same browser.
 %
 % Inputs:
-%   snapshotPlanes : Struct array containing finite image-plane geometry,
-%                    source images, timestamps, bone codes, and snapshot
-%                    indices. Its order defines the stable acquisition index.
-%   intersections  : Struct array of precomputed raw and probe-facing
-%                    mesh-plane intersection results. It must have one entry
-%                    for every entry in snapshotPlanes.
+%   snapshotPlanes : Struct array grouped by source directory. Every group
+%                    has name, bone, path, and data fields. Its data field is
+%                    a struct array of finite image-plane geometry, source
+%                    images, timestamps, and packet indices.
+%   intersections  : Struct array with the same source-directory groups and
+%                    metadata as snapshotPlanes. Each data field contains one
+%                    raw and probe-facing intersection result for every plane
+%                    at the same group and local data index.
 %   boneMeshesRefByCode : Scalar struct whose fields are bone codes such as
 %                         F and T. Each value is a reference-frame mesh struct
 %                         with exact fields V for vertices and F for faces.
@@ -28,11 +30,14 @@ function [figBrowser, validSnapshots, outputFilePath] = displaySnapshotIntersect
 %                       choose the dialog's initial directory.
 %
 % Outputs:
-%   figBrowser      : Handle to the new uifigure that contains the sortable
-%                    results table, selected 2D image, and selected 3D scene.
-%   validSnapshots  : Struct array exported from review mode. Each element
-%                    contains sourceIndex, plane, and intersection. This is
-%                    empty in display mode or when review mode is cancelled.
+%   figBrowser      : Handle to the new uifigure that contains one sortable
+%                    table tab per source group, the selected 2D image, and
+%                    the selected 3D scene.
+%   validSnapshots  : Source-directory groups exported from review mode. Each
+%                    group keeps name, bone, path, and data. Every selected
+%                    data record contains its group-local sourceIndex, plane,
+%                    and intersection. This is empty in display mode or when
+%                    review mode is cancelled.
 %   outputFilePath  : Full path of the first successful review export. This
 %                    is empty in display mode or after review cancellation.
 
@@ -78,46 +83,125 @@ end
 % Initialize optional outputs before any GUI callback can run. The empty
 % struct keeps the review output fields clear even when no export is made.
 validSnapshots = struct( ...
-    'sourceIndex', {}, ...
-    'plane', {}, ...
-    'intersection', {});
+    'name', {}, ...
+    'bone', {}, ...
+    'path', {}, ...
+    'data', {});
 outputFilePath = '';
 hasSuccessfulExport = false;
 
-% Check the two aligned result containers before inspecting their fields.
+% Check the two grouped result containers before inspecting their fields.
 validateattributes(snapshotPlanes, {'struct'}, {'vector'}, ...
     mfilename, 'snapshotPlanes');
 validateattributes(intersections, {'struct'}, {'vector'}, ...
     mfilename, 'intersections');
 
-% Stop when array lengths differ because a table row could otherwise show an
-% image and intersection that came from different acquisitions.
+% Stop when the group counts differ because a tab could otherwise combine
+% planes and intersections that came from different source directories.
 if numel(snapshotPlanes) ~= numel(intersections)
     error('displaySnapshotIntersectionBrowser:InputSizeMismatch', ...
-        ['snapshotPlanes contains %d entry/entries, but intersections ' ...
-        'contains %d. The arrays must stay aligned.'], ...
+        ['snapshotPlanes contains %d group(s), but intersections contains ' ...
+        '%d. The grouped arrays must stay aligned.'], ...
         numel(snapshotPlanes), numel(intersections));
 end
 
-% Require every plane field used by the image renderer, table, or UV-to-pixel
-% conversion. Extra fields remain allowed for future metadata extensions.
+% Reject the old flat input contract by requiring the shared group wrapper.
+% Extra outer fields remain allowed for later snapshot metadata extensions.
+requiredGroupFields = {'name', 'bone', 'path', 'data'};
+if ~all(isfield(snapshotPlanes, requiredGroupFields)) || ...
+        ~all(isfield(intersections, requiredGroupFields))
+    error('displaySnapshotIntersectionBrowser:MissingGroupFields', ...
+        ['snapshotPlanes and intersections must be source-directory groups ' ...
+        'with name, bone, path, and data fields. Flat arrays are unsupported.']);
+end
+
+% List every child field used by the table and renderers before validating
+% each group's data. Empty groups keep these fields through their templates.
 requiredPlaneFields = { ...
     'p0', 'ex', 'ey', 'n', 'W', 'H', 'nRows', 'nCols', ...
     'image', 'timestamp', 'bone', 'snapshotName', ...
     'snapshotIndex', 'sequenceIndex', 'packetIndex'};
-if ~all(isfield(snapshotPlanes, requiredPlaneFields))
-    error('displaySnapshotIntersectionBrowser:MissingPlaneFields', ...
-        'snapshotPlanes is missing one or more required geometry or metadata fields.');
-end
 
 % Require the result fields used for counts, overlays, 3D synchronization,
 % and clear status reporting in the table.
 requiredIntersectionFields = { ...
     'pixelList', 'segments3D', 'segmentsUV', ...
     'probeFacingSegments3D', 'probeFacingPixels', 'status'};
-if ~all(isfield(intersections, requiredIntersectionFields))
-    error('displaySnapshotIntersectionBrowser:MissingIntersectionFields', ...
-        'intersections is missing one or more required display fields.');
+
+% Validate the two-dimensional alignment once so GUI callbacks can read a
+% group and local index without repeating defensive checks during interaction.
+nGroups = numel(snapshotPlanes);
+for groupIndex = 1:nGroups
+    currentPlaneGroup = snapshotPlanes(groupIndex);
+    currentIntersectionGroup = intersections(groupIndex);
+
+    % Require simple text metadata because tab titles and mesh selection use
+    % these values directly. Paths may be empty but must still be text.
+    groupMetadataValues = { ...
+        currentPlaneGroup.name, currentPlaneGroup.bone, currentPlaneGroup.path, ...
+        currentIntersectionGroup.name, currentIntersectionGroup.bone, ...
+        currentIntersectionGroup.path};
+    for metadataIndex = 1:numel(groupMetadataValues)
+        currentMetadataValue = groupMetadataValues{metadataIndex};
+        isTextScalar = (ischar(currentMetadataValue) && ...
+            (isrow(currentMetadataValue) || isempty(currentMetadataValue))) || ...
+            (isstring(currentMetadataValue) && isscalar(currentMetadataValue));
+        if ~isTextScalar
+            error('displaySnapshotIntersectionBrowser:InvalidGroupMetadata', ...
+                'Group %d metadata fields name, bone, and path must be text scalars.', ...
+                groupIndex);
+        end
+    end
+
+    % Matching metadata prevents tabs from pairing arrays that merely happen
+    % to have the same number of records.
+    if string(currentPlaneGroup.name) ~= string(currentIntersectionGroup.name) || ...
+            string(currentPlaneGroup.bone) ~= string(currentIntersectionGroup.bone) || ...
+            string(currentPlaneGroup.path) ~= string(currentIntersectionGroup.path)
+        error('displaySnapshotIntersectionBrowser:GroupMetadataMismatch', ...
+            'snapshotPlanes and intersections metadata differs for group %d.', ...
+            groupIndex);
+    end
+
+    currentPlanes = currentPlaneGroup.data;
+    currentIntersections = currentIntersectionGroup.data;
+    if ~isstruct(currentPlanes) || (~isempty(currentPlanes) && ~isvector(currentPlanes))
+        error('displaySnapshotIntersectionBrowser:InvalidPlaneGroupData', ...
+            'snapshotPlanes(%d).data must be a struct vector.', groupIndex);
+    end
+    if ~isstruct(currentIntersections) || ...
+            (~isempty(currentIntersections) && ~isvector(currentIntersections))
+        error('displaySnapshotIntersectionBrowser:InvalidIntersectionGroupData', ...
+            'intersections(%d).data must be a struct vector.', groupIndex);
+    end
+    if numel(currentPlanes) ~= numel(currentIntersections)
+        error('displaySnapshotIntersectionBrowser:GroupDataSizeMismatch', ...
+            ['Group %d contains %d plane(s) but %d intersection result(s). ' ...
+            'Local data arrays must stay aligned.'], ...
+            groupIndex, numel(currentPlanes), numel(currentIntersections));
+    end
+    if ~all(isfield(currentPlanes, requiredPlaneFields))
+        error('displaySnapshotIntersectionBrowser:MissingPlaneFields', ...
+            'snapshotPlanes(%d).data is missing required fields.', groupIndex);
+    end
+    if ~all(isfield(currentIntersections, requiredIntersectionFields))
+        error('displaySnapshotIntersectionBrowser:MissingIntersectionFields', ...
+            'intersections(%d).data is missing required fields.', groupIndex);
+    end
+
+    % Confirm repeated plane metadata still points to its owning outer group.
+    % This catches accidental regrouping before an incorrect image is shown.
+    for localResultIndex = 1:numel(currentPlanes)
+        currentPlane = currentPlanes(localResultIndex);
+        if string(currentPlane.snapshotName) ~= string(currentPlaneGroup.name) || ...
+                string(currentPlane.bone) ~= string(currentPlaneGroup.bone) || ...
+                double(currentPlane.snapshotIndex) ~= groupIndex
+            error('displaySnapshotIntersectionBrowser:PlaneGroupMetadataMismatch', ...
+                ['snapshotPlanes(%d).data(%d) metadata does not identify its ' ...
+                'owning source-directory group.'], ...
+                groupIndex, localResultIndex);
+        end
+    end
 end
 
 % Require one mesh lookup struct because row selection uses the plane's bone
@@ -158,67 +242,83 @@ for boneMeshIndex = 1:numel(boneMeshCodes)
     end
 end
 
-%% BUILD THE RESULTS TABLE DATA
+%% BUILD THE GROUPED RESULTS TABLE DATA
 
-% Count aligned results once so every table column receives the same length.
-nResults = numel(snapshotPlanes);
+% Keep one lightweight table and one review-decision vector per source
+% directory. Large image matrices and intersection geometry stay outside the
+% UI controls and are read only when a row is selected.
+nResultsByGroup = zeros(1, nGroups);
+resultsDataByGroup = cell(1, nGroups);
+reviewDecisions = cell(1, nGroups);
 
-% Keep ResultIndex as an explicit column because the visible rows can move
-% when users sort by any intersection count.
-resultIndex = (1:nResults).';
-boneCode = strings(nResults, 1);
-snapshotName = strings(nResults, 1);
-sequenceIndex = zeros(nResults, 1);
-packetIndex = zeros(nResults, 1);
-timestamp = zeros(nResults, 1);
-rawSegmentCount = zeros(nResults, 1);
-rawPixelCount = zeros(nResults, 1);
-facingSegmentCount = zeros(nResults, 1);
-facingPixelCount = zeros(nResults, 1);
-resultStatus = strings(nResults, 1);
+for groupIndex = 1:nGroups
+    currentPlanes = snapshotPlanes(groupIndex).data;
+    currentIntersections = intersections(groupIndex).data;
+    currentResultCount = numel(currentPlanes);
+    nResultsByGroup(groupIndex) = currentResultCount;
 
-% Convert the aligned struct arrays into simple table values so sorting does
-% not copy large image matrices or segment cell arrays into the UI control.
-for resultIndexToRead = 1:nResults
-    currentPlane = snapshotPlanes(resultIndexToRead);
-    currentIntersection = intersections(resultIndexToRead);
+    % ResultIndex is local to this group and remains the permanent key when a
+    % user sorts the visible rows inside the directory's tab.
+    resultIndex = (1:currentResultCount).';
+    boneCode = strings(currentResultCount, 1);
+    snapshotName = strings(currentResultCount, 1);
+    sequenceIndex = zeros(currentResultCount, 1);
+    packetIndex = zeros(currentResultCount, 1);
+    timestamp = zeros(currentResultCount, 1);
+    rawSegmentCount = zeros(currentResultCount, 1);
+    rawPixelCount = zeros(currentResultCount, 1);
+    facingSegmentCount = zeros(currentResultCount, 1);
+    facingPixelCount = zeros(currentResultCount, 1);
+    resultStatus = strings(currentResultCount, 1);
 
-    boneCode(resultIndexToRead) = string(currentPlane.bone);
-    snapshotName(resultIndexToRead) = string(currentPlane.snapshotName);
-    sequenceIndex(resultIndexToRead) = double(currentPlane.sequenceIndex);
-    packetIndex(resultIndexToRead) = double(currentPlane.packetIndex);
-    timestamp(resultIndexToRead) = double(currentPlane.timestamp);
-    rawSegmentCount(resultIndexToRead) = numel(currentIntersection.segments3D);
-    rawPixelCount(resultIndexToRead) = size(currentIntersection.pixelList, 1);
-    facingSegmentCount(resultIndexToRead) = ...
-        numel(currentIntersection.probeFacingSegments3D);
-    facingPixelCount(resultIndexToRead) = ...
-        size(currentIntersection.probeFacingPixels, 1);
-    resultStatus(resultIndexToRead) = string(currentIntersection.status);
+    % Convert this group's aligned records into simple scalar table values.
+    for localResultIndex = 1:currentResultCount
+        currentPlane = currentPlanes(localResultIndex);
+        currentIntersection = currentIntersections(localResultIndex);
+
+        boneCode(localResultIndex) = string(currentPlane.bone);
+        snapshotName(localResultIndex) = string(currentPlane.snapshotName);
+        sequenceIndex(localResultIndex) = double(currentPlane.sequenceIndex);
+        packetIndex(localResultIndex) = double(currentPlane.packetIndex);
+        timestamp(localResultIndex) = double(currentPlane.timestamp);
+        rawSegmentCount(localResultIndex) = ...
+            numel(currentIntersection.segments3D);
+        rawPixelCount(localResultIndex) = ...
+            size(currentIntersection.pixelList, 1);
+        facingSegmentCount(localResultIndex) = ...
+            numel(currentIntersection.probeFacingSegments3D);
+        facingPixelCount(localResultIndex) = ...
+            size(currentIntersection.probeFacingPixels, 1);
+        resultStatus(localResultIndex) = string(currentIntersection.status);
+    end
+
+    % Preserve local acquisition order initially while allowing independent
+    % sorting inside every source-directory tab.
+    currentResultsData = table( ...
+        resultIndex, boneCode, snapshotName, sequenceIndex, packetIndex, ...
+        timestamp, rawSegmentCount, rawPixelCount, facingSegmentCount, ...
+        facingPixelCount, resultStatus, ...
+        'VariableNames', { ...
+            'ResultIndex', 'Bone', 'SnapshotGroup', 'Sequence', 'Packet', ...
+            'Timestamp', 'RawSegments', 'RawPixels', 'FacingSegments', ...
+            'FacingPixels', 'Status'});
+
+    % Keep review decisions separate from sortable table rows. Each logical
+    % value uses the group's stable local ResultIndex.
+    reviewDecisions{groupIndex} = false(currentResultCount, 1);
+    if isReviewMode
+        currentResultsData = addvars( ...
+            currentResultsData, reviewDecisions{groupIndex}, ...
+            'Before', 'ResultIndex', ...
+            'NewVariableNames', 'Valid');
+    end
+    resultsDataByGroup{groupIndex} = currentResultsData;
 end
 
-% Preserve acquisition order in the initial table. Column sorting remains a
-% view operation because ResultIndex always points back to the original data.
-resultsData = table( ...
-    resultIndex, boneCode, snapshotName, sequenceIndex, packetIndex, ...
-    timestamp, rawSegmentCount, rawPixelCount, facingSegmentCount, ...
-    facingPixelCount, resultStatus, ...
-    'VariableNames', { ...
-        'ResultIndex', 'Bone', 'SnapshotGroup', 'Sequence', 'Packet', ...
-        'Timestamp', 'RawSegments', 'RawPixels', 'FacingSegments', ...
-        'FacingPixels', 'Status'});
-
-% Keep review decisions outside the sortable table because visible row
-% positions are temporary. ResultIndex is the permanent key into this vector.
-reviewDecisions = false(nResults, 1);
-
-% Add the logical column only in review mode so the default display table
-% keeps the same columns and read-only behavior as existing calls.
-if isReviewMode
-    resultsData = addvars(resultsData, reviewDecisions, ...
-        'Before', 'ResultIndex', ...
-        'NewVariableNames', 'Valid');
-end
+% Use the total only for global review controls and the overall empty state;
+% the result records themselves remain separated by group.
+nResults = sum(nResultsByGroup);
+lastSelectedResultIndexByGroup = zeros(1, nGroups);
 
 %% CREATE THE RESULTS-FIRST USER INTERFACE
 
@@ -243,8 +343,8 @@ clearAllButton = gobjects(0);
 selectionCountLabel = gobjects(0);
 exportSelectedButton = gobjects(0);
 
-% Review mode uses a small second row under the existing table. Display mode
-% continues to place that same table directly in the main three-column grid.
+% Review mode uses a small second row under the tabbed tables. Display mode
+% places the same tab group directly in the main three-column grid.
 if isReviewMode
     tableGrid = uigridlayout(mainGrid, [2, 1], ...
         'RowHeight', {'1x', 34}, ...
@@ -257,37 +357,80 @@ else
     resultsTableParent = mainGrid;
 end
 
-% Configure column labels and edit permissions from the selected mode. Only
-% the review checkbox can ever write table data.
+% Configure column labels and edit permissions once because every directory
+% tab exposes the same record fields. Only Valid can be edited in review mode.
 if isReviewMode
     resultsColumnNames = { ...
         'Valid', 'Index', 'Bone', 'Snapshot group', 'Sequence', 'Packet', ...
         'Timestamp', 'Raw segments', 'Raw pixels', 'Facing segments', ...
         'Facing pixels', 'Status'};
     resultsColumnWidths = {55, 65, 50, 135, 70, 60, 90, 90, 75, 100, 90, 'auto'};
-    resultsColumnEditable = [true, false(1, width(resultsData) - 1)];
+    resultsColumnEditable = [true, false(1, 11)];
 else
     resultsColumnNames = { ...
         'Index', 'Bone', 'Snapshot group', 'Sequence', 'Packet', ...
         'Timestamp', 'Raw segments', 'Raw pixels', 'Facing segments', ...
         'Facing pixels', 'Status'};
     resultsColumnWidths = {65, 50, 135, 70, 60, 90, 90, 75, 100, 90, 'auto'};
-    resultsColumnEditable = false(1, width(resultsData));
+    resultsColumnEditable = false(1, 11);
 end
 
-% Keep all rows visible and make every column sortable. Row selection makes
-% it clear that all columns describe one shared snapshot result.
-resultsTable = uitable(resultsTableParent, ...
-    'Data', resultsData, ...
-    'ColumnName', resultsColumnNames, ...
-    'ColumnWidth', resultsColumnWidths, ...
-    'ColumnEditable', resultsColumnEditable, ...
-    'ColumnSortable', true(1, width(resultsData)), ...
-    'SelectionType', 'row', ...
-    'Multiselect', 'off', ...
-    'Tag', 'snapshot_intersection_results_table');
-resultsTable.Layout.Row = 1;
-resultsTable.Layout.Column = 1;
+% Create one tab and table per source directory. The table and tab store their
+% group index so callbacks can recover the first part of the grouped identity.
+resultsTabGroup = gobjects(0);
+resultsTabs = gobjects(1, nGroups);
+resultsTables = gobjects(1, nGroups);
+if nGroups > 0
+    resultsTabGroup = uitabgroup(resultsTableParent, ...
+        'Tag', 'snapshot_intersection_results_tab_group');
+    resultsTabGroup.Layout.Row = 1;
+    resultsTabGroup.Layout.Column = 1;
+
+    for groupIndex = 1:nGroups
+        currentGroupName = char(string(snapshotPlanes(groupIndex).name));
+        resultsTabs(groupIndex) = uitab(resultsTabGroup, ...
+            'Title', currentGroupName, ...
+            'Tag', sprintf('snapshot_intersection_group_tab_%d', groupIndex));
+        resultsTabs(groupIndex).UserData = groupIndex;
+
+        % A one-cell grid makes the table fill its tab as the browser resizes.
+        currentTabGrid = uigridlayout(resultsTabs(groupIndex), [1, 1], ...
+            'Padding', [0, 0, 0, 0]);
+        currentResultsData = resultsDataByGroup{groupIndex};
+        resultsTables(groupIndex) = uitable(currentTabGrid, ...
+            'Data', currentResultsData, ...
+            'ColumnName', resultsColumnNames, ...
+            'ColumnWidth', resultsColumnWidths, ...
+            'ColumnEditable', resultsColumnEditable, ...
+            'ColumnSortable', true(1, width(currentResultsData)), ...
+            'SelectionType', 'row', ...
+            'Multiselect', 'off', ...
+            'Tag', sprintf( ...
+                'snapshot_intersection_results_table_%d', groupIndex));
+        resultsTables(groupIndex).Layout.Row = 1;
+        resultsTables(groupIndex).Layout.Column = 1;
+        resultsTables(groupIndex).UserData = groupIndex;
+        resultsTables(groupIndex).SelectionChangedFcn = ...
+            @handleSelectionChanged;
+
+        % Empty source groups stay visible as tabs but cannot emit row events.
+        if nResultsByGroup(groupIndex) == 0
+            resultsTables(groupIndex).Enable = 'off';
+        end
+        if isReviewMode
+            resultsTables(groupIndex).CellEditCallback = @handleValidEdit;
+        end
+    end
+else
+    % Explain a root directory with no source groups in the same left column
+    % where directory tabs would normally be created.
+    noGroupsLabel = uilabel(resultsTableParent, ...
+        'Text', 'No snapshot source directories are available.', ...
+        'HorizontalAlignment', 'center', ...
+        'Tag', 'snapshot_intersection_no_groups_label');
+    noGroupsLabel.Layout.Row = 1;
+    noGroupsLabel.Layout.Column = 1;
+end
 
 % Add compact review actions below the table without reducing either image
 % axes. The buttons all operate on stable ResultIndex values, not visible rows.
@@ -328,8 +471,6 @@ if isReviewMode
     exportSelectedButton.Layout.Row = 1;
     exportSelectedButton.Layout.Column = 4;
 
-    % Listen only for review edits because display mode has no writable cells.
-    resultsTable.CellEditCallback = @handleValidEdit;
 end
 
 % Create one large image axes because only the selected row should be drawn.
@@ -392,8 +533,6 @@ sceneHeadlight = gobjects(0);
 % Show a readable empty state instead of attempting to select a row that does
 % not exist when every packet was rejected by the tracking checks.
 if nResults == 0
-    resultsTable.Enable = 'off';
-
     % No review action is meaningful without results. Keep the controls
     % visible so the layout remains understandable, but prevent empty exports.
     if isReviewMode
@@ -402,29 +541,25 @@ if nResults == 0
         exportSelectedButton.Enable = 'off';
     end
 
-    axis(imageAxes, 'off');
-    text(imageAxes, 0.5, 0.5, ...
-        'No valid tracked snapshots are available for intersection display.', ...
-        'Units', 'normalized', ...
-        'HorizontalAlignment', 'center', ...
-        'VerticalAlignment', 'middle', ...
-        'Interpreter', 'none');
-
-    % Give the 3D column its own empty message so the complete layout remains
-    % understandable even when no tracked plane can be selected.
-    axis(sceneAxes, 'off');
-    text(sceneAxes, 0.5, 0.5, ...
-        'No selected 3D scene is available.', ...
-        'Units', 'normalized', ...
-        'HorizontalAlignment', 'center', ...
-        'VerticalAlignment', 'middle', ...
-        'Interpreter', 'none');
+    if nGroups == 0
+        renderEmptyGroup([]);
+    else
+        renderEmptyGroup(1);
+    end
 else
-    % Select and render the first acquisition without changing the requested
-    % acquisition-order default. ResultIndex remains stable after later sorting.
-    resultsTable.Selection = 1;
-    resultsTable.SelectionChangedFcn = @handleSelectionChanged;
-    renderSnapshot(resultIndex(1));
+    % Start on the first group that contains a valid plane. Empty groups remain
+    % available as tabs and show their own message when selected later.
+    firstNonemptyGroupIndex = find(nResultsByGroup > 0, 1);
+    resultsTabGroup.SelectedTab = resultsTabs(firstNonemptyGroupIndex);
+    resultsTables(firstNonemptyGroupIndex).Selection = 1;
+    lastSelectedResultIndexByGroup(firstNonemptyGroupIndex) = 1;
+    renderSnapshot(firstNonemptyGroupIndex, 1);
+end
+
+% Connect tab changes only after the initial axes state exists. This avoids a
+% partially created callback trying to render while the UI is still building.
+if nGroups > 0
+    resultsTabGroup.SelectionChangedFcn = @handleTabChanged;
 end
 
 % Review mode returns its data only after the first completed export or a
@@ -433,13 +568,13 @@ if isReviewMode && isvalid(figBrowser)
     uiwait(figBrowser);
 end
 
-    function handleValidEdit(~, eventData)
+    function handleValidEdit(sourceTable, eventData)
         %HANDLEVALIDEDIT Store one checkbox decision by original result index.
-        % This callback is needed because sorted table rows can move while the
-        % review decision must stay attached to its original snapshot result.
+        % This callback reads its group from the source table because identical
+        % local result indices can exist in several directory tabs.
         %
         % Inputs:
-        %   ~         : Unused source table handle supplied by MATLAB.
+        %   sourceTable : Table whose UserData stores its source-group index.
         %   eventData : Cell edit event containing original data indices and
         %               the logical value written to the Valid cell.
         %
@@ -456,7 +591,8 @@ end
         % visible rows have been sorted, which makes this lookup stable.
         editedDataRow = eventData.Indices(1);
         editedDataColumn = eventData.Indices(2);
-        currentTableData = resultsTable.Data;
+        currentTableData = sourceTable.Data;
+        editedGroupIndex = sourceTable.UserData;
 
         % Defend against stale UI events that refer to data no longer present.
         if editedDataRow < 1 || editedDataRow > height(currentTableData) || ...
@@ -475,7 +611,8 @@ end
         % Resolve the permanent result identity before updating the logical
         % vector. No table refresh is needed because MATLAB already wrote the cell.
         editedResultIndex = currentTableData.ResultIndex(editedDataRow);
-        reviewDecisions(editedResultIndex) = logical(eventData.NewData);
+        reviewDecisions{editedGroupIndex}(editedResultIndex) = ...
+            logical(eventData.NewData);
         updateSelectionCount();
     end
 
@@ -490,7 +627,9 @@ end
         % Outputs:
         %   None. The callback updates review state and displayed checkboxes.
 
-        reviewDecisions(:) = true;
+        for groupIndexToUpdate = 1:nGroups
+            reviewDecisions{groupIndexToUpdate}(:) = true;
+        end
         synchronizeValidColumn();
     end
 
@@ -505,7 +644,9 @@ end
         % Outputs:
         %   None. The callback updates review state and displayed checkboxes.
 
-        reviewDecisions(:) = false;
+        for groupIndexToUpdate = 1:nGroups
+            reviewDecisions{groupIndexToUpdate}(:) = false;
+        end
         synchronizeValidColumn();
     end
 
@@ -520,32 +661,39 @@ end
         % Outputs:
         %   None. The helper refreshes Valid cells and preserves selection.
 
-        currentTableData = resultsTable.Data;
-        selectedResultIndex = [];
+        % Refresh each directory table independently because its ResultIndex is
+        % local to that group. Empty tables need no checkbox synchronization.
+        for groupIndexToUpdate = 1:nGroups
+            currentResultsTable = resultsTables(groupIndexToUpdate);
+            currentTableData = currentResultsTable.Data;
+            if height(currentTableData) == 0
+                continue;
+            end
+            selectedResultIndex = [];
 
-        % Remember the selected result identity before assigning refreshed
-        % table data, because a UI update must not switch the displayed snapshot.
-        selectedDataRows = resultsTable.Selection;
-        if ~isempty(selectedDataRows) && ...
-                selectedDataRows(1) >= 1 && ...
-                selectedDataRows(1) <= height(currentTableData)
-            selectedResultIndex = ...
-                currentTableData.ResultIndex(selectedDataRows(1));
-        end
+            % Remember the selected local identity before replacing table data.
+            selectedDataRows = currentResultsTable.Selection;
+            if ~isempty(selectedDataRows) && ...
+                    selectedDataRows(1) >= 1 && ...
+                    selectedDataRows(1) <= height(currentTableData)
+                selectedResultIndex = ...
+                    currentTableData.ResultIndex(selectedDataRows(1));
+            end
 
-        % Populate each Data row by its permanent result identity. MATLAB then
-        % reapplies any active visual sorting to its read-only DisplayData view.
-        currentTableData.Valid = ...
-            reviewDecisions(currentTableData.ResultIndex);
-        resultsTable.Data = currentTableData;
+            % Map checkbox values by stable local ResultIndex so sorting does
+            % not move review decisions to another acquisition.
+            currentTableData.Valid = reviewDecisions{groupIndexToUpdate}( ...
+                currentTableData.ResultIndex);
+            currentResultsTable.Data = currentTableData;
 
-        % Restore the same result selection if MATLAB rebuilt the table view.
-        if ~isempty(selectedResultIndex)
-            refreshedTableData = resultsTable.Data;
-            selectedDataRow = find( ...
-                refreshedTableData.ResultIndex == selectedResultIndex, 1);
-            if ~isempty(selectedDataRow)
-                resultsTable.Selection = selectedDataRow;
+            % Restore the selected record if MATLAB rebuilt the table view.
+            if ~isempty(selectedResultIndex)
+                refreshedTableData = currentResultsTable.Data;
+                selectedDataRow = find( ...
+                    refreshedTableData.ResultIndex == selectedResultIndex, 1);
+                if ~isempty(selectedDataRow)
+                    currentResultsTable.Selection = selectedDataRow;
+                end
             end
         end
 
@@ -564,9 +712,93 @@ end
         %   None. The helper updates the review count label text.
 
         if ~isempty(selectionCountLabel) && isvalid(selectionCountLabel)
+            selectedResultCount = sum(cellfun(@nnz, reviewDecisions));
             selectionCountLabel.Text = sprintf( ...
-                'Selected: %d / %d', nnz(reviewDecisions), nResults);
+                'Selected: %d / %d', selectedResultCount, nResults);
         end
+    end
+
+    function handleTabChanged(~, eventData)
+        %HANDLETABCHANGED Show the remembered acquisition for the active group.
+        % Directory tabs own independent tables, so switching tabs must restore
+        % that group's local selection or show a group-specific empty message.
+        %
+        % Inputs:
+        %   ~         : Unused tab-group handle supplied by MATLAB.
+        %   eventData : Tab selection event whose NewValue stores group index.
+        %
+        % Outputs:
+        %   None. The callback updates table selection and both display axes.
+
+        if isempty(eventData.NewValue) || ~isvalid(eventData.NewValue)
+            return;
+        end
+        selectedGroupIndex = eventData.NewValue.UserData;
+        if nResultsByGroup(selectedGroupIndex) == 0
+            renderEmptyGroup(selectedGroupIndex);
+            return;
+        end
+
+        % Use the group's previous stable local index, or its first acquisition
+        % when the tab has not been visited before.
+        selectedResultIndex = ...
+            lastSelectedResultIndexByGroup(selectedGroupIndex);
+        if selectedResultIndex < 1 || ...
+                selectedResultIndex > nResultsByGroup(selectedGroupIndex)
+            selectedResultIndex = 1;
+        end
+        currentTableData = resultsTables(selectedGroupIndex).Data;
+        selectedDataRow = find( ...
+            currentTableData.ResultIndex == selectedResultIndex, 1);
+        if ~isempty(selectedDataRow)
+            resultsTables(selectedGroupIndex).Selection = selectedDataRow;
+        end
+        lastSelectedResultIndexByGroup(selectedGroupIndex) = ...
+            selectedResultIndex;
+        renderSnapshot(selectedGroupIndex, selectedResultIndex);
+    end
+
+    function renderEmptyGroup(groupIndexToRender)
+        %RENDEREMPTYGROUP Clear both views when a group has no valid planes.
+        % This state keeps empty source directories visible without leaving an
+        % image or 3D scene from a different directory on screen.
+        %
+        % Input:
+        %   groupIndexToRender : Empty when no groups exist, or the index of an
+        %                        existing source group whose data is empty.
+        %
+        % Outputs:
+        %   None. The helper replaces both axes with explanatory text.
+
+        stopSceneRotation([], []);
+        hasRendered3DScene = false;
+        sceneHeadlight = gobjects(0);
+        cla(imageAxes);
+        cla(sceneAxes);
+
+        if isempty(groupIndexToRender)
+            imageMessage = 'No snapshot source directories are available.';
+        else
+            imageMessage = sprintf( ...
+                'No valid tracked snapshots are available in "%s".', ...
+                char(string(snapshotPlanes(groupIndexToRender).name)));
+        end
+        axis(imageAxes, 'off');
+        text(imageAxes, 0.5, 0.5, imageMessage, ...
+            'Units', 'normalized', ...
+            'HorizontalAlignment', 'center', ...
+            'VerticalAlignment', 'middle', ...
+            'Interpreter', 'none');
+
+        % Give the 3D column a separate message so both views clearly describe
+        % why no geometry is currently rendered.
+        axis(sceneAxes, 'off');
+        text(sceneAxes, 0.5, 0.5, ...
+            'No selected 3D scene is available.', ...
+            'Units', 'normalized', ...
+            'HorizontalAlignment', 'center', ...
+            'VerticalAlignment', 'middle', ...
+            'Interpreter', 'none');
     end
 
     function exportSelectedSnapshots(~, ~)
@@ -581,10 +813,13 @@ end
         %   None. The callback updates the parent function outputs, writes the
         %   MAT-file, reports success, and releases the first review wait.
 
-        % Export in original result order so file contents do not depend on
-        % whichever table column the reviewer most recently sorted.
-        selectedResultIndices = find(reviewDecisions);
-        if isempty(selectedResultIndices)
+        % Collect selected local indices independently for every source group.
+        % find preserves original acquisition order regardless of table sorting.
+        selectedResultIndicesByGroup = cellfun( ...
+            @find, reviewDecisions, 'UniformOutput', false);
+        selectedResultCount = sum(cellfun( ...
+            @numel, selectedResultIndicesByGroup));
+        if selectedResultCount == 0
             uialert(figBrowser, ...
                 ['No snapshots are selected. Check at least one Valid box ' ...
                 'before exporting.'], ...
@@ -624,20 +859,48 @@ end
         previousValidSnapshots = validSnapshots;
         previousOutputFilePath = outputFilePath;
 
-        % Copy every complete source record into the requested output schema.
-        % Images and all precomputed geometry remain intact inside these structs.
-        validSnapshots = repmat(struct( ...
+        % Build one selected-record template, then keep every outer source group
+        % even when the reviewer did not select a record from that directory.
+        validSnapshotDataTemplate = struct( ...
             'sourceIndex', [], ...
             'plane', [], ...
-            'intersection', []), ...
-            1, numel(selectedResultIndices));
-        for outputIndex = 1:numel(selectedResultIndices)
-            selectedResultIndex = selectedResultIndices(outputIndex);
-            validSnapshots(outputIndex).sourceIndex = selectedResultIndex;
-            validSnapshots(outputIndex).plane = ...
-                snapshotPlanes(selectedResultIndex);
-            validSnapshots(outputIndex).intersection = ...
-                intersections(selectedResultIndex);
+            'intersection', []);
+        emptyValidSnapshotData = repmat( ...
+            validSnapshotDataTemplate, 1, 0);
+        validSnapshotGroupTemplate = struct( ...
+            'name', '', ...
+            'bone', 'U', ...
+            'path', '', ...
+            'data', emptyValidSnapshotData);
+        validSnapshots = repmat( ...
+            validSnapshotGroupTemplate, 1, nGroups);
+
+        % Copy complete plane and intersection records without recalculating
+        % geometry. sourceIndex remains local to the surrounding source group.
+        for groupIndexToExport = 1:nGroups
+            validSnapshots(groupIndexToExport).name = ...
+                snapshotPlanes(groupIndexToExport).name;
+            validSnapshots(groupIndexToExport).bone = ...
+                snapshotPlanes(groupIndexToExport).bone;
+            validSnapshots(groupIndexToExport).path = ...
+                snapshotPlanes(groupIndexToExport).path;
+
+            currentSelectedResultIndices = ...
+                selectedResultIndicesByGroup{groupIndexToExport};
+            currentSelectedData = repmat( ...
+                validSnapshotDataTemplate, ...
+                1, numel(currentSelectedResultIndices));
+            for outputIndex = 1:numel(currentSelectedResultIndices)
+                selectedResultIndex = ...
+                    currentSelectedResultIndices(outputIndex);
+                currentSelectedData(outputIndex).sourceIndex = ...
+                    selectedResultIndex;
+                currentSelectedData(outputIndex).plane = ...
+                    snapshotPlanes(groupIndexToExport).data(selectedResultIndex);
+                currentSelectedData(outputIndex).intersection = ...
+                    intersections(groupIndexToExport).data(selectedResultIndex);
+            end
+            validSnapshots(groupIndexToExport).data = currentSelectedData;
         end
         outputFilePath = fullfile(selectedDirectory, selectedFileName);
 
@@ -661,7 +924,7 @@ end
         hasSuccessfulExport = true;
         uialert(figBrowser, ...
             sprintf('Exported %d snapshot(s).\n\nSaved to:\n%s', ...
-            numel(selectedResultIndices), outputFilePath), ...
+            selectedResultCount, outputFilePath), ...
             'Export complete', ...
             'Icon', 'success');
         if strcmp(figBrowser.WaitStatus, 'waiting')
@@ -775,14 +1038,13 @@ end
         end
     end
 
-    function handleSelectionChanged(~, eventData)
+    function handleSelectionChanged(sourceTable, eventData)
         %HANDLESELECTIONCHANGED Render the snapshot represented by a selected row.
-        % This callback is needed because table sorting changes visible row
-        % positions. The event reports the original Data row, whose immutable
-        % ResultIndex keeps the image and intersection paired after sorting.
+        % The source table identifies the directory group, while its immutable
+        % local ResultIndex keeps the image and intersection paired after sorting.
         %
         % Inputs:
-        %   ~         : Unused source table handle supplied by MATLAB.
+        %   sourceTable : Selected table whose UserData stores group index.
         %   eventData : Table selection event containing selected display rows.
         %
         % Outputs:
@@ -796,27 +1058,30 @@ end
         % Use the first row defensively even though Multiselect is disabled.
         % Selection refers to the original Data array, not the sorted display.
         selectedDataRow = eventData.Selection(1);
-        storedResults = resultsTable.Data;
+        storedResults = sourceTable.Data;
+        selectedGroupIndex = sourceTable.UserData;
 
         % Stop if a stale UI event refers to a row outside the stored data.
         if selectedDataRow < 1 || selectedDataRow > height(storedResults)
             return;
         end
 
-        % Recover the immutable acquisition index from the selected data row.
+        % Recover and remember the group-local acquisition index before drawing.
         selectedResultIndex = storedResults.ResultIndex(selectedDataRow);
-        renderSnapshot(selectedResultIndex);
+        lastSelectedResultIndexByGroup(selectedGroupIndex) = ...
+            selectedResultIndex;
+        renderSnapshot(selectedGroupIndex, selectedResultIndex);
     end
 
-    function renderSnapshot(selectedResultIndex)
+    function renderSnapshot(selectedGroupIndex, selectedResultIndex)
         %RENDERSNAPSHOT Draw one result in 2D and synchronize its 3D highlight.
         % This renderer keeps heavy image and geometry arrays outside the
         % table. It is needed so row changes redraw only one snapshot instead
         % of creating hundreds of axes and graphics objects.
         %
-        % Input:
-        %   selectedResultIndex : Stable index into snapshotPlanes and
-        %                         intersections for the selected acquisition.
+        % Inputs:
+        %   selectedGroupIndex  : Stable source-directory group index.
+        %   selectedResultIndex : Stable local data index within that group.
         %
         % Outputs:
         %   None. The function updates existing UI and 3D graphics objects.
@@ -824,12 +1089,16 @@ end
         % End a stale drag before replacing graphics or preserving its camera.
         stopSceneRotation([], []);
 
-        % Read the aligned records once so all display elements use one acquisition.
-        currentPlane = snapshotPlanes(selectedResultIndex);
-        currentIntersection = intersections(selectedResultIndex);
+        % Read the aligned grouped records once so all display elements use the
+        % same source directory and local acquisition.
+        currentPlane = ...
+            snapshotPlanes(selectedGroupIndex).data(selectedResultIndex);
+        currentIntersection = ...
+            intersections(selectedGroupIndex).data(selectedResultIndex);
 
         % Replace the previous 2D content before drawing the selected raw image.
         cla(imageAxes);
+        axis(imageAxes, 'on');
         displayImage = currentPlane.image.';
         imagesc(imageAxes, displayImage);
         axis(imageAxes, 'image');
@@ -899,7 +1168,7 @@ end
             sprintf('%s | Bone %s', ...
                 char(string(currentPlane.snapshotName)), ...
                 char(string(currentPlane.bone))), ...
-            sprintf('Acquisition %d | Sequence %d | Packet %d | t = %.3f', ...
+            sprintf('Group acquisition %d | Sequence %d | Packet %d | t = %.3f', ...
                 selectedResultIndex, currentPlane.sequenceIndex, ...
                 currentPlane.packetIndex, double(currentPlane.timestamp))}, ...
             'Interpreter', 'none');
@@ -911,6 +1180,7 @@ end
         previousSceneView = sceneAxes.View;
         sceneHeadlight = gobjects(0);
         cla(sceneAxes);
+        axis(sceneAxes, 'on');
         hold(sceneAxes, 'on');
 
         % Select only the anatomical mesh identified by this snapshot's bone
@@ -1079,9 +1349,10 @@ end
         % cancellation, so return the documented empty values to the caller.
         if isReviewMode && ~hasSuccessfulExport
             validSnapshots = struct( ...
-                'sourceIndex', {}, ...
-                'plane', {}, ...
-                'intersection', {});
+                'name', {}, ...
+                'bone', {}, ...
+                'path', {}, ...
+                'data', {});
             outputFilePath = '';
         end
 

@@ -103,7 +103,7 @@ Configuration paths may be absolute or relative. Relative paths are resolved fro
 
 5. **Calculate mesh-image intersections.** For each snapshot, the script intersects the correct bone mesh with the finite ultrasound image plane. It records the intersection pixels and keeps the mesh segments whose surface orientation faces the ultrasound probe.
 
-6. **Display and review the results.** An interactive browser shows each ultrasound image, its intersection overlay, and the related 3D geometry. Review mode allows accepted snapshots to be selected and exported.
+6. **Display and review the results.** An interactive browser creates one table tab per source directory and shows the selected ultrasound image, its intersection overlay, and the related 3D geometry. Review mode allows accepted snapshots to be selected across all tabs and exported.
 
 ## Running the project
 
@@ -128,24 +128,41 @@ The script adds the project `functions` directory and its subdirectories to the 
 
 In `review` mode, the **Export Selected** button writes a MATLAB v7.3 MAT-file to the chosen location. The suggested destination is `tools/snapshotProcess/outputs/`, and the default filename follows `validSnapshots_yyyyMMdd_HHmmss.mat`.
 
-The file contains one variable named `validSnapshots`. It is a struct array with one element for each snapshot selected as valid in the browser:
+The processing script keeps its two main result variables grouped by source directory. Both variables use the same outer metadata and aligned `data` arrays:
 
 ```text
-validSnapshots(1..N)
-+-- sourceIndex
-+-- plane
-|   +-- T_image_ref
-|   +-- p0, ex, ey, n, W, H
-|   +-- nRows, nCols, image
-|   +-- timestamp, bone, snapshotName
-|   +-- snapshotIndex, sequenceIndex, packetIndex
-+-- intersection
-    +-- mask, pixelList
-    +-- segments3D, segmentsUV, segmentFaceIdx
-    +-- probeFacingSegmentMask
-    +-- probeFacingSegments3D, probeFacingSegmentsUV
-    +-- probeFacingPixels, segmentFacingScore
-    +-- timestamp, status
+snapshotPlanes(1..G)                 intersections(1..G)
++-- name                             +-- name
++-- bone                             +-- bone
++-- path                             +-- path
++-- data(1..N)                       +-- data(1..N)
+    +-- plane fields                     +-- intersection fields
+```
+
+For every group `g` and local acquisition `k`, `snapshotPlanes(g).data(k)` and `intersections(g).data(k)` describe the same ultrasound image. Groups remain present even when no packet in that directory has valid tracking, in which case both `data` arrays are empty.
+
+The output file contains one variable named `validSnapshots`. It preserves every source-directory group in the same order as the processing variables. Only records selected as valid are copied into each group's `data` field; a group with no selection has empty `data`:
+
+```text
+validSnapshots(1..G)
++-- name
++-- bone
++-- path
++-- data(1..N_selected)
+    +-- sourceIndex
+    +-- plane
+    |   +-- T_image_ref
+    |   +-- p0, ex, ey, n, W, H
+    |   +-- nRows, nCols, image
+    |   +-- timestamp, bone, snapshotName
+    |   +-- snapshotIndex, sequenceIndex, packetIndex
+    +-- intersection
+        +-- mask, pixelList
+        +-- segments3D, segmentsUV, segmentFaceIdx
+        +-- probeFacingSegmentMask
+        +-- probeFacingSegments3D, probeFacingSegmentsUV
+        +-- probeFacingPixels, segmentFacingScore
+        +-- timestamp, status
 ```
 
 Load the output with:
@@ -155,11 +172,20 @@ loadedOutput = load('validSnapshots_yyyyMMdd_HHmmss.mat', 'validSnapshots');
 validSnapshots = loadedOutput.validSnapshots;
 ```
 
-### Fields in each selected snapshot
+### Fields in each source-directory group
 
 | Field | Explanation |
 | --- | --- |
-| `sourceIndex` | Index of this result in the complete `snapshotPlanes` and `intersections` arrays before the browser selection is applied. It can be used to trace an exported item back to the original processing result. |
+| `name` | Name of the source snapshot directory, also used as the browser tab title. |
+| `bone` | Bone code assigned from the directory name: `F`, `T`, or `U`. |
+| `path` | Absolute path of the source snapshot directory. |
+| `data` | Selected records from this directory in their original local acquisition order. This is empty when the group has no selected snapshots. |
+
+### Fields in each selected `data` record
+
+| Field | Explanation |
+| --- | --- |
+| `sourceIndex` | Local index of this result in `snapshotPlanes(groupIndex).data` and `intersections(groupIndex).data` before browser selection is applied. |
 | `plane` | Struct containing the ultrasound image, its finite-plane geometry, and source metadata. |
 | `intersection` | Struct containing the raw mesh-plane intersection and the subset produced by probe-facing mesh faces. |
 
