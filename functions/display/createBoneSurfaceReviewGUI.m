@@ -155,8 +155,10 @@ imageAxes = uiaxes(imageGrid, ...
     'Tag', 'bone_surface_review_image_axes');
 imageAxes.Layout.Row = 1;
 imageAxes.Layout.Column = 1;
-xlabel(imageAxes, 'Image column (pixel)');
-ylabel(imageAxes, 'Image row (pixel)');
+% Label both directions with physical units because the image and every
+% overlay below are positioned from plane.W and plane.H.
+xlabel(imageAxes, 'Image width (mm)');
+ylabel(imageAxes, 'Image height (mm)');
 box(imageAxes, 'on');
 colormap(imageAxes, gray(256));
 
@@ -314,14 +316,27 @@ end
 
         currentResult = surfaceResults(resultIndex);
         ultrasoundIndex = ultrasoundIndexByResult(resultIndex);
-        displayedImage = ultrasoundSequence(ultrasoundIndex).plane.image.';
+        currentPlane = ultrasoundSequence(ultrasoundIndex).plane;
+        displayedImage = currentPlane.image.';
+
+        % plane.W and plane.H describe the distances between the first and
+        % last pixel centres. Use the same convention as the extraction code
+        % so displayed measurements agree with the saved millimetre results.
+        imageWidthMm = double(currentPlane.W);
+        imageHeightMm = double(currentPlane.H);
+        numberOfImageRows = size(displayedImage, 1);
+        numberOfImageColumns = size(displayedImage, 2);
+        pixelSpacingXYMm = [ ...
+            imageWidthMm / (numberOfImageColumns - 1), ...
+            imageHeightMm / (numberOfImageRows - 1)];
 
         cla(imageAxes);
-        imagesc(imageAxes, displayedImage);
+        imagesc(imageAxes, ...
+            [0, imageWidthMm], [0, imageHeightMm], displayedImage);
         axis(imageAxes, 'image');
         imageAxes.YDir = 'reverse';
-        imageAxes.XLim = [0.5, size(displayedImage, 2) + 0.5];
-        imageAxes.YLim = [0.5, size(displayedImage, 1) + 0.5];
+        imageAxes.XLim = [0, imageWidthMm];
+        imageAxes.YLim = [0, imageHeightMm];
         colormap(imageAxes, gray(256));
         hold(imageAxes, 'on');
 
@@ -332,12 +347,13 @@ end
                 segmentationResults, currentResult.sourceIndex);
         if hasSegmentationEntry
             segmentationDisplayStatus = plotSegmentationOverlay( ...
-                imageAxes, segmentationEntry, size(displayedImage));
+                imageAxes, segmentationEntry, size(displayedImage), ...
+                pixelSpacingXYMm);
         else
             segmentationDisplayStatus = "unavailable";
         end
 
-        plotSurfaceResult(imageAxes, currentResult);
+        plotSurfaceResult(imageAxes, currentResult, pixelSpacingXYMm);
         hold(imageAxes, 'off');
 
         title(imageAxes, sprintf( ...
@@ -393,7 +409,7 @@ end
 
 
 function displayStatus = plotSegmentationOverlay( ...
-        targetAxes, segmentationEntry, expectedImageSize)
+        targetAxes, segmentationEntry, expectedImageSize, pixelSpacingXYMm)
 %PLOTSEGMENTATIONOVERLAY Draw the selected bone segmentation over B-mode.
 % A valid mask is shown with a light fill and separate boundary curves. Older
 % results that contain only boundary coordinates still receive a point overlay.
@@ -402,6 +418,7 @@ function displayStatus = plotSegmentationOverlay( ...
 %   targetAxes        : Axes that already display the selected B-mode image.
 %   segmentationEntry : One matching segmentation result record.
 %   expectedImageSize : Size vector of the displayed B-mode image.
+%   pixelSpacingXYMm  : Horizontal and vertical pixel spacing in millimetres.
 %
 % Outputs:
 %   displayStatus     : Text describing whether a mask, coordinates, or no
@@ -434,18 +451,23 @@ if isfield(segmentationEntry, 'segmentationMask')
         colorOverlay(:, :, 2) = segmentationColor(2);
         colorOverlay(:, :, 3) = segmentationColor(3);
         image(targetAxes, colorOverlay, ...
-            'XData', [1, expectedImageSize(2)], ...
-            'YData', [1, expectedImageSize(1)], ...
+            'XData', [0, (expectedImageSize(2) - 1) * pixelSpacingXYMm(1)], ...
+            'YData', [0, (expectedImageSize(1) - 1) * pixelSpacingXYMm(2)], ...
             'AlphaData', 0.12 * double(segmentationMask), ...
             'HitTest', 'off');
 
         % Draw connected boundaries separately so disjoint regions are never
-        % joined by misleading diagonal lines.
+        % joined by misleading diagonal lines. Subtract one because MATLAB
+        % pixel indices start at one while the physical image origin is zero.
         boundaries = bwboundaries(segmentationMask, 8, 'noholes');
         for boundaryIndex = 1:numel(boundaries)
             currentBoundary = boundaries{boundaryIndex};
+            boundaryXMm = ...
+                (currentBoundary(:, 2) - 1) * pixelSpacingXYMm(1);
+            boundaryYMm = ...
+                (currentBoundary(:, 1) - 1) * pixelSpacingXYMm(2);
             plot(targetAxes, ...
-                currentBoundary(:, 2), currentBoundary(:, 1), ...
+                boundaryXMm, boundaryYMm, ...
                 '-', 'Color', segmentationColor, 'LineWidth', 1.1, ...
                 'HandleVisibility', 'off');
         end
@@ -478,21 +500,26 @@ if isempty(pixelCoordinates)
     return;
 end
 
-plot(targetAxes, pixelCoordinates(:, 2), pixelCoordinates(:, 1), ...
+% Convert the historical [row,column] coordinates into the same millimetre
+% coordinate system used by the image and mask overlay.
+coordinateXMm = (pixelCoordinates(:, 2) - 1) * pixelSpacingXYMm(1);
+coordinateYMm = (pixelCoordinates(:, 1) - 1) * pixelSpacingXYMm(2);
+plot(targetAxes, coordinateXMm, coordinateYMm, ...
     '.', 'Color', segmentationColor, 'MarkerSize', 5, ...
     'HandleVisibility', 'off');
 displayStatus = "boundary coordinates";
 end
 
 
-function plotSurfaceResult(targetAxes, surfaceResult)
+function plotSurfaceResult(targetAxes, surfaceResult, pixelSpacingXYMm)
 %PLOTSURFACERESULT Draw raw and refined bone-surface review overlays.
 % Raw segments remain thin magenta lines. Final observed and interpolated
 % columns use separate red and cyan points so inferred gaps stay obvious.
 %
 % Inputs:
-%   targetAxes   : Axes that already display the source B-mode image.
-%   surfaceResult: One extracted surface result record.
+%   targetAxes        : Axes that already display the source B-mode image.
+%   surfaceResult     : One extracted surface result record.
+%   pixelSpacingXYMm  : Horizontal and vertical pixel spacing in millimetres.
 %
 % Outputs:
 %   None. The function adds surface overlays to targetAxes.
@@ -514,7 +541,10 @@ segmentIds = unique(surfaceResult.segmentIdByColumn);
 segmentIds = segmentIds(isfinite(segmentIds) & segmentIds > 0);
 for segmentId = reshape(segmentIds, 1, [])
     segmentColumns = find(surfaceResult.segmentIdByColumn == segmentId);
-    plot(targetAxes, segmentColumns, rawSurfaceRows(segmentColumns), ...
+    segmentXMm = (segmentColumns - 1) * pixelSpacingXYMm(1);
+    segmentYMm = ...
+        (rawSurfaceRows(segmentColumns) - 1) * pixelSpacingXYMm(2);
+    plot(targetAxes, segmentXMm, segmentYMm, ...
         '-', 'Color', [0.90, 0.10, 0.80], 'LineWidth', 0.9, ...
         'HandleVisibility', 'off');
 end
@@ -525,13 +555,19 @@ interpolatedColumnMask = reshape( ...
     logical(surfaceResult.interpolatedColumnMask), 1, []);
 
 observedColumns = find(observedColumnMask);
-plot(targetAxes, observedColumns, finalSurfaceRows(observedColumns), ...
+observedXMm = (observedColumns - 1) * pixelSpacingXYMm(1);
+observedYMm = ...
+    (finalSurfaceRows(observedColumns) - 1) * pixelSpacingXYMm(2);
+plot(targetAxes, observedXMm, observedYMm, ...
     '.', 'Color', [1.00, 0.15, 0.10], 'MarkerSize', 10, ...
     'HandleVisibility', 'off');
 
 interpolatedColumns = find(interpolatedColumnMask);
-plot(targetAxes, interpolatedColumns, ...
-    finalSurfaceRows(interpolatedColumns), ...
+interpolatedXMm = ...
+    (interpolatedColumns - 1) * pixelSpacingXYMm(1);
+interpolatedYMm = ...
+    (finalSurfaceRows(interpolatedColumns) - 1) * pixelSpacingXYMm(2);
+plot(targetAxes, interpolatedXMm, interpolatedYMm, ...
     '.', 'Color', [0.00, 0.90, 1.00], 'MarkerSize', 10, ...
     'HandleVisibility', 'off');
 end
