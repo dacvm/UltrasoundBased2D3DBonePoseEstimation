@@ -10,25 +10,30 @@ function [segmentationFigure, segmentationResults] = ...
 % is available.
 %
 % Inputs:
-%   ultrasoundSequence : Struct vector whose elements contain sourceIndex
-%                        and plane. Each plane supplies the stored ultrasound
-%                        image, physical width W, physical height H, and the
-%                        metadata shown in the browser table.
+%   ultrasoundSequence : Source-directory group struct vector. Every group
+%                        contains name, bone, path, and data. Each data record
+%                        contains sourceIndex and plane, where plane supplies
+%                        the stored image, physical dimensions, and metadata.
 %   outputDirectory    : Existing directory suggested by the MAT-file export
 %                        dialog when the user presses Export.
 %
 % Outputs:
 %   segmentationFigure : Handle to the non-blocking uifigure that owns the
-%                        table, image preview, controls, and callback state.
-%   segmentationResults: Final 1-by-N result struct array returned after the
-%                        first successful export when this second output is
-%                        requested. Closing before export returns an empty
-%                        struct array. With one output, the UI stays non-blocking.
+%                        tabbed tables, image preview, controls, and state.
+%   segmentationResults: Source-directory groups returned after the first
+%                        successful export when this second output is requested.
+%                        Each group retains name, bone, path, and grouped result
+%                        data. Closing before export returns an empty struct.
+%                        With one output, the UI stays non-blocking.
 
 % Preserve the existing non-blocking API unless the caller explicitly requests
 % final results as a second output.
 shouldWaitForSegmentationResults = nargout >= 2;
-segmentationResults = struct.empty(1, 0);
+segmentationResults = struct( ...
+    'name', {}, ...
+    'bone', {}, ...
+    'path', {}, ...
+    'data', {});
 
 %% VALIDATE AND PREPARE THE INPUT DATA
 
@@ -38,14 +43,58 @@ outputDirectory = char(string(outputDirectory));
 % Check every field used by the UI before creating a partially working window.
 validateBoneSegmentationInputs(ultrasoundSequence, outputDirectory);
 
-% Keep one stable sequence position for navigation even if the table is sorted.
-numberOfImages = numel(ultrasoundSequence);
-sequencePositions = (1:numberOfImages).';
+% Keep all processing arrays flat internally so the established segmentation
+% pipeline can be reused. These mappings preserve the public group and local
+% identity and make repeated sourceIndex values in different groups safe.
+numberOfGroups = numel(ultrasoundSequence);
+numberOfImagesByGroup = arrayfun( ...
+    @(sequenceGroup) numel(sequenceGroup.data), ultrasoundSequence);
+numberOfImages = sum(numberOfImagesByGroup);
+stateIndicesByGroup = cell(1, numberOfGroups);
+groupIndexByState = zeros(1, numberOfImages);
+localIndexByState = zeros(1, numberOfImages);
+
+% Preallocate from the first real record because validation guarantees at
+% least one image across all source groups.
+firstNonemptyGroupIndex = find(numberOfImagesByGroup > 0, 1);
+firstUltrasoundRecord = ...
+    ultrasoundSequence(firstNonemptyGroupIndex).data(1);
+flatRecordTemplate = struct( ...
+    'sourceIndex', firstUltrasoundRecord.sourceIndex, ...
+    'plane', firstUltrasoundRecord.plane);
+flatUltrasoundSequence = repmat( ...
+    flatRecordTemplate, 1, numberOfImages);
+nextStateIndex = 1;
+for groupIndex = 1:numberOfGroups
+    currentGroupImageCount = numberOfImagesByGroup(groupIndex);
+    currentStateIndices = ...
+        nextStateIndex:(nextStateIndex + currentGroupImageCount - 1);
+    stateIndicesByGroup{groupIndex} = currentStateIndices;
+    if currentGroupImageCount == 0
+        continue;
+    end
+
+    % Copy only the grouped public-contract fields. Input records may carry
+    % unrelated extra fields, and those should not make otherwise valid groups
+    % structurally incompatible with the internal flat processing array.
+    currentGroupData = reshape( ...
+        ultrasoundSequence(groupIndex).data, 1, []);
+    for localImageIndex = 1:currentGroupImageCount
+        currentStateIndex = currentStateIndices(localImageIndex);
+        flatUltrasoundSequence(currentStateIndex).sourceIndex = ...
+            currentGroupData(localImageIndex).sourceIndex;
+        flatUltrasoundSequence(currentStateIndex).plane = ...
+            currentGroupData(localImageIndex).plane;
+    end
+    groupIndexByState(currentStateIndices) = groupIndex;
+    localIndexByState(currentStateIndices) = 1:currentGroupImageCount;
+    nextStateIndex = nextStateIndex + currentGroupImageCount;
+end
 
 % Build the parameter defaults from the first image. Only the threshold is
 % data-dependent; all other controls use neutral processing values.
 defaultParameters = createDefaultProcessingParameters( ...
-    ultrasoundSequence(1).plane.image);
+    flatUltrasoundSequence(1).plane.image);
 lastCommittedParameters = defaultParameters;
 currentParameters = defaultParameters;
 
@@ -61,13 +110,19 @@ pointCounts = zeros(numberOfImages, 1);
 statusValues = repmat("Unprocessed", numberOfImages, 1);
 areaStatusValues = repmat("Full", numberOfImages, 1);
 
-% Start with the first image, matching the requested guided sequence workflow.
+% Start with the first image in the first nonempty source group. Empty groups
+% remain visible as tabs but cannot supply the initial processing parameters.
 currentImageIndex = 1;
+activeGroupIndex = groupIndexByState(currentImageIndex);
+hasActiveImage = true;
+lastSelectedLocalIndexByGroup = zeros(1, numberOfGroups);
+lastSelectedLocalIndexByGroup(activeGroupIndex) = ...
+    localIndexByState(currentImageIndex);
 currentPreviewImage = uint8([]);
 currentPreviewMask = false(0, 0);
 currentPreviewCoordinates = zeros(0, 2);
 currentSegmentationAreaMask = true(size( ...
-    ultrasoundSequence(1).plane.image.'));
+    flatUltrasoundSequence(1).plane.image.'));
 currentUsesCustomSegmentationArea = false;
 
 % Track user work separately from successful exports so close warnings are
@@ -76,29 +131,38 @@ currentImageHasUserEdits = false;
 hasUnexportedCommittedChanges = false;
 isSynchronizingTableSelection = false;
 isDrawingSegmentationArea = false;
-isApplyingParametersToAll = false;
+isApplyingParameters = false;
 
-%% BUILD THE TABLE DATA
+%% BUILD THE GROUPED TABLE DATA
 
-% Read only compact metadata into the table. Large images and masks stay in
-% the sequence and result containers owned by this function.
-sourceIndices = zeros(numberOfImages, 1);
-boneCodes = strings(numberOfImages, 1);
-snapshotGroups = strings(numberOfImages, 1);
-for imageIndex = 1:numberOfImages
-    currentPlane = ultrasoundSequence(imageIndex).plane;
-    sourceIndices(imageIndex) = double(ultrasoundSequence(imageIndex).sourceIndex);
-    boneCodes(imageIndex) = string(currentPlane.bone);
-    snapshotGroups(imageIndex) = string(currentPlane.snapshotName);
+% Read only compact metadata into one table per source group. Large images and
+% masks stay in the flat internal sequence and committed result containers.
+tableDataByGroup = cell(1, numberOfGroups);
+for groupIndex = 1:numberOfGroups
+    currentStateIndices = stateIndicesByGroup{groupIndex};
+    currentImageCount = numel(currentStateIndices);
+    sequencePositions = (1:currentImageCount).';
+    sourceIndices = zeros(currentImageCount, 1);
+    boneCodes = strings(currentImageCount, 1);
+    snapshotGroups = strings(currentImageCount, 1);
+
+    for localImageIndex = 1:currentImageCount
+        currentRecord = ultrasoundSequence(groupIndex).data(localImageIndex);
+        currentPlane = currentRecord.plane;
+        sourceIndices(localImageIndex) = double(currentRecord.sourceIndex);
+        boneCodes(localImageIndex) = string(currentPlane.bone);
+        snapshotGroups(localImageIndex) = string(currentPlane.snapshotName);
+    end
+
+    % SequencePosition is local to the group and remains stable after sorting.
+    tableDataByGroup{groupIndex} = table( ...
+        sequencePositions, sourceIndices, boneCodes, snapshotGroups, ...
+        statusValues(currentStateIndices), areaStatusValues(currentStateIndices), ...
+        pointCounts(currentStateIndices), ...
+        'VariableNames', { ...
+            'SequencePosition', 'SourceIndex', 'Bone', 'SnapshotGroup', ...
+            'Status', 'Area', 'PointCount'});
 end
-
-% SequencePosition remains the permanent key after visual table sorting.
-tableData = table( ...
-    sequencePositions, sourceIndices, boneCodes, snapshotGroups, ...
-    statusValues, areaStatusValues, pointCounts, ...
-    'VariableNames', { ...
-        'SequencePosition', 'SourceIndex', 'Bone', 'SnapshotGroup', ...
-        'Status', 'Area', 'PointCount'});
 
 %% CREATE THE THREE-COLUMN USER INTERFACE
 
@@ -118,27 +182,52 @@ mainGrid = uigridlayout(segmentationFigure, [1, 3], ...
     'Padding', [10, 10, 10, 10], ...
     'ColumnSpacing', 10);
 
-% Put the table inside a titled panel so the three interface responsibilities
-% remain visually clear to a first-time user.
+% Put the directory tabs inside a titled panel so the three interface
+% responsibilities remain visually clear to a first-time user.
 tablePanel = uipanel(mainGrid, ...
-    'Title', 'Ultrasound Sequence', ...
+    'Title', 'Ultrasound Sequence by Source Directory', ...
     'Tag', 'bone_segmentation_table_panel');
 tablePanel.Layout.Row = 1;
 tablePanel.Layout.Column = 1;
 tableGrid = uigridlayout(tablePanel, [1, 1], ...
     'Padding', [5, 5, 5, 5]);
 
-% Allow row selection and sorting, but keep metadata read-only.
-sequenceTable = uitable(tableGrid, ...
-    'Data', tableData, ...
-    'ColumnName', { ...
-        'Position', 'Source', 'Bone', 'Snapshot group', 'Status', 'Area', 'Points'}, ...
-    'ColumnWidth', {65, 60, 45, 110, 80, 65, 55}, ...
-    'ColumnEditable', false(1, width(tableData)), ...
-    'ColumnSortable', true(1, width(tableData)), ...
-    'SelectionType', 'row', ...
-    'Multiselect', 'off', ...
-    'Tag', 'bone_segmentation_sequence_table');
+% Create one independently sortable table tab for every source directory.
+% Group indices stored on tabs and tables give callbacks the first part of the
+% composite image identity without relying on visible titles.
+sequenceTabGroup = uitabgroup(tableGrid, ...
+    'Tag', 'bone_segmentation_sequence_tab_group');
+sequenceTabs = gobjects(1, numberOfGroups);
+sequenceTables = gobjects(1, numberOfGroups);
+for groupIndex = 1:numberOfGroups
+    sequenceTabs(groupIndex) = uitab(sequenceTabGroup, ...
+        'Title', char(string(ultrasoundSequence(groupIndex).name)), ...
+        'Tag', sprintf('bone_segmentation_sequence_tab_%d', groupIndex));
+    sequenceTabs(groupIndex).UserData = groupIndex;
+
+    % A one-cell grid makes each table fill its tab when the figure resizes.
+    currentTabGrid = uigridlayout(sequenceTabs(groupIndex), [1, 1], ...
+        'Padding', [0, 0, 0, 0]);
+    currentTableData = tableDataByGroup{groupIndex};
+    sequenceTables(groupIndex) = uitable(currentTabGrid, ...
+        'Data', currentTableData, ...
+        'ColumnName', { ...
+            'Position', 'Source', 'Bone', 'Snapshot group', ...
+            'Status', 'Area', 'Points'}, ...
+        'ColumnWidth', {65, 60, 45, 110, 80, 65, 55}, ...
+        'ColumnEditable', false(1, width(currentTableData)), ...
+        'ColumnSortable', true(1, width(currentTableData)), ...
+        'SelectionType', 'row', ...
+        'Multiselect', 'off', ...
+        'Tag', sprintf('bone_segmentation_sequence_table_%d', groupIndex));
+    sequenceTables(groupIndex).UserData = groupIndex;
+
+    % Empty groups keep a visible tab and table, but the table itself has no
+    % meaningful selection until the user returns to a populated group.
+    if numberOfImagesByGroup(groupIndex) == 0
+        sequenceTables(groupIndex).Enable = 'off';
+    end
+end
 
 % The center panel owns one reusable axes so navigation does not create a new
 % graphics tree for every ultrasound image.
@@ -160,7 +249,7 @@ colormap(imageAxes, gray(256));
 % outer panel leaves its former title, border, and padding space available to
 % the controls inside each stage.
 parametersGrid = uigridlayout(mainGrid, [4, 1], ...
-    'RowHeight', {190, 220, '1x', 185}, ...
+    'RowHeight', {190, 220, '1x', 220}, ...
     'Padding', [0, 0, 0, 0], ...
     'RowSpacing', 6);
 parametersGrid.Layout.Row = 1;
@@ -419,8 +508,8 @@ parameterStagePanels = [ ...
     preprocessingPanel, segmentationPanel, ...
     postprocessingPanel, workflowPanel];
 
-workflowGrid = uigridlayout(workflowPanel, [4, 2], ...
-    'RowHeight', {22, 30, 32, 38}, ...
+workflowGrid = uigridlayout(workflowPanel, [5, 2], ...
+    'RowHeight', {22, 30, 30, 32, 38}, ...
     'ColumnWidth', {'1x', '1x'}, ...
     'Padding', [8, 8, 8, 8], ...
     'RowSpacing', 6, ...
@@ -441,27 +530,35 @@ resetButton = uibutton(workflowGrid, 'push', ...
 resetButton.Layout.Row = 2;
 resetButton.Layout.Column = 1;
 
+applyParametersToTabButton = uibutton(workflowGrid, 'push', ...
+    'Text', 'Apply Parameters to Tab', ...
+    'Tooltip', 'Reprocess every image in the active source-directory tab.', ...
+    'ButtonPushedFcn', @handleApplyParametersToTab, ...
+    'Tag', 'bone_segmentation_apply_parameters_tab_button');
+applyParametersToTabButton.Layout.Row = 2;
+applyParametersToTabButton.Layout.Column = 2;
+
 applyParametersToAllButton = uibutton(workflowGrid, 'push', ...
     'Text', 'Apply Parameters to All', ...
     'Tooltip', 'Reprocess every image using the current parameter values.', ...
     'ButtonPushedFcn', @handleApplyParametersToAll, ...
     'Tag', 'bone_segmentation_apply_parameters_all_button');
-applyParametersToAllButton.Layout.Row = 2;
-applyParametersToAllButton.Layout.Column = 2;
+applyParametersToAllButton.Layout.Row = 3;
+applyParametersToAllButton.Layout.Column = [1, 2];
 
 previousButton = uibutton(workflowGrid, 'push', ...
     'Text', 'Previous', ...
     'Tooltip', 'Show the previous image (A).', ...
     'ButtonPushedFcn', @handlePreviousImage, ...
     'Tag', 'bone_segmentation_previous_button');
-previousButton.Layout.Row = 3;
+previousButton.Layout.Row = 4;
 previousButton.Layout.Column = 1;
 nextButton = uibutton(workflowGrid, 'push', ...
     'Text', 'Next', ...
     'Tooltip', 'Show the next image (S).', ...
     'ButtonPushedFcn', @handleNextImage, ...
     'Tag', 'bone_segmentation_next_button');
-nextButton.Layout.Row = 3;
+nextButton.Layout.Row = 4;
 nextButton.Layout.Column = 2;
 
 exportButton = uibutton(workflowGrid, 'push', ...
@@ -469,16 +566,21 @@ exportButton = uibutton(workflowGrid, 'push', ...
     'FontWeight', 'bold', ...
     'ButtonPushedFcn', @handleExport, ...
     'Tag', 'bone_segmentation_export_button');
-exportButton.Layout.Row = 4;
+exportButton.Layout.Row = 5;
 exportButton.Layout.Column = [1, 2];
 
 %% SELECT AND DISPLAY THE FIRST IMAGE
 
-% Set the initial selection before registering the callback so setup cannot
-% be mistaken for user navigation.
-sequenceTable.Selection = 1;
+% Set the initial nonempty tab and local row before registering the tab
+% callback so setup cannot be mistaken for user navigation.
+sequenceTabGroup.SelectedTab = sequenceTabs(activeGroupIndex);
+sequenceTables(activeGroupIndex).Selection = ...
+    localIndexByState(currentImageIndex);
 loadCurrentImage();
-sequenceTable.SelectionChangedFcn = @handleTableSelection;
+for groupIndex = 1:numberOfGroups
+    sequenceTables(groupIndex).SelectionChangedFcn = @handleTableSelection;
+end
+sequenceTabGroup.SelectionChangedFcn = @handleTabSelection;
 
 % A caller requesting results waits for either a successful export or a close.
 % One-output callers return immediately and retain the original UI behavior.
@@ -500,7 +602,8 @@ end
 
         % Ignore shortcuts while an ROI is being drawn and preserve standard
         % operating-system combinations such as Ctrl+A and Alt+D.
-        if isDrawingSegmentationArea || isApplyingParametersToAll || ...
+        if ~hasActiveImage || isDrawingSegmentationArea || ...
+                isApplyingParameters || ...
                 ~isempty(eventData.Modifier)
             return;
         end
@@ -515,13 +618,80 @@ end
         end
     end
 
-    function handleTableSelection(~, eventData)
+    function handleTabSelection(~, eventData)
+        %HANDLETABSELECTION Open the remembered image for a source-directory tab.
+        % This callback commits the image being left and handles empty groups
+        % without allowing controls to edit an image from another directory.
+        %
+        % Inputs:
+        %   ~         : Unused tab-group handle supplied by MATLAB.
+        %   eventData : Tab event whose NewValue stores the selected group index.
+        %
+        % Outputs:
+        %   None. The callback changes active group, preview, and control state.
+
+        if isSynchronizingTableSelection || isempty(eventData.NewValue)
+            return;
+        end
+        targetGroupIndex = eventData.NewValue.UserData;
+
+        % A tab change during a modal operation would separate controls from
+        % their active image, so immediately restore the prior group tab.
+        if isDrawingSegmentationArea || isApplyingParameters
+            isSynchronizingTableSelection = true;
+            sequenceTabGroup.SelectedTab = sequenceTabs(activeGroupIndex);
+            isSynchronizingTableSelection = false;
+            return;
+        end
+        if targetGroupIndex == activeGroupIndex && hasActiveImage
+            return;
+        end
+
+        isSynchronizingTableSelection = true;
+        try
+            % Save the live preview before leaving a populated group.
+            if hasActiveImage
+                commitCurrentImage();
+            end
+            activeGroupIndex = targetGroupIndex;
+
+            if numberOfImagesByGroup(activeGroupIndex) == 0
+                hasActiveImage = false;
+                renderEmptyGroup();
+                set(parameterStagePanels, 'Enable', 'off');
+                refreshProgressAndNavigation();
+            else
+                % Restore the last local row visited in this group, or start at
+                % its first acquisition on the initial visit.
+                targetLocalIndex = ...
+                    lastSelectedLocalIndexByGroup(activeGroupIndex);
+                if targetLocalIndex < 1 || ...
+                        targetLocalIndex > numberOfImagesByGroup(activeGroupIndex)
+                    targetLocalIndex = 1;
+                end
+                currentImageIndex = ...
+                    stateIndicesByGroup{activeGroupIndex}(targetLocalIndex);
+                lastSelectedLocalIndexByGroup(activeGroupIndex) = ...
+                    targetLocalIndex;
+                hasActiveImage = true;
+                set(parameterStagePanels, 'Enable', 'on');
+                sequenceTables(activeGroupIndex).Selection = targetLocalIndex;
+                loadCurrentImage();
+            end
+        catch tabChangeError
+            isSynchronizingTableSelection = false;
+            rethrow(tabChangeError);
+        end
+        isSynchronizingTableSelection = false;
+    end
+
+    function handleTableSelection(sourceTable, eventData)
         %HANDLETABLESELECTION Commit the old image and open the selected row.
         % This callback is needed so direct table navigation follows the same
         % save-on-leave behavior as the Previous and Next buttons.
         %
         % Inputs:
-        %   ~         : Unused table source supplied by MATLAB.
+        %   sourceTable : Table whose UserData contains its source group index.
         %   eventData : Selection event containing the selected data row.
         %
         % Outputs:
@@ -529,21 +699,69 @@ end
 
         % Ignore programmatic selection updates made during navigation.
         if isSynchronizingTableSelection || isDrawingSegmentationArea || ...
-                isApplyingParametersToAll || ...
+                isApplyingParameters || ...
                 isempty(eventData.Selection)
             return;
         end
 
         % MATLAB reports the original Data row even when the table is sorted.
         selectedDataRow = eventData.Selection(1);
-        currentTableData = sequenceTable.Data;
+        currentTableData = sourceTable.Data;
         if selectedDataRow < 1 || selectedDataRow > height(currentTableData)
             return;
         end
 
-        % Resolve the permanent sequence position stored in the selected row.
-        targetImageIndex = currentTableData.SequencePosition(selectedDataRow);
+        % Resolve the stable local position, then map the composite identity to
+        % the flat processing-state index used by the established pipeline.
+        targetGroupIndex = sourceTable.UserData;
+        targetLocalIndex = ...
+            currentTableData.SequencePosition(selectedDataRow);
+        lastSelectedLocalIndexByGroup(targetGroupIndex) = targetLocalIndex;
+        targetImageIndex = ...
+            stateIndicesByGroup{targetGroupIndex}(targetLocalIndex);
         navigateToImage(targetImageIndex);
+    end
+
+    function renderEmptyGroup()
+        %RENDEREMPTYGROUP Show a clear state for a group without selected images.
+        % This helper prevents stale imagery and controls from appearing to
+        % belong to an empty source-directory tab.
+        %
+        % Inputs:
+        %   None. The active empty group is read from nested callback state.
+        %
+        % Outputs:
+        %   None. The image axes are cleared and replaced with a message.
+
+        cla(imageAxes);
+        axis(imageAxes, 'off');
+        text(imageAxes, 0.5, 0.5, sprintf( ...
+            'No selected ultrasound images are available in "%s".', ...
+            char(string(ultrasoundSequence(activeGroupIndex).name))), ...
+            'Units', 'normalized', ...
+            'HorizontalAlignment', 'center', ...
+            'VerticalAlignment', 'middle', ...
+            'Interpreter', 'none');
+    end
+
+    function setSequenceTablesEnabled(shouldEnable)
+        %SETSEQUENCETABLESENABLED Update all populated table interaction states.
+        % Centralizing this operation keeps modal drawing and batch processing
+        % from leaving one directory tab interactive by mistake.
+        %
+        % Input:
+        %   shouldEnable : Logical scalar requesting populated tables on or off.
+        %
+        % Outputs:
+        %   None. Every populated table is updated; empty tables remain disabled.
+
+        for groupIndexToUpdate = 1:numberOfGroups
+            if shouldEnable && numberOfImagesByGroup(groupIndexToUpdate) > 0
+                sequenceTables(groupIndexToUpdate).Enable = 'on';
+            else
+                sequenceTables(groupIndexToUpdate).Enable = 'off';
+            end
+        end
     end
 
     function handleDrawSegmentationArea(~, ~)
@@ -557,14 +775,15 @@ end
         % Outputs:
         %   None. The callback updates the current logical area mask and preview.
 
-        if isDrawingSegmentationArea || isApplyingParametersToAll
+        if ~hasActiveImage || isDrawingSegmentationArea || ...
+                isApplyingParameters
             return;
         end
 
         % Disable state-changing controls until drawfreehand completes or is
         % cancelled, preventing navigation to a different image mid-draw.
         isDrawingSegmentationArea = true;
-        sequenceTable.Enable = 'off';
+        setSequenceTablesEnabled(false);
         set(parameterStagePanels, 'Enable', 'off');
         areaStatusLabel.Text = 'Area: Draw an enclosed region on the image';
         drawnow;
@@ -574,7 +793,7 @@ end
         try
             numberOfRows = size(currentPreviewImage, 1);
             numberOfColumns = size(currentPreviewImage, 2);
-            currentPlane = ultrasoundSequence(currentImageIndex).plane;
+            currentPlane = flatUltrasoundSequence(currentImageIndex).plane;
             imageWidthMillimeters = double(currentPlane.W);
             imageHeightMillimeters = double(currentPlane.H);
             pixelWidthMillimeters = ...
@@ -656,7 +875,7 @@ end
 
         isDrawingSegmentationArea = false;
         if isvalid(segmentationFigure)
-            sequenceTable.Enable = 'on';
+            setSequenceTablesEnabled(true);
             set(parameterStagePanels, 'Enable', 'on');
             refreshSegmentationAreaControls();
             refreshProgressAndNavigation();
@@ -674,7 +893,7 @@ end
         % Outputs:
         %   None. The callback updates the current area state and preview.
 
-        if isDrawingSegmentationArea || isApplyingParametersToAll || ...
+        if isDrawingSegmentationArea || isApplyingParameters || ...
                 ~currentUsesCustomSegmentationArea
             return;
         end
@@ -785,7 +1004,7 @@ end
                 % Keep the value meaningful for both the current image and the
                 % finite slider range used for interactive tuning.
                 maximumArea = min( ...
-                    numel(ultrasoundSequence(currentImageIndex).plane.image), ...
+                    numel(flatUltrasoundSequence(currentImageIndex).plane.image), ...
                     minimumRegionAreaSliderMaximum);
                 newValue = round(min(max(double(requestedValue), 0), maximumArea));
                 currentParameters.minimumRegionArea = newValue;
@@ -812,7 +1031,8 @@ end
         % Outputs:
         %   None. The callback updates the threshold controls and preview.
 
-        currentStoredImage = ultrasoundSequence(currentImageIndex).plane.image;
+        currentStoredImage = ...
+            flatUltrasoundSequence(currentImageIndex).plane.image;
         displayedImage = currentStoredImage.';
         preprocessedImage = applyBrightnessAndContrast( ...
             displayedImage, currentParameters.brightness, ...
@@ -832,7 +1052,8 @@ end
         % Outputs:
         %   None. The callback resets controls and redraws the current image.
 
-        currentStoredImage = ultrasoundSequence(currentImageIndex).plane.image;
+        currentStoredImage = ...
+            flatUltrasoundSequence(currentImageIndex).plane.image;
         currentParameters = createDefaultProcessingParameters(currentStoredImage);
         currentImageHasUserEdits = true;
         writeControlsFromCurrentParameters();
@@ -840,29 +1061,62 @@ end
         refreshCurrentTableRow();
     end
 
-    function handleApplyParametersToAll(~, ~)
-        %HANDLEAPPLYPARAMETERSTOALL Reprocess every image with current settings.
-        % This callback applies one parameter set across the sequence while
-        % preserving every image's own segmentation area. Replacement results
-        % are calculated first so a processing error cannot partially update
-        % committed state.
+    function handleApplyParametersToTab(~, ~)
+        %HANDLEAPPLYPARAMETERSTOTAB Reprocess the active directory group.
+        % This callback gives users a local alternative to the existing global
+        % operation while preserving each target image's segmentation area.
         %
         % Inputs:
         %   ~ : Unused button source and event values supplied by MATLAB.
         %
         % Outputs:
-        %   None. Confirmed operations replace all committed per-image results.
+        %   None. A confirmed operation updates only the active tab's images.
 
-        if isDrawingSegmentationArea || isApplyingParametersToAll
+        if ~hasActiveImage || isDrawingSegmentationArea || ...
+                isApplyingParameters
             return;
         end
-
+        targetStateIndices = stateIndicesByGroup{activeGroupIndex};
+        activeGroupName = ...
+            char(string(ultrasoundSequence(activeGroupIndex).name));
         confirmation = uiconfirm(segmentationFigure, ...
             sprintf([ ...
-                'Apply the current processing parameters to all %d images?\n\n' ...
-                'This will replace every existing parameter set and ' ...
-                'recompute every segmentation result. Per-image custom ' ...
-                'segmentation areas will be preserved.'], numberOfImages), ...
+                'Apply the current processing parameters to all %d images ' ...
+                'in tab "%s"?\n\nPer-image custom segmentation areas ' ...
+                'will be preserved.'], ...
+                numel(targetStateIndices), activeGroupName), ...
+            'Apply parameters to active tab?', ...
+            'Options', {'Apply to tab', 'Cancel'}, ...
+            'DefaultOption', 2, ...
+            'CancelOption', 2, ...
+            'Icon', 'warning');
+        if strcmp(confirmation, 'Cancel')
+            return;
+        end
+        applyParametersToStateIndices( ...
+            targetStateIndices, sprintf('tab "%s"', activeGroupName));
+    end
+
+    function handleApplyParametersToAll(~, ~)
+        %HANDLEAPPLYPARAMETERSTOALL Reprocess every group with current settings.
+        % This callback retains the original global operation while routing it
+        % through the same transaction used by the tab-scoped action.
+        %
+        % Inputs:
+        %   ~ : Unused button source and event values supplied by MATLAB.
+        %
+        % Outputs:
+        %   None. A confirmed operation updates every internal image state.
+
+        if ~hasActiveImage || isDrawingSegmentationArea || ...
+                isApplyingParameters
+            return;
+        end
+        confirmation = uiconfirm(segmentationFigure, ...
+            sprintf([ ...
+                'Apply the current processing parameters to all %d images ' ...
+                'across every tab?\n\nPer-image custom segmentation areas ' ...
+                'will be preserved.'], numberOfImages), ...
             'Apply parameters to all images?', ...
             'Options', {'Apply to all', 'Cancel'}, ...
             'DefaultOption', 2, ...
@@ -871,85 +1125,100 @@ end
         if strcmp(confirmation, 'Cancel')
             return;
         end
+        applyParametersToStateIndices(1:numberOfImages, 'all tabs');
+    end
+
+    function applyParametersToStateIndices(targetStateIndices, scopeText)
+        %APPLYPARAMETERSTOSTATEINDICES Reprocess a target set transactionally.
+        % All replacement masks are calculated before committed state changes,
+        % so a failure cannot leave only part of a tab or dataset updated.
+        %
+        % Inputs:
+        %   targetStateIndices : Internal flat indices selected for processing.
+        %   scopeText          : Human-readable scope used in progress messages.
+        %
+        % Outputs:
+        %   None. Successful processing replaces committed target records.
 
         parametersToApply = currentParameters;
+        numberOfTargets = numel(targetStateIndices);
         replacementParameters = repmat( ...
-            parametersToApply, 1, numberOfImages);
-        replacementMasks = cell(1, numberOfImages);
-        replacementCoordinates = cell(1, numberOfImages);
-        replacementAreaMasks = cell(1, numberOfImages);
-        replacementUsesCustomArea = false(1, numberOfImages);
-        replacementPointCounts = zeros(numberOfImages, 1);
-        replacementAreaStatus = repmat("Full", numberOfImages, 1);
+            parametersToApply, 1, numberOfTargets);
+        replacementMasks = cell(1, numberOfTargets);
+        replacementCoordinates = cell(1, numberOfTargets);
+        replacementAreaMasks = cell(1, numberOfTargets);
+        replacementUsesCustomArea = false(1, numberOfTargets);
+        replacementPointCounts = zeros(numberOfTargets, 1);
+        replacementAreaStatus = repmat("Full", numberOfTargets, 1);
 
-        % Resolve every image's area before processing. Only the selected image
-        % can contain uncommitted area edits; other custom areas are committed
-        % automatically when navigation leaves their image.
-        for applyIndex = 1:numberOfImages
+        % Resolve target areas before processing. The current image may contain
+        % a live uncommitted area, while other images use committed or full areas.
+        for targetPosition = 1:numberOfTargets
+            targetStateIndex = targetStateIndices(targetPosition);
             displayedImageSize = size( ...
-                ultrasoundSequence(applyIndex).plane.image.');
-            if applyIndex == currentImageIndex
-                replacementAreaMasks{applyIndex} = ...
+                flatUltrasoundSequence(targetStateIndex).plane.image.');
+            if targetStateIndex == currentImageIndex
+                replacementAreaMasks{targetPosition} = ...
                     currentSegmentationAreaMask;
-                replacementUsesCustomArea(applyIndex) = ...
+                replacementUsesCustomArea(targetPosition) = ...
                     currentUsesCustomSegmentationArea;
-            elseif isImageProcessed(applyIndex)
-                replacementAreaMasks{applyIndex} = ...
-                    committedSegmentationAreaMasks{applyIndex};
-                replacementUsesCustomArea(applyIndex) = ...
-                    committedUsesCustomSegmentationArea(applyIndex);
+            elseif isImageProcessed(targetStateIndex)
+                replacementAreaMasks{targetPosition} = ...
+                    committedSegmentationAreaMasks{targetStateIndex};
+                replacementUsesCustomArea(targetPosition) = ...
+                    committedUsesCustomSegmentationArea(targetStateIndex);
             else
-                replacementAreaMasks{applyIndex} = true(displayedImageSize);
+                replacementAreaMasks{targetPosition} = true(displayedImageSize);
             end
-
-            if replacementUsesCustomArea(applyIndex)
-                replacementAreaStatus(applyIndex) = "Custom";
+            if replacementUsesCustomArea(targetPosition)
+                replacementAreaStatus(targetPosition) = "Custom";
             end
         end
 
-        % Block state-changing controls and window actions until the transaction
-        % either finishes or rolls back without touching committed data.
-        isApplyingParametersToAll = true;
-        sequenceTable.Enable = 'off';
+        % Block all state-changing table and parameter actions until every
+        % replacement result succeeds or the transaction rolls back.
+        isApplyingParameters = true;
+        setSequenceTablesEnabled(false);
         set(parameterStagePanels, 'Enable', 'off');
         drawnow;
 
         progressDialog = [];
         try
             progressDialog = uiprogressdlg(segmentationFigure, ...
-                'Title', 'Applying Parameters to All Images', ...
+                'Title', 'Applying Segmentation Parameters', ...
                 'Message', sprintf( ...
-                    'Processing image 1 of %d...', numberOfImages), ...
+                    'Processing image 1 of %d in %s...', ...
+                    numberOfTargets, scopeText), ...
                 'Value', 0, ...
                 'Cancelable', 'off', ...
                 'Indeterminate', 'off');
 
-            for applyIndex = 1:numberOfImages
+            for targetPosition = 1:numberOfTargets
+                targetStateIndex = targetStateIndices(targetPosition);
                 progressDialog.Message = sprintf( ...
-                    'Processing image %d of %d...', ...
-                    applyIndex, numberOfImages);
-
+                    'Processing image %d of %d in %s...', ...
+                    targetPosition, numberOfTargets, scopeText);
                 [~, fullSegmentationMask, fullBoundaryCoordinates] = ...
                     applyBoneSegmentationPipeline( ...
-                        ultrasoundSequence(applyIndex).plane.image, ...
+                        flatUltrasoundSequence(targetStateIndex).plane.image, ...
                         parametersToApply);
-                [replacementMasks{applyIndex}, ...
-                    replacementCoordinates{applyIndex}] = ...
+                [replacementMasks{targetPosition}, ...
+                    replacementCoordinates{targetPosition}] = ...
                     applySegmentationAreaMask( ...
                         fullSegmentationMask, fullBoundaryCoordinates, ...
-                        replacementAreaMasks{applyIndex});
-                replacementPointCounts(applyIndex) = size( ...
-                    replacementCoordinates{applyIndex}, 1);
-                progressDialog.Value = applyIndex / numberOfImages;
+                        replacementAreaMasks{targetPosition});
+                replacementPointCounts(targetPosition) = size( ...
+                    replacementCoordinates{targetPosition}, 1);
+                progressDialog.Value = targetPosition / numberOfTargets;
                 drawnow limitrate;
             end
         catch processingError
             if ~isempty(progressDialog) && isvalid(progressDialog)
                 close(progressDialog);
             end
-            isApplyingParametersToAll = false;
+            isApplyingParameters = false;
             if isvalid(segmentationFigure)
-                sequenceTable.Enable = 'on';
+                setSequenceTablesEnabled(true);
                 set(parameterStagePanels, 'Enable', 'on');
                 refreshSegmentationAreaControls();
                 refreshProgressAndNavigation();
@@ -962,52 +1231,42 @@ end
             end
             return;
         end
-
         if ~isempty(progressDialog) && isvalid(progressDialog)
             close(progressDialog);
         end
 
-        % Commit the fully calculated replacement containers as one state change.
-        committedParameters = replacementParameters;
-        committedMasks = replacementMasks;
-        committedCoordinates = replacementCoordinates;
-        committedSegmentationAreaMasks = replacementAreaMasks;
-        committedUsesCustomSegmentationArea = replacementUsesCustomArea;
-        isImageProcessed(:) = true;
-        pointCounts = replacementPointCounts;
-        statusValues(:) = "Processed";
-        areaStatusValues = replacementAreaStatus;
+        % Commit only the fully calculated target records as one state change.
+        committedParameters(targetStateIndices) = replacementParameters;
+        committedMasks(targetStateIndices) = replacementMasks;
+        committedCoordinates(targetStateIndices) = replacementCoordinates;
+        committedSegmentationAreaMasks(targetStateIndices) = replacementAreaMasks;
+        committedUsesCustomSegmentationArea(targetStateIndices) = ...
+            replacementUsesCustomArea;
+        isImageProcessed(targetStateIndices) = true;
+        pointCounts(targetStateIndices) = replacementPointCounts;
+        statusValues(targetStateIndices) = "Processed";
+        areaStatusValues(targetStateIndices) = replacementAreaStatus;
         lastCommittedParameters = parametersToApply;
         currentParameters = parametersToApply;
         currentSegmentationAreaMask = ...
-            replacementAreaMasks{currentImageIndex};
+            committedSegmentationAreaMasks{currentImageIndex};
         currentUsesCustomSegmentationArea = ...
-            replacementUsesCustomArea(currentImageIndex);
+            committedUsesCustomSegmentationArea(currentImageIndex);
         currentImageHasUserEdits = false;
         hasUnexportedCommittedChanges = true;
 
-        % Update every visible row together so table state cannot temporarily
-        % disagree with the committed result arrays.
-        currentTableData = sequenceTable.Data;
-        currentTableData.Status = statusValues;
-        currentTableData.Area = areaStatusValues;
-        currentTableData.PointCount = pointCounts;
-        sequenceTable.Data = currentTableData;
-        sequenceTable.Selection = currentImageIndex;
-
+        refreshAllGroupTables();
         writeControlsFromCurrentParameters();
         renderCurrentPreview();
 
-        isApplyingParametersToAll = false;
-        sequenceTable.Enable = 'on';
+        isApplyingParameters = false;
+        setSequenceTablesEnabled(true);
         set(parameterStagePanels, 'Enable', 'on');
         refreshSegmentationAreaControls();
         refreshProgressAndNavigation();
-
         uialert(segmentationFigure, ...
-            sprintf( ...
-                'Applied the current processing parameters to all %d images.', ...
-                numberOfImages), ...
+            sprintf('Applied the current parameters to %d image(s) in %s.', ...
+                numberOfTargets, scopeText), ...
             'Parameters applied', ...
             'Icon', 'success');
     end
@@ -1023,7 +1282,9 @@ end
         % Outputs:
         %   None. The callback commits and navigates when a previous image exists.
 
-        navigateToImage(currentImageIndex - 1);
+        if hasActiveImage
+            navigateToImage(currentImageIndex - 1);
+        end
     end
 
     function handleNextImage(~, ~)
@@ -1037,7 +1298,9 @@ end
         % Outputs:
         %   None. The callback commits and navigates when a next image exists.
 
-        navigateToImage(currentImageIndex + 1);
+        if hasActiveImage
+            navigateToImage(currentImageIndex + 1);
+        end
     end
 
     function navigateToImage(targetImageIndex)
@@ -1046,14 +1309,15 @@ end
         % apply identical state and parameter-inheritance rules.
         %
         % Input:
-        %   targetImageIndex : Stable sequence position to display next.
+        %   targetImageIndex : Stable flat state position to display next.
         %
         % Outputs:
         %   None. The helper updates committed state, table selection, and preview.
 
         % Ignore invalid or no-op requests. Boundary buttons are disabled too,
         % but this check protects programmatic callback calls.
-        if isDrawingSegmentationArea || isApplyingParametersToAll || ...
+        if ~hasActiveImage || isDrawingSegmentationArea || ...
+                isApplyingParameters || ...
                 targetImageIndex < 1 || targetImageIndex > numberOfImages || ...
                 targetImageIndex == currentImageIndex
             return;
@@ -1065,7 +1329,13 @@ end
         try
             commitCurrentImage();
             currentImageIndex = targetImageIndex;
-            sequenceTable.Selection = targetImageIndex;
+            activeGroupIndex = groupIndexByState(currentImageIndex);
+            targetLocalIndex = localIndexByState(currentImageIndex);
+            lastSelectedLocalIndexByGroup(activeGroupIndex) = targetLocalIndex;
+            hasActiveImage = true;
+            sequenceTabGroup.SelectedTab = sequenceTabs(activeGroupIndex);
+            sequenceTables(activeGroupIndex).Selection = targetLocalIndex;
+            set(parameterStagePanels, 'Enable', 'on');
             loadCurrentImage();
         catch navigationError
             isSynchronizingTableSelection = false;
@@ -1146,7 +1416,7 @@ end
         else
             currentParameters = lastCommittedParameters;
             currentSegmentationAreaMask = true(size( ...
-                ultrasoundSequence(currentImageIndex).plane.image.'));
+                flatUltrasoundSequence(currentImageIndex).plane.image.'));
             currentUsesCustomSegmentationArea = false;
         end
         currentImageHasUserEdits = false;
@@ -1194,7 +1464,7 @@ end
         % Outputs:
         %   None. It updates preview arrays and graphics in imageAxes.
 
-        currentPlane = ultrasoundSequence(currentImageIndex).plane;
+        currentPlane = flatUltrasoundSequence(currentImageIndex).plane;
         [currentPreviewImage, fullSegmentationMask, ...
             fullBoundaryCoordinates] = applyBoneSegmentationPipeline( ...
             currentPlane.image, currentParameters);
@@ -1218,7 +1488,10 @@ end
 
         % Replace the previous image and overlay while preserving fixed uint8
         % display limits so brightness and contrast changes remain visible.
+        % Turn the axes back on because an empty tab hides them while showing
+        % its explanatory message.
         cla(imageAxes);
+        axis(imageAxes, 'on');
         imageHandle = imagesc(imageAxes, ...
             columnCentersMillimeters, rowCentersMillimeters, ...
             currentPreviewImage, [0, 255]);
@@ -1267,9 +1540,12 @@ end
             sprintf('%s | Bone %s', ...
                 char(string(currentPlane.snapshotName)), ...
                 char(string(currentPlane.bone))), ...
-            sprintf('Position %d of %d | Source %g | Boundary points: %d', ...
+            sprintf(['Tab image %d of %d | Overall %d of %d | ' ...
+                'Source %g | Boundary points: %d'], ...
+                localIndexByState(currentImageIndex), ...
+                numberOfImagesByGroup(activeGroupIndex), ...
                 currentImageIndex, numberOfImages, ...
-                double(ultrasoundSequence(currentImageIndex).sourceIndex), ...
+                double(flatUltrasoundSequence(currentImageIndex).sourceIndex), ...
                 size(currentPreviewCoordinates, 1))}, ...
             'Interpreter', 'none');
         xlabel(imageAxes, 'Width (mm)');
@@ -1286,9 +1562,12 @@ end
         %   None. The helper reads the current processing and preview state.
         %
         % Outputs:
-        %   None. It updates sequenceTable.Data and preserves row selection.
+        %   None. It updates the owning group table and preserves selection.
 
-        currentTableData = sequenceTable.Data;
+        currentGroupIndex = groupIndexByState(currentImageIndex);
+        currentLocalIndex = localIndexByState(currentImageIndex);
+        currentSequenceTable = sequenceTables(currentGroupIndex);
+        currentTableData = currentSequenceTable.Data;
 
         % Mark a processed result as modified while its preview differs from the
         % last commit. A new image remains explicitly unprocessed until leaving.
@@ -1307,15 +1586,49 @@ end
             displayedAreaStatus = "Full";
         end
         areaStatusValues(currentImageIndex) = displayedAreaStatus;
-        currentTableData.Status(currentImageIndex) = displayedStatus;
-        currentTableData.Area(currentImageIndex) = displayedAreaStatus;
-        currentTableData.PointCount(currentImageIndex) = ...
+        currentTableData.Status(currentLocalIndex) = displayedStatus;
+        currentTableData.Area(currentLocalIndex) = displayedAreaStatus;
+        currentTableData.PointCount(currentLocalIndex) = ...
             size(currentPreviewCoordinates, 1);
-        sequenceTable.Data = currentTableData;
+        currentSequenceTable.Data = currentTableData;
 
         % Reapply the stable data-row selection in case table data assignment
         % caused MATLAB to rebuild its sorted display view.
-        sequenceTable.Selection = currentImageIndex;
+        currentSequenceTable.Selection = currentLocalIndex;
+    end
+
+    function refreshAllGroupTables()
+        %REFRESHALLGROUPTABLES Synchronize every table from flat result state.
+        % Batch processing can affect one or many groups, so this helper maps
+        % global status arrays back into each directory's local table rows.
+        %
+        % Inputs:
+        %   None. Values come from the internal mappings and committed state.
+        %
+        % Outputs:
+        %   None. Populated tables are refreshed and selections are restored.
+
+        for groupIndexToRefresh = 1:numberOfGroups
+            currentStateIndices = stateIndicesByGroup{groupIndexToRefresh};
+            if isempty(currentStateIndices)
+                continue;
+            end
+            currentSequenceTable = sequenceTables(groupIndexToRefresh);
+            currentTableData = currentSequenceTable.Data;
+            currentTableData.Status = statusValues(currentStateIndices);
+            currentTableData.Area = areaStatusValues(currentStateIndices);
+            currentTableData.PointCount = pointCounts(currentStateIndices);
+            currentSequenceTable.Data = currentTableData;
+
+            % Restore the last stable local result rather than a visually
+            % sorted row position.
+            selectedLocalIndex = ...
+                lastSelectedLocalIndexByGroup(groupIndexToRefresh);
+            if selectedLocalIndex >= 1 && ...
+                    selectedLocalIndex <= numel(currentStateIndices)
+                currentSequenceTable.Selection = selectedLocalIndex;
+            end
+        end
     end
 
     function refreshProgressAndNavigation()
@@ -1329,10 +1642,23 @@ end
         % Outputs:
         %   None. It updates labels and button Enable properties.
 
-        % Keep current position and completion progress on one compact line so
-        % the fixed-height workflow panel leaves more room for processing.
+        % Empty tabs have no active image and keep all processing controls off.
+        if ~hasActiveImage
+            workflowStatusLabel.Text = sprintf( ...
+                '%s: no images  |  Processed: %d / %d', ...
+                char(string(ultrasoundSequence(activeGroupIndex).name)), ...
+                nnz(isImageProcessed), numberOfImages);
+            previousButton.Enable = 'off';
+            nextButton.Enable = 'off';
+            return;
+        end
+
+        % Show both local group position and global guided-sequence progress.
+        currentLocalIndex = localIndexByState(currentImageIndex);
         workflowStatusLabel.Text = sprintf( ...
-            'Image %d of %d  |  Processed: %d / %d', ...
+            '%s: %d/%d  |  Overall: %d/%d  |  Processed: %d/%d', ...
+            char(string(ultrasoundSequence(activeGroupIndex).name)), ...
+            currentLocalIndex, numberOfImagesByGroup(activeGroupIndex), ...
             currentImageIndex, numberOfImages, ...
             nnz(isImageProcessed), numberOfImages);
 
@@ -1359,7 +1685,8 @@ end
         % Outputs:
         %   None. It writes a selected MAT-file and updates export state.
 
-        if isDrawingSegmentationArea || isApplyingParametersToAll
+        if ~hasActiveImage || isDrawingSegmentationArea || ...
+                isApplyingParameters
             return;
         end
 
@@ -1396,7 +1723,8 @@ end
             return;
         end
 
-        % Save the ordered per-image records directly without a metadata wrapper.
+        % Build grouped output so repeated local source indices stay scoped by
+        % their source directory in both the return value and MAT-file.
         segmentationResults = buildSegmentationResults();
         outputFilePath = fullfile(selectedDirectory, selectedFileName);
         try
@@ -1425,16 +1753,16 @@ end
     end
 
     function builtResults = buildSegmentationResults()
-        %BUILDSEGMENTATIONRESULTS Package ordered per-image result records.
-        % This helper creates the direct 1-by-N struct array saved in the MAT-file
-        % and guarantees alignment with the original ultrasound sequence.
+        %BUILDSEGMENTATIONRESULTS Package results under source-directory groups.
+        % This helper mirrors the ultrasound input hierarchy so each local source
+        % index remains unambiguous and empty input groups remain represented.
         %
         % Inputs:
         %   None. Data is read from the nested committed state.
         %
         % Output:
-        %   builtResults : 1-by-N struct array containing one ordered result
-        %                  record for every ultrasound sequence image.
+        %   builtResults : Group struct array with name, bone, path, and data.
+        %                  Each data array aligns with its ultrasound input group.
 
         resultTemplate = struct( ...
             'sequencePosition', [], ...
@@ -1445,38 +1773,63 @@ end
             'usesCustomSegmentationArea', false, ...
             'processingParameters', defaultParameters, ...
             'status', 'unprocessed');
-        builtResults = repmat(resultTemplate, 1, numberOfImages);
+        emptyResultData = repmat(resultTemplate, 1, 0);
+        resultGroupTemplate = struct( ...
+            'name', '', ...
+            'bone', 'U', ...
+            'path', '', ...
+            'data', emptyResultData);
+        builtResults = repmat( ...
+            resultGroupTemplate, 1, numberOfGroups);
 
-        for resultIndex = 1:numberOfImages
-            displayedImageSize = size( ...
-                ultrasoundSequence(resultIndex).plane.image.');
-            builtResults(resultIndex).sequencePosition = resultIndex;
-            builtResults(resultIndex).sourceIndex = ...
-                ultrasoundSequence(resultIndex).sourceIndex;
-            builtResults(resultIndex).processingParameters = ...
-                committedParameters(resultIndex);
+        for resultGroupIndex = 1:numberOfGroups
+            builtResults(resultGroupIndex).name = ...
+                ultrasoundSequence(resultGroupIndex).name;
+            builtResults(resultGroupIndex).bone = ...
+                ultrasoundSequence(resultGroupIndex).bone;
+            builtResults(resultGroupIndex).path = ...
+                ultrasoundSequence(resultGroupIndex).path;
+            currentStateIndices = stateIndicesByGroup{resultGroupIndex};
+            currentGroupResults = repmat( ...
+                resultTemplate, 1, numel(currentStateIndices));
 
-            if isImageProcessed(resultIndex)
-                builtResults(resultIndex).pixelCoordinates = ...
-                    committedCoordinates{resultIndex};
-                builtResults(resultIndex).segmentationMask = ...
-                    committedMasks{resultIndex};
-                builtResults(resultIndex).segmentationAreaMask = ...
-                    committedSegmentationAreaMasks{resultIndex};
-                builtResults(resultIndex).usesCustomSegmentationArea = ...
-                    committedUsesCustomSegmentationArea(resultIndex);
-                builtResults(resultIndex).status = 'processed';
-            else
-                % A correctly sized false mask preserves array conventions while
-                % status prevents it from being mistaken for an accepted empty result.
-                builtResults(resultIndex).pixelCoordinates = zeros(0, 2);
-                builtResults(resultIndex).segmentationMask = ...
-                    false(displayedImageSize);
-                builtResults(resultIndex).segmentationAreaMask = ...
-                    true(displayedImageSize);
-                builtResults(resultIndex).usesCustomSegmentationArea = false;
-                builtResults(resultIndex).status = 'unprocessed';
+            for localResultIndex = 1:numel(currentStateIndices)
+                resultStateIndex = currentStateIndices(localResultIndex);
+                displayedImageSize = size( ...
+                    flatUltrasoundSequence(resultStateIndex).plane.image.');
+                currentGroupResults(localResultIndex).sequencePosition = ...
+                    localResultIndex;
+                currentGroupResults(localResultIndex).sourceIndex = ...
+                    ultrasoundSequence(resultGroupIndex).data( ...
+                    localResultIndex).sourceIndex;
+                currentGroupResults(localResultIndex).processingParameters = ...
+                    committedParameters(resultStateIndex);
+
+                if isImageProcessed(resultStateIndex)
+                    currentGroupResults(localResultIndex).pixelCoordinates = ...
+                        committedCoordinates{resultStateIndex};
+                    currentGroupResults(localResultIndex).segmentationMask = ...
+                        committedMasks{resultStateIndex};
+                    currentGroupResults(localResultIndex).segmentationAreaMask = ...
+                        committedSegmentationAreaMasks{resultStateIndex};
+                    currentGroupResults(localResultIndex).usesCustomSegmentationArea = ...
+                        committedUsesCustomSegmentationArea(resultStateIndex);
+                    currentGroupResults(localResultIndex).status = 'processed';
+                else
+                    % Correctly sized default masks preserve array conventions
+                    % while status distinguishes work that was not accepted.
+                    currentGroupResults(localResultIndex).pixelCoordinates = ...
+                        zeros(0, 2);
+                    currentGroupResults(localResultIndex).segmentationMask = ...
+                        false(displayedImageSize);
+                    currentGroupResults(localResultIndex).segmentationAreaMask = ...
+                        true(displayedImageSize);
+                    currentGroupResults(localResultIndex).usesCustomSegmentationArea = ...
+                        false;
+                    currentGroupResults(localResultIndex).status = 'unprocessed';
+                end
             end
+            builtResults(resultGroupIndex).data = currentGroupResults;
         end
     end
 
@@ -1501,9 +1854,9 @@ end
             return;
         end
 
-        if isApplyingParametersToAll
+        if isApplyingParameters
             uialert(sourceFigure, ...
-                'Wait for the all-image parameter update to finish.', ...
+                'Wait for the parameter update to finish.', ...
                 'Applying parameters', ...
                 'Icon', 'warning');
             return;
@@ -1540,83 +1893,169 @@ end
 
 function validateBoneSegmentationInputs(ultrasoundSequence, outputDirectory)
 %VALIDATEBONESEGMENTATIONINPUTS Check data required by the segmentation UI.
-% This function rejects malformed sequence records before graphics and callback
-% state are created, producing clear errors close to the actual input problem.
+% This function validates the grouped snapshot contract before graphics and
+% callback state are created, producing errors close to the malformed group.
 %
 % Inputs:
-%   ultrasoundSequence : Candidate struct vector containing sourceIndex and plane.
+%   ultrasoundSequence : Candidate source-directory group struct vector.
 %   outputDirectory    : Candidate existing directory for export suggestions.
 %
 % Outputs:
 %   None. The function returns silently for valid inputs and throws otherwise.
 
-% Require a non-empty vector because the workflow always selects a first image.
+% Require at least one outer group before checking the grouped-only contract.
 validateattributes(ultrasoundSequence, {'struct'}, ...
     {'vector', 'nonempty'}, mfilename, 'ultrasoundSequence');
 
-requiredSequenceFields = {'sourceIndex', 'plane'};
-if ~all(isfield(ultrasoundSequence, requiredSequenceFields))
-    error('launchBoneSegmentationTools:MissingSequenceFields', ...
-        'Each ultrasoundSequence entry must contain sourceIndex and plane.');
+requiredGroupFields = {'name', 'bone', 'path', 'data'};
+if ~all(isfield(ultrasoundSequence, requiredGroupFields))
+    error('launchBoneSegmentationTools:MissingGroupFields', ...
+        ['ultrasoundSequence must contain source-directory groups with name, ' ...
+        'bone, path, and data fields. Flat sequence input is unsupported.']);
 end
 
 requiredPlaneFields = { ...
     'image', 'nRows', 'nCols', 'W', 'H', 'bone', 'snapshotName'};
-for imageIndex = 1:numel(ultrasoundSequence)
-    sourceIndex = ultrasoundSequence(imageIndex).sourceIndex;
-    if ~isnumeric(sourceIndex) || ~isscalar(sourceIndex) || ...
-            ~isreal(sourceIndex) || ~isfinite(sourceIndex)
-        error('launchBoneSegmentationTools:InvalidSourceIndex', ...
-            'sourceIndex at sequence position %d must be a finite numeric scalar.', ...
-            imageIndex);
+requiredDataFields = {'sourceIndex', 'plane'};
+totalImageCount = 0;
+for groupIndex = 1:numel(ultrasoundSequence)
+    currentGroup = ultrasoundSequence(groupIndex);
+
+    % Tab labels and grouped output metadata require scalar text values.
+    metadataValues = {currentGroup.name, currentGroup.bone, currentGroup.path};
+    for metadataIndex = 1:numel(metadataValues)
+        currentMetadata = metadataValues{metadataIndex};
+        isTextScalar = (ischar(currentMetadata) && ...
+            (isrow(currentMetadata) || isempty(currentMetadata))) || ...
+            (isstring(currentMetadata) && isscalar(currentMetadata));
+        if ~isTextScalar
+            error('launchBoneSegmentationTools:InvalidGroupMetadata', ...
+                'Group %d name, bone, and path must be text scalars.', groupIndex);
+        end
+    end
+    if strlength(string(currentGroup.name)) == 0 || ...
+            strlength(string(currentGroup.bone)) == 0
+        error('launchBoneSegmentationTools:EmptyGroupMetadata', ...
+            'Group %d name and bone must not be empty.', groupIndex);
     end
 
-    currentPlane = ultrasoundSequence(imageIndex).plane;
-    if ~isstruct(currentPlane) || ~isscalar(currentPlane) || ...
-            ~all(isfield(currentPlane, requiredPlaneFields))
-        error('launchBoneSegmentationTools:InvalidPlane', ...
-            ['plane at sequence position %d must be a scalar struct with ' ...
-                'image, nRows, nCols, W, H, bone, and snapshotName fields.'], ...
-            imageIndex);
+    currentGroupData = currentGroup.data;
+    if ~isstruct(currentGroupData) || ...
+            (~isempty(currentGroupData) && ~isvector(currentGroupData))
+        error('launchBoneSegmentationTools:InvalidGroupData', ...
+            'ultrasoundSequence(%d).data must be a struct vector.', groupIndex);
+    end
+    if isempty(currentGroupData)
+        continue;
+    end
+    if ~all(isfield(currentGroupData, requiredDataFields))
+        error('launchBoneSegmentationTools:MissingDataFields', ...
+            ['Every record in ultrasoundSequence(%d).data must contain ' ...
+            'sourceIndex and plane.'], groupIndex);
     end
 
-    % Physical dimensions are needed to label the image axes in millimeters.
-    if ~isnumeric(currentPlane.W) || ~isscalar(currentPlane.W) || ...
-            ~isreal(currentPlane.W) || ~isfinite(currentPlane.W) || ...
-            currentPlane.W <= 0 || ...
-            ~isnumeric(currentPlane.H) || ~isscalar(currentPlane.H) || ...
-            ~isreal(currentPlane.H) || ~isfinite(currentPlane.H) || ...
-            currentPlane.H <= 0
-        error('launchBoneSegmentationTools:InvalidPhysicalImageSize', ...
-            ['plane.W and plane.H at sequence position %d must be positive, ' ...
-                'finite numeric scalars in millimeters.'], imageIndex);
+    totalImageCount = totalImageCount + numel(currentGroupData);
+    groupSourceIndices = zeros(1, numel(currentGroupData));
+    for localImageIndex = 1:numel(currentGroupData)
+        currentRecord = currentGroupData(localImageIndex);
+        sourceIndex = currentRecord.sourceIndex;
+        if ~isnumeric(sourceIndex) || ~isscalar(sourceIndex) || ...
+                ~isreal(sourceIndex) || ~isfinite(sourceIndex)
+            error('launchBoneSegmentationTools:InvalidSourceIndex', ...
+                ['sourceIndex at group %d, local position %d must be a ' ...
+                'finite numeric scalar.'], groupIndex, localImageIndex);
+        end
+        groupSourceIndices(localImageIndex) = double(sourceIndex);
+
+        currentPlane = currentRecord.plane;
+        if ~isstruct(currentPlane) || ~isscalar(currentPlane) || ...
+                ~all(isfield(currentPlane, requiredPlaneFields))
+            error('launchBoneSegmentationTools:InvalidPlane', ...
+                ['plane at group %d, local position %d must contain image, ' ...
+                'nRows, nCols, W, H, bone, and snapshotName fields.'], ...
+                groupIndex, localImageIndex);
+        end
+
+        % Require scalar text before comparing record metadata with the outer
+        % group. This produces a clear validation error for malformed labels
+        % instead of letting a vector string fail inside an if expression.
+        planeMetadataValues = {currentPlane.bone, currentPlane.snapshotName};
+        for planeMetadataIndex = 1:numel(planeMetadataValues)
+            currentPlaneMetadata = planeMetadataValues{planeMetadataIndex};
+            isPlaneTextScalar = (ischar(currentPlaneMetadata) && ...
+                (isrow(currentPlaneMetadata) || isempty(currentPlaneMetadata))) || ...
+                (isstring(currentPlaneMetadata) && ...
+                isscalar(currentPlaneMetadata));
+            if ~isPlaneTextScalar
+                error('launchBoneSegmentationTools:InvalidPlaneMetadata', ...
+                    ['plane.bone and plane.snapshotName at group %d, local ' ...
+                    'position %d must be text scalars.'], ...
+                    groupIndex, localImageIndex);
+            end
+        end
+        if string(currentPlane.bone) ~= string(currentGroup.bone) || ...
+                string(currentPlane.snapshotName) ~= string(currentGroup.name)
+            error('launchBoneSegmentationTools:PlaneGroupMetadataMismatch', ...
+                ['plane metadata at group %d, local position %d does not ' ...
+                'match its owning source-directory group.'], ...
+                groupIndex, localImageIndex);
+        end
+
+        % Physical dimensions label the displayed image axes in millimeters.
+        if ~isnumeric(currentPlane.W) || ~isscalar(currentPlane.W) || ...
+                ~isreal(currentPlane.W) || ~isfinite(currentPlane.W) || ...
+                currentPlane.W <= 0 || ...
+                ~isnumeric(currentPlane.H) || ~isscalar(currentPlane.H) || ...
+                ~isreal(currentPlane.H) || ~isfinite(currentPlane.H) || ...
+                currentPlane.H <= 0
+            error('launchBoneSegmentationTools:InvalidPhysicalImageSize', ...
+                ['plane.W and plane.H at group %d, local position %d must ' ...
+                'be positive finite numeric scalars in millimeters.'], ...
+                groupIndex, localImageIndex);
+        end
+
+        currentImage = currentPlane.image;
+        if ~isnumeric(currentImage) || ~ismatrix(currentImage) || ...
+                isempty(currentImage) || ~isreal(currentImage) || ...
+                any(~isfinite(double(currentImage(:)))) || ...
+                any(double(currentImage(:)) < 0) || ...
+                any(double(currentImage(:)) > 255)
+            error('launchBoneSegmentationTools:InvalidImage', ...
+                ['plane.image at group %d, local position %d must be a ' ...
+                'non-empty finite 2D numeric image from 0 through 255.'], ...
+                groupIndex, localImageIndex);
+        end
+
+        % Stored packets use [width, height], while the segmentation display
+        % uses the transposed [nRows, nCols] image.
+        displayedImageSize = size(currentImage.');
+        if ~isnumeric(currentPlane.nRows) || ...
+                ~isscalar(currentPlane.nRows) || ...
+                ~isfinite(currentPlane.nRows) || ...
+                currentPlane.nRows ~= displayedImageSize(1) || ...
+                ~isnumeric(currentPlane.nCols) || ...
+                ~isscalar(currentPlane.nCols) || ...
+                ~isfinite(currentPlane.nCols) || ...
+                currentPlane.nCols ~= displayedImageSize(2)
+            error('launchBoneSegmentationTools:ImageSizeMismatch', ...
+                ['plane.nRows and plane.nCols at group %d, local position ' ...
+                '%d must match the size of plane.image transpose.'], ...
+                groupIndex, localImageIndex);
+        end
     end
 
-    currentImage = currentPlane.image;
-    if ~isnumeric(currentImage) || ~ismatrix(currentImage) || ...
-            isempty(currentImage) || ~isreal(currentImage) || ...
-            any(~isfinite(double(currentImage(:)))) || ...
-            any(double(currentImage(:)) < 0) || ...
-            any(double(currentImage(:)) > 255)
-        error('launchBoneSegmentationTools:InvalidImage', ...
-            ['plane.image at sequence position %d must be a non-empty, ' ...
-                'finite 2D numeric image with values from 0 through 255.'], ...
-            imageIndex);
+    % sourceIndex is local to a group but must uniquely identify one selected
+    % input record inside that directory.
+    if numel(unique(groupSourceIndices)) ~= numel(groupSourceIndices)
+        error('launchBoneSegmentationTools:DuplicateGroupSourceIndex', ...
+            'ultrasoundSequence(%d).data contains duplicate sourceIndex values.', ...
+            groupIndex);
     end
+end
 
-    % The project stores packets as [width, height], while nRows and nCols
-    % describe the transposed display image used by segmentation coordinates.
-    displayedImageSize = size(currentImage.');
-    if ~isnumeric(currentPlane.nRows) || ~isscalar(currentPlane.nRows) || ...
-            ~isfinite(currentPlane.nRows) || ...
-            currentPlane.nRows ~= displayedImageSize(1) || ...
-            ~isnumeric(currentPlane.nCols) || ~isscalar(currentPlane.nCols) || ...
-            ~isfinite(currentPlane.nCols) || ...
-            currentPlane.nCols ~= displayedImageSize(2)
-        error('launchBoneSegmentationTools:ImageSizeMismatch', ...
-            ['plane.nRows and plane.nCols at sequence position %d must match ' ...
-                'the size of plane.image transpose.'], imageIndex);
-    end
+if totalImageCount == 0
+    error('launchBoneSegmentationTools:NoImages', ...
+        'At least one ultrasoundSequence group must contain image data.');
 end
 
 % Fail early when the export dialog would otherwise open at an invalid path.
