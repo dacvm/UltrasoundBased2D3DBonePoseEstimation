@@ -1,0 +1,11 @@
+{
+  "input": {
+    "boneSurfaceFilePath": "../outputs",
+    "boneSurfaceFileName": "boneSurface_20260806_011723.mat",
+    "ultrasoundImageFilePath": "../../ultrasoundSpatialProcessing/outputs",
+    "ultrasoundImageFileName": "validSnapshots_20260804_152821.mat"
+  },
+  "output": {
+    "boneSurface3DOutputPath": "../outputs"
+  }
+}
