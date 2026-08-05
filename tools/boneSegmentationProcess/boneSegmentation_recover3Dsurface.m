@@ -97,7 +97,6 @@ for groupIndex = 1:numberOfSurfaceGroups
         ultrasoundSequence(groupIndex).name, ...
         ultrasoundSequence(groupIndex).bone, ...
         ultrasoundSequence(groupIndex).path});
-
     if ~isequal(surfaceGroupIdentity, ultrasoundGroupIdentity)
         error('boneSegmentation_recover3Dsurface:GroupIdentityMismatch', ...
               'Surface and ultrasound group %d do not describe the same source.', ...
@@ -196,13 +195,17 @@ view(ax1, 35, 40);
 % image arrays use [width,height] storage, so SwapXY restores normal displayed
 % [row,column] orientation. The same pixel spacing used during conversion
 % guarantees that the texture and recovered points occupy the same plane.
-imagePlaneAlpha = 0.12;
+imagePlaneAlpha = 0.08;
 
+% Loop for all group (sensor location)
 for groupIndex = 1:numberOfSurfaceGroups
 
+    % Loop for all data within a group
     for recordIndex = 1:numel(surfaceResults(groupIndex).data)
-
+        
+        % Get current plane
         currentPlane = ultrasoundSequence(groupIndex).data(recordIndex).plane;
+        % Compute the spacing for display
         pixelSpacingXYMm = [ ...
             double(currentPlane.W) / (double(currentPlane.nCols) - 1), ...
             double(currentPlane.H) / (double(currentPlane.nRows) - 1)];
@@ -228,10 +231,13 @@ surfaceGroupBones       = string({surfaceResults.bone});
 surfaceGroupColors      = lines(max(numberOfSurfaceGroups, 1));
 hasVisibleSurfaceGroup  = false(1, numberOfSurfaceGroups);
 
+% Loop for all group (sensor location)
 for groupIndex = 1:numberOfSurfaceGroups
 
+    % Loop for all data within a group
     for recordIndex = 1:numel(surfaceResults(groupIndex).data)
 
+        % Get current data
         surfaceCoordinatesRefXYZ = surfaceResults(groupIndex).data(recordIndex).surfaceCoordinatesRefXYZ;
 
         % Some valid records may contain no detected surface. Their image plane
@@ -240,6 +246,7 @@ for groupIndex = 1:numberOfSurfaceGroups
             continue;
         end
 
+        % Display the 3d bone surface
         boneSurfaceHandle = scatter3(ax1, ...
             surfaceCoordinatesRefXYZ(:, 1), ...
             surfaceCoordinatesRefXYZ(:, 2), ...
