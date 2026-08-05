@@ -110,6 +110,15 @@ pointCounts = zeros(numberOfImages, 1);
 statusValues = repmat("Unprocessed", numberOfImages, 1);
 areaStatusValues = repmat("Full", numberOfImages, 1);
 
+% Keep quality as an ordered category so sorting places rows that need work
+% before good results. Unprocessed previews remain explicitly not checked.
+blobQualityCategoryNames = { ...
+    'Not checked', 'No blobs', 'Urgent', 'Check', 'Good'};
+blobQualityValues = categorical( ...
+    repmat({'Not checked'}, numberOfImages, 1), ...
+    blobQualityCategoryNames, ...
+    'Ordinal', true);
+
 % Start with the first image in the first nonempty source group. Empty groups
 % remain visible as tabs but cannot supply the initial processing parameters.
 currentImageIndex = 1;
@@ -157,11 +166,11 @@ for groupIndex = 1:numberOfGroups
     % SequencePosition is local to the group and remains stable after sorting.
     tableDataByGroup{groupIndex} = table( ...
         sequencePositions, sourceIndices, boneCodes, snapshotGroups, ...
-        statusValues(currentStateIndices), areaStatusValues(currentStateIndices), ...
-        pointCounts(currentStateIndices), ...
+        statusValues(currentStateIndices), blobQualityValues(currentStateIndices), ...
+        areaStatusValues(currentStateIndices), pointCounts(currentStateIndices), ...
         'VariableNames', { ...
             'SequencePosition', 'SourceIndex', 'Bone', 'SnapshotGroup', ...
-            'Status', 'Area', 'PointCount'});
+            'Status', 'BlobQuality', 'Area', 'PointCount'});
 end
 
 %% CREATE THE THREE-COLUMN USER INTERFACE
@@ -178,7 +187,7 @@ segmentationFigure = uifigure( ...
 % Give the image the flexible center column while keeping the table and
 % processing controls wide enough for readable labels.
 mainGrid = uigridlayout(segmentationFigure, [1, 3], ...
-    'ColumnWidth', {540, '1x', 420}, ...
+    'ColumnWidth', {650, '1x', 420}, ...
     'Padding', [10, 10, 10, 10], ...
     'ColumnSpacing', 10);
 
@@ -199,6 +208,14 @@ sequenceTabGroup = uitabgroup(tableGrid, ...
     'Tag', 'bone_segmentation_sequence_tab_group');
 sequenceTabs = gobjects(1, numberOfGroups);
 sequenceTables = gobjects(1, numberOfGroups);
+
+% Reuse one style object per quality level so every table presents the same
+% soft colors and marker meanings without loading external icon files.
+blobQualityStyles = createBlobQualityStyles();
+blobQualityTooltip = sprintf([ ...
+    'Blob quality uses 8-connected regions in the final segmentation mask.\n' ...
+    'Good: 1 | Check: 2-5 | Urgent: more than 5 | ' ...
+    'No blobs: 0 | Not checked: unprocessed']);
 for groupIndex = 1:numberOfGroups
     sequenceTabs(groupIndex) = uitab(sequenceTabGroup, ...
         'Title', char(string(ultrasoundSequence(groupIndex).name)), ...
@@ -213,14 +230,19 @@ for groupIndex = 1:numberOfGroups
         'Data', currentTableData, ...
         'ColumnName', { ...
             'Position', 'Source', 'Bone', 'Snapshot group', ...
-            'Status', 'Area', 'Points'}, ...
-        'ColumnWidth', {65, 60, 45, 110, 80, 65, 55}, ...
+            'Status', 'Blob quality', 'Area', 'Points'}, ...
+        'ColumnWidth', {65, 60, 45, 110, 80, 115, 65, 55}, ...
         'ColumnEditable', false(1, width(currentTableData)), ...
         'ColumnSortable', true(1, width(currentTableData)), ...
         'SelectionType', 'row', ...
         'Multiselect', 'off', ...
+        'Tooltip', blobQualityTooltip, ...
         'Tag', sprintf('bone_segmentation_sequence_table_%d', groupIndex));
     sequenceTables(groupIndex).UserData = groupIndex;
+
+    % Apply the initial gray badges, including the valid empty-table case.
+    applyBlobQualityTableStyles( ...
+        sequenceTables(groupIndex), blobQualityStyles);
 
     % Empty groups keep a visible tab and table, but the table itself has no
     % meaningful selection until the user returns to a populated group.
@@ -1150,6 +1172,7 @@ end
         replacementUsesCustomArea = false(1, numberOfTargets);
         replacementPointCounts = zeros(numberOfTargets, 1);
         replacementAreaStatus = repmat("Full", numberOfTargets, 1);
+        replacementBlobQuality = blobQualityValues(targetStateIndices);
 
         % Resolve target areas before processing. The current image may contain
         % a live uncommitted area, while other images use committed or full areas.
@@ -1209,6 +1232,9 @@ end
                         replacementAreaMasks{targetPosition});
                 replacementPointCounts(targetPosition) = size( ...
                     replacementCoordinates{targetPosition}, 1);
+                replacementBlobQuality(targetPosition) = ...
+                    classifySegmentationBlobQuality( ...
+                    replacementMasks{targetPosition});
                 progressDialog.Value = targetPosition / numberOfTargets;
                 drawnow limitrate;
             end
@@ -1246,6 +1272,7 @@ end
         pointCounts(targetStateIndices) = replacementPointCounts;
         statusValues(targetStateIndices) = "Processed";
         areaStatusValues(targetStateIndices) = replacementAreaStatus;
+        blobQualityValues(targetStateIndices) = replacementBlobQuality;
         lastCommittedParameters = parametersToApply;
         currentParameters = parametersToApply;
         currentSegmentationAreaMask = ...
@@ -1554,7 +1581,7 @@ end
     end
 
     function refreshCurrentTableRow()
-        %REFRESHCURRENTTABLEROW Update status and point count for one image.
+        %REFRESHCURRENTTABLEROW Update status, quality, and points for one image.
         % This helper keeps the compact table synchronized without copying image
         % or mask arrays into the UI control.
         %
@@ -1579,6 +1606,15 @@ end
             displayedStatus = "Unprocessed";
         end
 
+        % Do not treat an automatically rendered preview as reviewed. Once an
+        % image is processed, show quality from its live preview immediately.
+        if isImageProcessed(currentImageIndex)
+            blobQualityValues(currentImageIndex) = ...
+                classifySegmentationBlobQuality(currentPreviewMask);
+        else
+            blobQualityValues(currentImageIndex) = 'Not checked';
+        end
+
         statusValues(currentImageIndex) = displayedStatus;
         if currentUsesCustomSegmentationArea
             displayedAreaStatus = "Custom";
@@ -1587,10 +1623,16 @@ end
         end
         areaStatusValues(currentImageIndex) = displayedAreaStatus;
         currentTableData.Status(currentLocalIndex) = displayedStatus;
+        currentTableData.BlobQuality(currentLocalIndex) = ...
+            blobQualityValues(currentImageIndex);
         currentTableData.Area(currentLocalIndex) = displayedAreaStatus;
         currentTableData.PointCount(currentLocalIndex) = ...
             size(currentPreviewCoordinates, 1);
         currentSequenceTable.Data = currentTableData;
+
+        % Data assignment can rebuild the table's display, so restore the badge
+        % targets before restoring the stable row selection.
+        applyBlobQualityTableStyles(currentSequenceTable, blobQualityStyles);
 
         % Reapply the stable data-row selection in case table data assignment
         % caused MATLAB to rebuild its sorted display view.
@@ -1616,9 +1658,16 @@ end
             currentSequenceTable = sequenceTables(groupIndexToRefresh);
             currentTableData = currentSequenceTable.Data;
             currentTableData.Status = statusValues(currentStateIndices);
+            currentTableData.BlobQuality = ...
+                blobQualityValues(currentStateIndices);
             currentTableData.Area = areaStatusValues(currentStateIndices);
             currentTableData.PointCount = pointCounts(currentStateIndices);
             currentSequenceTable.Data = currentTableData;
+
+            % Batch updates can change several quality groups at once, so rebuild
+            % the compact set of styled cell targets for this source table.
+            applyBlobQualityTableStyles( ...
+                currentSequenceTable, blobQualityStyles);
 
             % Restore the last stable local result rather than a visually
             % sorted row position.
@@ -2062,6 +2111,206 @@ end
 if isempty(outputDirectory) || ~isfolder(outputDirectory)
     error('launchBoneSegmentationTools:OutputDirectoryNotFound', ...
         'The output directory does not exist: %s', outputDirectory);
+end
+end
+
+
+function blobQualityLabel = classifySegmentationBlobQuality(segmentationMask)
+%CLASSIFYSEGMENTATIONBLOBQUALITY Classify connected segmentation regions.
+% This function counts 8-connected blobs in the final clipped mask and maps
+% that count to the review labels shown in the sequence table. It is needed so
+% live previews, committed images, and batch processing use identical rules.
+%
+% Input:
+%   segmentationMask : Logical 2D final segmentation mask after any custom
+%                      segmentation-area mask has been applied.
+%
+% Output:
+%   blobQualityLabel : String scalar containing No blobs, Good, Check, or
+%                      Urgent. Not checked is assigned by workflow state.
+
+% Match the 8-connectivity already used by the morphology and boundary steps.
+connectedComponents = bwconncomp(segmentationMask, 8);
+numberOfBlobs = connectedComponents.NumObjects;
+
+% Keep zero separate because a missing segmentation needs a distinct black
+% marker, while excessive regions use the red urgent state.
+if numberOfBlobs == 0
+    blobQualityLabel = "No blobs";
+elseif numberOfBlobs == 1
+    blobQualityLabel = "Good";
+elseif numberOfBlobs <= 5
+    blobQualityLabel = "Check";
+else
+    blobQualityLabel = "Urgent";
+end
+end
+
+
+function blobQualityStyles = createBlobQualityStyles()
+%CREATEBLOBQUALITYSTYLES Build reusable soft table-cell badge styles.
+% This function creates one MATLAB UI style for every blob-quality state. It is
+% needed to keep colors, text alignment, and generated dot icons consistent
+% across all source-directory tables without relying on external image files.
+%
+% Inputs:
+%   None.
+%
+% Output:
+%   blobQualityStyles : Scalar struct whose fields contain the uistyle objects
+%                       for Not checked, No blobs, Urgent, Check, and Good.
+
+% Use pale backgrounds so the indicator remains readable without overpowering
+% the row selection highlight or the ultrasound image beside the table.
+notCheckedBackground = [0.95, 0.95, 0.95];
+noBlobsBackground = [0.88, 0.88, 0.88];
+urgentBackground = [0.99, 0.91, 0.90];
+checkBackground = [1.00, 0.96, 0.80];
+goodBackground = [0.90, 0.96, 0.91];
+
+% Generate each marker in MATLAB. The unchecked marker is hollow so it remains
+% visually different from the filled black marker used for an empty result.
+notCheckedIcon = createBlobQualityDotIcon( ...
+    [0.55, 0.55, 0.55], notCheckedBackground, false);
+noBlobsIcon = createBlobQualityDotIcon( ...
+    [0.05, 0.05, 0.05], noBlobsBackground, true);
+urgentIcon = createBlobQualityDotIcon( ...
+    [0.75, 0.18, 0.16], urgentBackground, true);
+checkIcon = createBlobQualityDotIcon( ...
+    [0.78, 0.56, 0.04], checkBackground, true);
+goodIcon = createBlobQualityDotIcon( ...
+    [0.18, 0.55, 0.28], goodBackground, true);
+
+% Center the readable label while leaving the visual marker at the cell margin.
+blobQualityStyles.notChecked = uistyle( ...
+    'BackgroundColor', notCheckedBackground, ...
+    'FontColor', [0.35, 0.35, 0.35], ...
+    'FontWeight', 'bold', ...
+    'HorizontalAlignment', 'center', ...
+    'Icon', notCheckedIcon, ...
+    'IconAlignment', 'leftmargin');
+blobQualityStyles.noBlobs = uistyle( ...
+    'BackgroundColor', noBlobsBackground, ...
+    'FontColor', [0.08, 0.08, 0.08], ...
+    'FontWeight', 'bold', ...
+    'HorizontalAlignment', 'center', ...
+    'Icon', noBlobsIcon, ...
+    'IconAlignment', 'leftmargin');
+blobQualityStyles.urgent = uistyle( ...
+    'BackgroundColor', urgentBackground, ...
+    'FontColor', [0.50, 0.10, 0.08], ...
+    'FontWeight', 'bold', ...
+    'HorizontalAlignment', 'center', ...
+    'Icon', urgentIcon, ...
+    'IconAlignment', 'leftmargin');
+blobQualityStyles.check = uistyle( ...
+    'BackgroundColor', checkBackground, ...
+    'FontColor', [0.42, 0.30, 0.02], ...
+    'FontWeight', 'bold', ...
+    'HorizontalAlignment', 'center', ...
+    'Icon', checkIcon, ...
+    'IconAlignment', 'leftmargin');
+blobQualityStyles.good = uistyle( ...
+    'BackgroundColor', goodBackground, ...
+    'FontColor', [0.10, 0.38, 0.18], ...
+    'FontWeight', 'bold', ...
+    'HorizontalAlignment', 'center', ...
+    'Icon', goodIcon, ...
+    'IconAlignment', 'leftmargin');
+end
+
+
+function iconImage = createBlobQualityDotIcon( ...
+        markerColor, backgroundColor, isFilled)
+%CREATEBLOBQUALITYDOTICON Draw a small filled or hollow quality marker.
+% This function creates a truecolor icon whose corners match the cell background.
+% It is needed because MATLAB table styles accept in-memory icons and the tool
+% should not depend on separate image assets for its quality badges.
+%
+% Inputs:
+%   markerColor     : 1-by-3 RGB color used for the marker pixels.
+%   backgroundColor : 1-by-3 RGB color matching the table-cell background.
+%   isFilled        : Logical scalar selecting a filled dot when true or a
+%                     hollow ring when false.
+%
+% Output:
+%   iconImage : 11-by-11-by-3 double truecolor image in the range 0 through 1.
+
+% Start with a small square that disappears into the styled cell background.
+iconSize = 11;
+iconImage = repmat(reshape(backgroundColor, 1, 1, 3), ...
+    iconSize, iconSize, 1);
+
+% Build a circular pixel mask around the exact center of the odd-sized icon.
+iconCenter = (iconSize + 1) / 2;
+[columnGrid, rowGrid] = meshgrid(1:iconSize, 1:iconSize);
+distanceFromCenter = hypot( ...
+    rowGrid - iconCenter, columnGrid - iconCenter);
+if isFilled
+    markerMask = distanceFromCenter <= 3.5;
+else
+    markerMask = distanceFromCenter >= 2.5 & ...
+        distanceFromCenter <= 3.5;
+end
+
+% Write each RGB channel through the same circular mask.
+for colorChannel = 1:3
+    currentChannel = iconImage(:, :, colorChannel);
+    currentChannel(markerMask) = markerColor(colorChannel);
+    iconImage(:, :, colorChannel) = currentChannel;
+end
+end
+
+
+function applyBlobQualityTableStyles(sequenceTable, blobQualityStyles)
+%APPLYBLOBQUALITYTABLESTYLES Style each blob-quality table cell by its state.
+% This function rebuilds the style targets after table Data changes. It is
+% needed because individual edits and bulk processing can move rows between
+% quality categories while the table remains independently sortable.
+%
+% Inputs:
+%   sequenceTable     : MATLAB uitable containing a BlobQuality data variable.
+%   blobQualityStyles : Struct of reusable styles returned by
+%                       createBlobQualityStyles.
+%
+% Outputs:
+%   None. Existing table styles are replaced with current quality-cell styles.
+
+% This table currently owns only blob-quality styles, so clearing them avoids
+% stale target rows after its Data property is reassigned.
+removeStyle(sequenceTable);
+
+% Empty source groups have the correct schema but no cells that can be styled.
+currentTableData = sequenceTable.Data;
+if height(currentTableData) == 0
+    return;
+end
+
+% Resolve the column from its stable variable name rather than a hard-coded
+% number, which keeps styling safe if metadata columns are rearranged later.
+qualityColumnIndex = find(strcmp( ...
+    currentTableData.Properties.VariableNames, 'BlobQuality'), 1);
+qualityLabels = ["Not checked", "No blobs", "Urgent", "Check", "Good"];
+stylesInLabelOrder = { ...
+    blobQualityStyles.notChecked, ...
+    blobQualityStyles.noBlobs, ...
+    blobQualityStyles.urgent, ...
+    blobQualityStyles.check, ...
+    blobQualityStyles.good};
+displayedQualityValues = string(currentTableData.BlobQuality);
+
+% Add one style target per populated quality group instead of one object per
+% cell, which keeps refreshes fast for sequences containing hundreds of images.
+for qualityIndex = 1:numel(qualityLabels)
+    matchingRows = find( ...
+        displayedQualityValues == qualityLabels(qualityIndex));
+    if isempty(matchingRows)
+        continue;
+    end
+    matchingCells = [matchingRows, ...
+        repmat(qualityColumnIndex, numel(matchingRows), 1)];
+    addStyle(sequenceTable, stylesInLabelOrder{qualityIndex}, ...
+        'cell', matchingCells);
 end
 end
 
