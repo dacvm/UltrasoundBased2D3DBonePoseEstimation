@@ -9,7 +9,7 @@ projectDirectory        = fileparts(fileparts(extractionToolDirectory));
 
 % Define the path to the segmentation result
 segmentationOutputDirectory = fullfile(extractionToolDirectory, 'outputs');
-segmentationFileName        = 'boneSegmentation_20260804_171803.mat';
+segmentationFileName        = 'boneSegmentation_20260805_094513.mat';
 segmentationFilePath        = fullfile(segmentationOutputDirectory, segmentationFileName);
 
 % Define the path to the ultrasound sequence file
