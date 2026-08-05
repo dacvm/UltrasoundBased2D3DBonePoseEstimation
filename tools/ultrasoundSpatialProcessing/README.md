@@ -4,7 +4,7 @@
 
 This MATLAB tool combines tracked ultrasound snapshots with CT-derived femur and tibia meshes. It places the ultrasound images and CT bones in the same reference coordinate system, calculates where each bone mesh crosses its ultrasound image plane, and opens an interactive browser for inspecting the results.
 
-The recommended entry point is `extra_snapshotProcess_from_config.m`. It reads experiment paths and settings from `tools/snapshotProcess/configs/extra_snapshotProcess_config.json`. In review mode, the browser also lets the user select useful snapshots and export them to a MAT file for later processing. The export dialog starts in `tools/snapshotProcess/outputs/`.
+The recommended entry point is `build_ultrasoundBone_intersectionData.m`. It reads experiment paths and settings from `tools/ultrasoundSpatialProcessing/configs/extra_snapshotProcess_config.json`. In review mode, the browser also lets the user select useful snapshots and export them to a MAT file for later processing. The export dialog starts in `tools/ultrasoundSpatialProcessing/outputs/`.
 
 The `legacy/extra_snapshotProcess.m` script is the older version with experiment-specific paths written directly in the MATLAB file. It is kept for reference, but the config-driven script is easier to reuse with a new dataset.
 
@@ -67,7 +67,7 @@ Use CT data from the same physical pin and marker setup as the ultrasound experi
 
 ### Snapshot configuration
 
-Edit `tools/snapshotProcess/configs/extra_snapshotProcess_config.json`. It contains these settings:
+Edit `tools/ultrasoundSpatialProcessing/configs/extra_snapshotProcess_config.json`. It contains these settings:
 
 | Setting | Meaning |
 | --- | --- |
@@ -108,25 +108,25 @@ Configuration paths may be absolute or relative. Relative paths are resolved fro
 ## Running the project
 
 1. Prepare the ultrasound snapshot folders, fCal XML file, and post-processed CT MAT file.
-2. Edit `tools/snapshotProcess/configs/extra_snapshotProcess_config.json` and set the paths, selected pins, rigid-body names, and display mode.
+2. Edit `tools/ultrasoundSpatialProcessing/configs/extra_snapshotProcess_config.json` and set the paths, selected pins, rigid-body names, and display mode.
 3. Start MATLAB. The script can be launched from any current folder because it locates the project and its `functions` directory from its own file path.
 4. Run the recommended script:
 
    ```matlab
-   run('tools/snapshotProcess/extra_snapshotProcess_from_config.m')
+   run('tools/ultrasoundSpatialProcessing/build_ultrasoundBone_intersectionData.m')
    ```
 
    If MATLAB is not currently in the project root, pass the absolute script path to `run` instead.
 
 5. Follow the progress messages in the MATLAB Command Window and inspect the figures and final snapshot browser.
 
-Set `displayMode` to `display` when the results only need to be inspected. Set it to `review` to mark acceptable snapshots and export them. In review mode, click **Export Selected** and choose an output filename when MATLAB asks. The save dialog starts in `tools/snapshotProcess/outputs/`. The exported MAT file contains a `validSnapshots` structure with the selected image planes and their mesh-intersection results.
+Set `displayMode` to `display` when the results only need to be inspected. Set it to `review` to mark acceptable snapshots and export them. In review mode, click **Export Selected** and choose an output filename when MATLAB asks. The save dialog starts in `tools/ultrasoundSpatialProcessing/outputs/`. The exported MAT file contains a `validSnapshots` structure with the selected image planes and their mesh-intersection results.
 
 The script adds the project `functions` directory and its subdirectories to the MATLAB path automatically.
 
 ## Output MAT-file structure
 
-In `review` mode, the **Export Selected** button writes a MATLAB v7.3 MAT-file to the chosen location. The suggested destination is `tools/snapshotProcess/outputs/`, and the default filename follows `validSnapshots_yyyyMMdd_HHmmss.mat`.
+In `review` mode, the **Export Selected** button writes a MATLAB v7.3 MAT-file to the chosen location. The suggested destination is `tools/ultrasoundSpatialProcessing/outputs/`, and the default filename follows `validSnapshots_yyyyMMdd_HHmmss.mat`.
 
 The processing script keeps its two main result variables grouped by source directory. Both variables use the same outer metadata and aligned `data` arrays:
 

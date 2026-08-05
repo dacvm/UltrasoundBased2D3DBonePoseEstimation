@@ -9,11 +9,11 @@ projectDirectory        = fileparts(fileparts(extractionToolDirectory));
 
 % Define the path to the segmentation result
 segmentationOutputDirectory = fullfile(extractionToolDirectory, 'outputs');
-segmentationFileName        = 'boneSegmentation_20260804_171803.mat';
+segmentationFileName        = 'boneSegmentation_20260805_094513.mat';
 segmentationFilePath        = fullfile(segmentationOutputDirectory, segmentationFileName);
 
 % Define the path to the ultrasound sequence file
-snapshotOutputDirectory     = fullfile(fileparts(extractionToolDirectory), 'snapshotProcess', 'outputs');
+snapshotOutputDirectory     = fullfile(fileparts(extractionToolDirectory), 'ultrasoundSpatialProcessing', 'outputs');
 ultrasoundFileName          = 'validSnapshots_20260804_152821.mat';
 ultrasoundFilePath          = fullfile(snapshotOutputDirectory, ultrasoundFileName);
 
@@ -24,9 +24,9 @@ configurationFilePath       = fullfile(extractionToolDirectory, 'configs', 'bone
 % also works when MATLAB starts outside the project directory.
 surfaceExtractionDirectory       = fullfile(projectDirectory, 'functions', 'boneSurfaceExtraction');
 surfaceExtractionHelperDirectory = fullfile(surfaceExtractionDirectory, 'helpers');
-displayFunctionDirectory          = fullfile(projectDirectory, 'functions', 'display');
+displayFunctionDirectory         = fullfile(projectDirectory, 'functions', 'display');
 if ~isfolder(surfaceExtractionDirectory) || ~isfolder(surfaceExtractionHelperDirectory) || ~isfolder(displayFunctionDirectory)
-    error('boneSegmentatio_extractSurface:MissingExtractionFunctions', ...
+    error('boneSegmentation_extractSurface:MissingExtractionFunctions', ...
           'Bone-surface extraction or display functions were not found under the project functions directory: %s', ...
           fullfile(projectDirectory, 'functions'));
 end
@@ -38,7 +38,7 @@ addpath(surfaceExtractionDirectory, surfaceExtractionHelperDirectory, displayFun
 % check MATLAB would stop with a generic file error, which would make it harder
 % to tell the user which input is missing and where the script looked for it.
 if ~isfile(segmentationFilePath)
-    error('boneSegmentatio_extractSurface:MissingSegmentationFile', ...
+    error('boneSegmentation_extractSurface:MissingSegmentationFile', ...
           'Segmentation file was not found: %s', segmentationFilePath);
 end
 segmentationFileData = load(segmentationFilePath, 'segmentationResults');
@@ -47,7 +47,7 @@ segmentationFileData = load(segmentationFilePath, 'segmentationResults');
 % Check for it explicitly so a file with the wrong contents fails with a useful
 % message instead of causing an unclear error later in the processing pipeline.
 if ~isfield(segmentationFileData, 'segmentationResults')
-    error('boneSegmentatio_extractSurface:MissingSegmentationResults', ...
+    error('boneSegmentation_extractSurface:MissingSegmentationResults', ...
           'The selected segmentation file does not contain segmentationResults.');
 end
 segmentationResults = segmentationFileData.segmentationResults;
@@ -57,7 +57,7 @@ clear segmentationFileData;
 % report the missing input with its full path instead of exposing LOAD's generic
 % error message.
 if ~isfile(ultrasoundFilePath)
-    error('boneSegmentatio_extractSurface:MissingUltrasoundFile', ...
+    error('boneSegmentation_extractSurface:MissingUltrasoundFile', ...
           'Ultrasound file was not found: %s', ultrasoundFilePath);
 end
 ultrasoundFileData = load(ultrasoundFilePath);
@@ -67,7 +67,7 @@ ultrasoundVariableNames = fieldnames(ultrasoundFileData);
 % Requiring one variable makes the next dynamic field lookup unambiguous and
 % prevents the script from silently choosing the wrong dataset.
 if numel(ultrasoundVariableNames) ~= 1
-    error('boneSegmentatio_extractSurface:UnexpectedUltrasoundVariables', ...
+    error('boneSegmentation_extractSurface:UnexpectedUltrasoundVariables', ...
           'Expected one ultrasound variable in "%s", but found %d.', ...
           ultrasoundFileName, numel(ultrasoundVariableNames));
 end
@@ -78,7 +78,7 @@ clear ultrasoundFileData ultrasoundVariableNames;
 % The extractor depends on these settings, so continuing without them could
 % produce incomplete or incorrectly configured surface results.
 if ~isfile(configurationFilePath)
-    error('boneSegmentatio_extractSurface:MissingConfigurationFile', ...
+    error('boneSegmentation_extractSurface:MissingConfigurationFile', ...
           'Extraction configuration was not found: %s', configurationFilePath);
 end
 
@@ -90,7 +90,7 @@ try
     % that hierarchy so the extractor receives an easier-to-navigate struct.
     extractionOptions = jsondecode(fileread(configurationFilePath));
 catch configurationError
-    error('boneSegmentatio_extractSurface:InvalidConfigurationFile', ...
+    error('boneSegmentation_extractSurface:InvalidConfigurationFile', ...
         'Could not read the extraction configuration: %s', ...
         configurationError.message);
 end

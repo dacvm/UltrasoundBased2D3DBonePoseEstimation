@@ -4,7 +4,7 @@
 
 This MATLAB project preprocesses CT-derived 3D meshes from a cadaver-leg or knee-phantom experiment. It estimates the centers of optical markers, defines the rigid bodies attached to the femur and tibia bone pins, loads the anatomical coordinate systems (ACS), stores the results in MATLAB structures, and displays all geometry and coordinate systems in the CT coordinate frame.
 
-The recommended entry point is `preprocess_markerstls_from_config.m`. It reads the input paths and filenames from `tools/ctkneePostProcess/configs/preprocess_markerstls_config.json` and exports a MAT file, MATLAB FIG file, and PNG image to `tools/ctkneePostProcess/outputs/` by default. `preprocess_markerstls.m` is the older script with paths configured directly in the MATLAB file.
+The recommended entry point is `build_ct_knee_reference_model.m`. It reads the input paths and filenames from `tools/ctkneePostProcess/configs/preprocess_markerstls_config.json` and exports a MAT file, MATLAB FIG file, and PNG image to `tools/ctkneePostProcess/outputs/` by default. `preprocess_markerstls.m` is the older script with paths configured directly in the MATLAB file.
 
 ## Experiment setup
 
@@ -94,7 +94,7 @@ This definition must be identical in the user's motion-capture system. The marke
 2. Run the recommended script from MATLAB:
 
    ```matlab
-   run('tools/ctkneePostProcess/preprocess_markerstls_from_config.m')
+   run('tools/ctkneePostProcess/build_ct_knee_reference_model.m')
    ```
 
 3. Inspect the generated MAT, FIG, and PNG files in `tools/ctkneePostProcess/outputs/`. Relative paths in the JSON are resolved from `tools/ctkneePostProcess/configs/`; therefore, the default `../outputs` setting selects the tool-local output folder.

@@ -336,6 +336,41 @@ mainGrid = uigridlayout(figBrowser, [1, 3], ...
     'Padding', [10, 10, 10, 10], ...
     'ColumnSpacing', 10);
 
+% Enclose each primary view in a titled panel so users can quickly see where
+% the data controls, 2D image, and 3D scene begin and end.
+dataPanel = uipanel(mainGrid, ...
+    'Title', 'Ultrasound Data', ...
+    'FontWeight', 'bold', ...
+    'BorderType', 'line', ...
+    'Tag', 'snapshot_intersection_data_panel');
+dataPanel.Layout.Row = 1;
+dataPanel.Layout.Column = 1;
+
+imagePanel = uipanel(mainGrid, ...
+    'Title', 'Ultrasound Image (Intersection in 2D Space)', ...
+    'FontWeight', 'bold', ...
+    'BorderType', 'line', ...
+    'Tag', 'snapshot_intersection_image_panel');
+imagePanel.Layout.Row = 1;
+imagePanel.Layout.Column = 2;
+
+scenePanel = uipanel(mainGrid, ...
+    'Title', 'Bone Mesh (Intersection in 3D Space)', ...
+    'FontWeight', 'bold', ...
+    'BorderType', 'line', ...
+    'Tag', 'snapshot_intersection_3d_panel');
+scenePanel.Layout.Row = 1;
+scenePanel.Layout.Column = 3;
+
+% Use a one-cell grid inside each panel so its content stays responsive and
+% leaves a small, even gap between the panel border and the child controls.
+dataPanelGrid = uigridlayout(dataPanel, [1, 1], ...
+    'Padding', [8, 8, 8, 8]);
+imagePanelGrid = uigridlayout(imagePanel, [1, 1], ...
+    'Padding', [8, 8, 8, 8]);
+scenePanelGrid = uigridlayout(scenePanel, [1, 1], ...
+    'Padding', [8, 8, 8, 8]);
+
 % Define empty handles before the review-only branch so the later empty-data
 % state can disable controls without needing separate browser implementations.
 selectAllButton = gobjects(0);
@@ -344,9 +379,9 @@ selectionCountLabel = gobjects(0);
 exportSelectedButton = gobjects(0);
 
 % Review mode uses a small second row under the tabbed tables. Display mode
-% places the same tab group directly in the main three-column grid.
+% places the same tab group directly in the data panel grid.
 if isReviewMode
-    tableGrid = uigridlayout(mainGrid, [2, 1], ...
+    tableGrid = uigridlayout(dataPanelGrid, [2, 1], ...
         'RowHeight', {'1x', 34}, ...
         'Padding', [0, 0, 0, 0], ...
         'RowSpacing', 6);
@@ -354,7 +389,7 @@ if isReviewMode
     tableGrid.Layout.Column = 1;
     resultsTableParent = tableGrid;
 else
-    resultsTableParent = mainGrid;
+    resultsTableParent = dataPanelGrid;
 end
 
 % Configure column labels and edit permissions once because every directory
@@ -473,20 +508,21 @@ if isReviewMode
 
 end
 
-% Create one large image axes because only the selected row should be drawn.
-imageAxes = uiaxes(mainGrid, 'Tag', 'snapshot_intersection_image_axes');
+% Create one large image axes inside the 2D panel because only the selected
+% row should be drawn at a time.
+imageAxes = uiaxes(imagePanelGrid, 'Tag', 'snapshot_intersection_image_axes');
 imageAxes.Layout.Row = 1;
-imageAxes.Layout.Column = 2;
+imageAxes.Layout.Column = 1;
 xlabel(imageAxes, 'Column');
 ylabel(imageAxes, 'Row');
 box(imageAxes, 'on');
 colormap(imageAxes, gray(256));
 
-% Create a separate 3D axes owned by this browser. The static ax1 overview is
+% Create a separate 3D axes inside the mesh panel. The static ax1 overview is
 % intentionally not passed into or modified by this function.
-sceneAxes = uiaxes(mainGrid, 'Tag', 'snapshot_intersection_3d_axes');
+sceneAxes = uiaxes(scenePanelGrid, 'Tag', 'snapshot_intersection_3d_axes');
 sceneAxes.Layout.Row = 1;
-sceneAxes.Layout.Column = 3;
+sceneAxes.Layout.Column = 1;
 xlabel(sceneAxes, 'X');
 ylabel(sceneAxes, 'Y');
 zlabel(sceneAxes, 'Z');

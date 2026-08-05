@@ -9,7 +9,7 @@ close all;
 script_full_path = mfilename('fullpath');
 if isempty(script_full_path)
     error('preprocess_markerstls:ScriptPathUnavailable', ...
-          'Run preprocess_markerstls_from_config.m as a complete script so its configuration file can be located.');
+          'Run build_ct_knee_reference_model.m as a complete script so its configuration file can be located.');
 end
 tool_directory = fileparts(script_full_path);
 

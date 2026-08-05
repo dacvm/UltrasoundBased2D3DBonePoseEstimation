@@ -120,6 +120,25 @@ verifyEqual(testCase, groupATable.Data.SequencePosition, [1; 2]);
 verifyEqual(testCase, groupATable.Data.SourceIndex, [1; 3]);
 verifyEqual(testCase, groupBTable.Data.SourceIndex, 1);
 verifyTrue(testCase, all(groupATable.ColumnSortable));
+verifyTrue(testCase, ismember( ...
+    'BlobQuality', groupATable.Data.Properties.VariableNames));
+verifyTrue(testCase, isordinal(groupATable.Data.BlobQuality));
+verifyEqual(testCase, categories(groupATable.Data.BlobQuality), { ...
+    'Not checked'; 'No blobs'; 'Urgent'; 'Check'; 'Good'});
+verifyEqual(testCase, string(groupATable.Data.BlobQuality), ...
+    repmat("Not checked", 2, 1));
+verifyEqual(testCase, height(emptyTable.StyleConfigurations), 0);
+
+% The initial gray badge must target the quality cells, and the tooltip must
+% make every count threshold discoverable without adding another UI panel.
+qualityColumnIndex = find(strcmp( ...
+    groupATable.Data.Properties.VariableNames, 'BlobQuality'), 1);
+notCheckedStyle = findCellStyle( ...
+    groupATable, 1, qualityColumnIndex);
+verifyEqual(testCase, notCheckedStyle.BackgroundColor, ...
+    [0.95, 0.95, 0.95], 'AbsTol', 1e-12);
+verifySize(testCase, notCheckedStyle.Icon, [11, 11, 3]);
+verifyTrue(testCase, contains(string(groupATable.Tooltip), '2-5'));
 
 % Both processing scopes must be visible in the grouped browser.
 verifyNotEmpty(testCase, findall(segmentationFigure, ...
@@ -229,6 +248,9 @@ drawnow;
 verifyEqual(testCase, groupATable.Data.Status, ...
     repmat("Processed", 2, 1));
 verifyEqual(testCase, groupBTable.Data.Status, "Unprocessed");
+verifyFalse(testCase, any(string( ...
+    groupATable.Data.BlobQuality) == "Not checked"));
+verifyEqual(testCase, string(groupBTable.Data.BlobQuality), "Not checked");
 
 % The global callback must then process the remaining group B image as well.
 applyAllButton = findall(segmentationFigure, ...
@@ -238,6 +260,8 @@ drawnow;
 verifyEqual(testCase, groupATable.Data.Status, ...
     repmat("Processed", 2, 1));
 verifyEqual(testCase, groupBTable.Data.Status, "Processed");
+verifyFalse(testCase, any(string( ...
+    groupBTable.Data.BlobQuality) == "Not checked"));
 
 % Direct the real export callback to a unique disposable MAT file.
 exportPath = [tempname(testCase.TestData.outputDirectory), '.mat'];
@@ -287,6 +311,126 @@ for groupIndex = 2:numel(segmentationResults)
             segmentationResults(2).data(1).processingParameters);
     end
 end
+end
+
+
+function testBlobQualityBoundariesAndStyles(testCase)
+%TESTBLOBQUALITYBOUNDARIESANDSTYLES Verify every blob-count classification.
+% Synthetic images with separated bright squares make 0, 1, 2, 5, and 6
+% connected components deterministic after the existing segmentation pipeline.
+%
+% Input:
+%   testCase - matlab.unittest.FunctionTestCase used for assertions.
+%
+% Outputs:
+%   None. The test processes the fixture and inspects table data and styles.
+
+ultrasoundSequence = makeBlobCountFixture( ...
+    [0, 1, 2, 5, 6], 'blob_quality_group');
+segmentationFigure = launchBoneSegmentationTools( ...
+    ultrasoundSequence, testCase.TestData.outputDirectory);
+drawnow;
+
+% Use a fixed threshold so only the 255-valued squares become foreground.
+thresholdField = findall(segmentationFigure, ...
+    'Tag', 'bone_segmentation_threshold_field');
+thresholdField.Value = 128;
+thresholdField.ValueChangedFcn(thresholdField, []);
+
+% Process every synthetic image through the same transactional callback used
+% by the real bulk workflow.
+applyAllButton = findall(segmentationFigure, ...
+    'Tag', 'bone_segmentation_apply_parameters_all_button');
+applyAllButton.ButtonPushedFcn(applyAllButton, []);
+drawnow;
+
+sequenceTable = findall(segmentationFigure, ...
+    'Tag', 'bone_segmentation_sequence_table_1');
+expectedQuality = [ ...
+    "No blobs"; "Good"; "Check"; "Check"; "Urgent"];
+verifyEqual(testCase, string(sequenceTable.Data.BlobQuality), expectedQuality);
+
+% Ordered categories must place the most actionable populated states first
+% when users sort the quality column in ascending order.
+sortedTableData = sortrows(sequenceTable.Data, 'BlobQuality');
+verifyEqual(testCase, string(sortedTableData.BlobQuality), [ ...
+    "No blobs"; "Urgent"; "Check"; "Check"; "Good"]);
+
+% Confirm every row has a style attached to the quality cell and that each
+% category uses the agreed soft background color.
+qualityColumnIndex = find(strcmp( ...
+    sequenceTable.Data.Properties.VariableNames, 'BlobQuality'), 1);
+expectedBackgroundColors = [ ...
+    0.88, 0.88, 0.88; ...
+    0.90, 0.96, 0.91; ...
+    1.00, 0.96, 0.80; ...
+    1.00, 0.96, 0.80; ...
+    0.99, 0.91, 0.90];
+for rowIndex = 1:height(sequenceTable.Data)
+    currentStyle = findCellStyle( ...
+        sequenceTable, rowIndex, qualityColumnIndex);
+    verifyEqual(testCase, currentStyle.BackgroundColor, ...
+        expectedBackgroundColors(rowIndex, :), 'AbsTol', 1e-12);
+    verifySize(testCase, currentStyle.Icon, [11, 11, 3]);
+end
+
+% The center of the zero-blob icon must be black. The gray unchecked icon is
+% hollow, which makes these two neutral-background states visually distinct.
+noBlobsStyle = findCellStyle(sequenceTable, 1, qualityColumnIndex);
+centerPixel = reshape(noBlobsStyle.Icon(6, 6, :), 1, 3);
+verifyEqual(testCase, centerPixel, [0.05, 0.05, 0.05], ...
+    'AbsTol', 1e-12);
+end
+
+
+function testBlobQualityLiveUpdateRules(testCase)
+%TESTBLOBQUALITYLIVEUPDATERULES Verify unchecked and processed preview behavior.
+% An unprocessed image must stay gray even when controls change, while a
+% processed image must show its new live quality before navigation commits it.
+%
+% Input:
+%   testCase - matlab.unittest.FunctionTestCase used for assertions.
+%
+% Outputs:
+%   None. The test drives real parameter and bulk-processing callbacks.
+
+ultrasoundSequence = makeBlobCountFixture([1, 1], 'live_quality_group');
+segmentationFigure = launchBoneSegmentationTools( ...
+    ultrasoundSequence, testCase.TestData.outputDirectory);
+drawnow;
+sequenceTable = findall(segmentationFigure, ...
+    'Tag', 'bone_segmentation_sequence_table_1');
+
+% Changing an automatically opened preview does not mean the user accepted or
+% batch-processed it, so the initial row must remain Not checked.
+thresholdField = findall(segmentationFigure, ...
+    'Tag', 'bone_segmentation_threshold_field');
+thresholdField.Value = 128;
+thresholdField.ValueChangedFcn(thresholdField, []);
+verifyEqual(testCase, string( ...
+    sequenceTable.Data.BlobQuality(1)), "Not checked");
+
+% Bulk processing commits both one-blob masks and establishes the live-update
+% rule for later edits to the selected processed row.
+applyAllButton = findall(segmentationFigure, ...
+    'Tag', 'bone_segmentation_apply_parameters_all_button');
+applyAllButton.ButtonPushedFcn(applyAllButton, []);
+drawnow;
+verifyEqual(testCase, string(sequenceTable.Data.BlobQuality), ...
+    repmat("Good", 2, 1));
+
+% At threshold 255 the original white square remains. Lowering brightness then
+% removes it from the live mask and must immediately show No blobs/Modified.
+thresholdField.Value = 255;
+thresholdField.ValueChangedFcn(thresholdField, []);
+brightnessField = findall(segmentationFigure, ...
+    'Tag', 'bone_segmentation_brightness_field');
+brightnessField.Value = -100;
+brightnessField.ValueChangedFcn(brightnessField, []);
+drawnow;
+verifyEqual(testCase, string( ...
+    sequenceTable.Data.BlobQuality(1)), "No blobs");
+verifyEqual(testCase, sequenceTable.Data.Status(1), "Modified");
 end
 
 
@@ -452,6 +596,66 @@ ultrasoundSequence(3).data = ...
 end
 
 
+function ultrasoundSequence = makeBlobCountFixture(blobCounts, groupName)
+%MAKEBLOBCOUNTFIXTURE Build images with known connected-component counts.
+% This helper draws separated 6-by-6 white squares on black images. It is needed
+% to exercise blob-quality boundaries through the real segmentation pipeline
+% without relying on noisy acquisition data or fragile automatic thresholds.
+%
+% Inputs:
+%   blobCounts : Numeric row vector containing counts from 0 through 6.
+%   groupName  : Text scalar used for matching group and plane metadata.
+%
+% Output:
+%   ultrasoundSequence : Scalar grouped sequence whose records contain the
+%                        requested numbers of 8-connected bright regions.
+
+% Six fixed positions leave black gaps between every square, including along
+% diagonals, so 8-connectivity cannot join neighboring test blobs.
+blobStartPositions = [ ...
+    5, 5; ...
+    5, 25; ...
+    5, 45; ...
+    25, 5; ...
+    25, 25; ...
+    25, 45];
+displayedImageSize = [40, 60];
+
+% Preallocate records from one valid image so the fixture matches the grouped
+% public input contract used by launchBoneSegmentationTools.
+blankDisplayedImage = zeros(displayedImageSize, 'uint8');
+recordTemplate = makeUltrasoundRecord( ...
+    1, groupName, 'T', blankDisplayedImage.');
+groupRecords = repmat(recordTemplate, 1, numel(blobCounts));
+
+for imageIndex = 1:numel(blobCounts)
+    displayedImage = blankDisplayedImage;
+    for blobIndex = 1:blobCounts(imageIndex)
+        startRow = blobStartPositions(blobIndex, 1);
+        startColumn = blobStartPositions(blobIndex, 2);
+        displayedImage(startRow:(startRow + 5), ...
+            startColumn:(startColumn + 5)) = 255;
+    end
+
+    % Store the transpose because project acquisition packets use [width, height]
+    % while segmentation masks use the displayed [row, column] orientation.
+    groupRecords(imageIndex) = makeUltrasoundRecord( ...
+        imageIndex, groupName, 'T', displayedImage.');
+end
+
+% Assign fields after creating the scalar group so its record vector remains one
+% nested data field rather than expanding the outer struct array.
+ultrasoundSequence = struct( ...
+    'name', '', ...
+    'bone', 'T', ...
+    'path', '', ...
+    'data', groupRecords([]));
+ultrasoundSequence.name = groupName;
+ultrasoundSequence.path = fullfile('C:\fixture', groupName);
+ultrasoundSequence.data = groupRecords;
+end
+
+
 function ultrasoundRecord = makeUltrasoundRecord( ...
         sourceIndex, groupName, boneCode, storedImage)
 %MAKEULTRASOUNDRECORD Build one valid grouped snapshot data record.
@@ -479,6 +683,41 @@ plane = struct( ...
 ultrasoundRecord = struct( ...
     'sourceIndex', sourceIndex, ...
     'plane', plane);
+end
+
+
+function matchingStyle = findCellStyle(sequenceTable, rowIndex, columnIndex)
+%FINDCELLSTYLE Find the style configuration targeting one table cell.
+% This helper inspects MATLAB's compact style-configuration table. It is needed
+% to verify that grouped style targets include the requested quality cell even
+% when one style object is shared by several rows.
+%
+% Inputs:
+%   sequenceTable : MATLAB uitable whose StyleConfigurations are inspected.
+%   rowIndex      : Positive data-row index of the requested cell.
+%   columnIndex   : Positive data-column index of the requested cell.
+%
+% Output:
+%   matchingStyle : matlab.ui.style.Style object applied to the requested cell.
+
+styleConfigurations = sequenceTable.StyleConfigurations;
+for configurationIndex = 1:height(styleConfigurations)
+    if string(styleConfigurations.Target(configurationIndex)) ~= "cell"
+        continue;
+    end
+
+    targetCells = styleConfigurations.TargetIndex{configurationIndex};
+    requestedCell = [rowIndex, columnIndex];
+    if any(all(targetCells == requestedCell, 2))
+        matchingStyle = styleConfigurations.Style(configurationIndex);
+        return;
+    end
+end
+
+% A missing target means the visual indicator was not applied as required.
+error('testLaunchBoneSegmentationToolsGrouped:MissingCellStyle', ...
+    'No style targets table cell at row %d, column %d.', ...
+    rowIndex, columnIndex);
 end
 
 
