@@ -60,7 +60,7 @@ if ~isfile(ultrasoundFilePath)
     error('boneSegmentation_extractSurface:MissingUltrasoundFile', ...
           'Ultrasound file was not found: %s', ultrasoundFilePath);
 end
-ultrasoundFileData = load(ultrasoundFilePath);
+ultrasoundFileData      = load(ultrasoundFilePath);
 ultrasoundVariableNames = fieldnames(ultrasoundFileData);
 
 % This tool expects the ultrasound MAT-file to contain exactly one variable.
@@ -91,8 +91,8 @@ try
     extractionOptions = jsondecode(fileread(configurationFilePath));
 catch configurationError
     error('boneSegmentation_extractSurface:InvalidConfigurationFile', ...
-        'Could not read the extraction configuration: %s', ...
-        configurationError.message);
+          'Could not read the extraction configuration: %s', ...
+          configurationError.message);
 end
 
 %% EXTRACT AND SAVE THE THIN BONE SURFACES
