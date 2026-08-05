@@ -4,7 +4,7 @@
 
 This MATLAB tool combines tracked ultrasound snapshots with CT-derived femur and tibia meshes. It places the ultrasound images and CT bones in the same reference coordinate system, calculates where each bone mesh crosses its ultrasound image plane, and opens an interactive browser for inspecting the results.
 
-The recommended entry point is `extra_snapshotProcess_from_config.m`. It reads experiment paths and settings from `tools/snapshotProcess/configs/extra_snapshotProcess_config.json`. In review mode, the browser also lets the user select useful snapshots and export them to a MAT file for later processing. The export dialog starts in `tools/snapshotProcess/outputs/`.
+The recommended entry point is `build_ultrasoundBone_intersectionData.m`. It reads experiment paths and settings from `tools/snapshotProcess/configs/extra_snapshotProcess_config.json`. In review mode, the browser also lets the user select useful snapshots and export them to a MAT file for later processing. The export dialog starts in `tools/snapshotProcess/outputs/`.
 
 The `legacy/extra_snapshotProcess.m` script is the older version with experiment-specific paths written directly in the MATLAB file. It is kept for reference, but the config-driven script is easier to reuse with a new dataset.
 
@@ -113,7 +113,7 @@ Configuration paths may be absolute or relative. Relative paths are resolved fro
 4. Run the recommended script:
 
    ```matlab
-   run('tools/snapshotProcess/extra_snapshotProcess_from_config.m')
+   run('tools/snapshotProcess/build_ultrasoundBone_intersectionData.m')
    ```
 
    If MATLAB is not currently in the project root, pass the absolute script path to `run` instead.
