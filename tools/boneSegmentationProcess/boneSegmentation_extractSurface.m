@@ -13,7 +13,7 @@ segmentationFileName        = 'boneSegmentation_20260804_171803.mat';
 segmentationFilePath        = fullfile(segmentationOutputDirectory, segmentationFileName);
 
 % Define the path to the ultrasound sequence file
-snapshotOutputDirectory     = fullfile(fileparts(extractionToolDirectory), 'snapshotProcess', 'outputs');
+snapshotOutputDirectory     = fullfile(fileparts(extractionToolDirectory), 'ultrasoundSpatialProcessing', 'outputs');
 ultrasoundFileName          = 'validSnapshots_20260804_152821.mat';
 ultrasoundFilePath          = fullfile(snapshotOutputDirectory, ultrasoundFileName);
 

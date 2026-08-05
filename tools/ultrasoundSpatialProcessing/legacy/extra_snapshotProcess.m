@@ -8,7 +8,7 @@ if isempty(scriptFullPath)
 end
 scriptDirectory = fileparts(scriptFullPath);
 
-% This script lives in tools/snapshotProcess, two folders below the project root.
+% This script lives in tools/ultrasoundSpatialProcessing, two folders below the project root.
 projectRoot = fileparts(fileparts(scriptDirectory));
 
 % Add every project function folder through an absolute path so the readers
