@@ -1,8 +1,11 @@
 data/*
 output/*
+configs/*
 tools/ctkneePostProcess/outputs/*
 tools/ultrasoundSpatialProcessing/outputs/*
+tools/ultrasoundSpatialProcessing/configs/*
 tools/boneSegmentationProcess/outputs/*
+tools/boneSegmentationProcess/configs/*
 functions/fcal_related/split_sequence_image_frames_demo/*
 AGENTS.md
 *.asv
