@@ -8,7 +8,7 @@ clear; clc; close all;
 % Keep each directory and filename separate so selecting another run only
 % requires changing these values.
 filepath_boneSurface = 'D:\Documents\BELANDA\SonoSkin\codes\matlab\bmodeimage_3dspace\tools\boneSegmentationProcess\outputs';
-filename_boneSurface = 'boneSurface_20260805_140438.mat';
+filename_boneSurface = 'boneSurface_20260806_011723.mat';
 fullpath_boneSurface = fullfile(filepath_boneSurface, filename_boneSurface);
 
 filepath_ultrasoundimage = 'D:\Documents\BELANDA\SonoSkin\codes\matlab\bmodeimage_3dspace\tools\ultrasoundSpatialProcessing\outputs';
@@ -48,6 +48,20 @@ if ~isfield(surfaceFileData, 'surfaceResults')
 end
 surfaceResults = surfaceFileData.surfaceResults;
 clear surfaceFileData;
+
+% The extraction step must declare the complete result schema before this
+% script fills the 3D coordinates. Reject older artifacts instead of silently
+% creating a new field here, because that would make saved results inconsistent.
+for groupIndex = 1:numel(surfaceResults)
+    currentSurfaceData = surfaceResults(groupIndex).data;
+    if ~isstruct(currentSurfaceData) || ...
+            ~isfield(currentSurfaceData, 'surfaceCoordinatesRefXYZ')
+        error('boneSegmentation_recover3Dsurface:MissingSurfaceCoordinatesRefXYZ', ...
+            ['Surface group %d does not contain surfaceCoordinatesRefXYZ. ' ...
+             'Rerun boneSegmentation_extractSurface.m to create a compatible MAT-file.'], ...
+            groupIndex);
+    end
+end
 
 %% LOAD THE ULTRASOUND SEQUENCE
 
@@ -167,7 +181,8 @@ for groupIndex = 1:numberOfSurfaceGroups
 
         % Ultrasound pixels lie on the image plane, so their local Z coordinate
         % is zero. applyRigidTransform applies both the rotation and translation
-        % in T_image_ref to produce physical points in the ref frame.
+        % in T_image_ref to produce physical points in the ref frame. Fill the
+        % field that was already declared by the surface extraction step.
         surfaceCoordinatesRefXYZ = applyRigidTransform(surfaceCoordinatesImageXYZ, currentPlane.T_image_ref);
         surfaceResults(groupIndex).data(recordIndex).surfaceCoordinatesRefXYZ = surfaceCoordinatesRefXYZ;
 

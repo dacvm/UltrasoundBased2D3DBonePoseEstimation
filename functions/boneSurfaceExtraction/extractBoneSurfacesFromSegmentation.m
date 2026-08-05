@@ -21,8 +21,10 @@ function [surfaceResults, extractionMetadata] = extractBoneSurfacesFromSegmentat
 % Outputs:
 %   surfaceResults      : Group struct vector aligned with segmentationResults.
 %                         Every group retains name, bone, path, and data; each
-%                         data record contains the existing extracted-surface
-%                         fields, confidence, spacing, and summary values.
+%                         data record contains the extracted-surface fields,
+%                         confidence, spacing, summary values, and an empty
+%                         surfaceCoordinatesRefXYZ field reserved for later 3D
+%                         recovery in the reference coordinate frame.
 %   extractionMetadata : Scalar struct describing the algorithm, coordinate
 %                        convention, creation time, and resolved configuration.
 

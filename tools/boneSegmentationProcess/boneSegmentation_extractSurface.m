@@ -106,7 +106,8 @@ end
 
 %% EXTRACT AND SAVE THE THIN BONE SURFACES
 
-% Extract the bone surface
+% Extract the 2D bone surface. Each output record also reserves an empty
+% surfaceCoordinatesRefXYZ field that the later 3D recovery step will fill.
 [surfaceResults, extractionMetadata] = extractBoneSurfacesFromSegmentation(segmentationResults, ultrasoundSequence, extractionOptions);
 
 % The public function receives arrays rather than file paths, so record the
