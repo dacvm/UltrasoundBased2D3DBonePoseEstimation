@@ -5,7 +5,7 @@
   },
   "input": {
     "fcalFilename": "PlusDeviceSet_fCal_Epiphan_NDIPolaris_UTNML__20260312_120634.xml",
-    "sequenceFolder": "D:\\Documents\\BELANDA\\SonoSkin\\data\\dennis_data\\2026-13-04_phantom\\selected_sequence",
+    "sequenceFolder": "D:\\Documents\\BELANDA\\SonoSkin\\data\\dennis_data\\2026-04-13_phantom\\selected_sequence",
     "acsFilename": "CT_Femur_editedFlipped_scaled_20260421-174922.mat",
     "manualAdjustmentFilename": "manual_transformation_adjustments_20260422-154031.mat",
     "stlFilename": "CT_Femur_editedFlipped_scaled_distal.stl"
