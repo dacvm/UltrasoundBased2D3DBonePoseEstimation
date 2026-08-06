@@ -128,15 +128,15 @@ segmentationResults = loadedSegmentation.segmentationResults;
 
 Part 2 requires three inputs:
 
-- The Part 1 MAT-file containing the variable `segmentationResults`.
-- The same selected ultrasound snapshot MAT-file used in Part 1. It must contain exactly one variable.
+- The MAT-file produced by Bone Segmentation (from Part 1), containing the variable `segmentationResults`.
+- The same selected ultrasound snapshot MAT-file used for Bone Segmentation (from Part 1). It must contain exactly one variable.
 - The algorithm configuration file `tools/boneSegmentationProcess/configs/boneSurfaceExtraction.json`.
 
 Edit `tools/boneSegmentationProcess/configs/boneSegmentation_extractSurface.json` to select these inputs and the output location:
 
 | Setting | Meaning |
 | --- | --- |
-| `input.segmentationFilePath` | Directory containing the Part 1 segmentation MAT-file. |
+| `input.segmentationFilePath` | Directory containing the MAT-file produced by Bone Segmentation (from Part 1). |
 | `input.segmentationFileName` | Segmentation MAT-file name only. |
 | `input.ultrasoundSequenceFilePath` | Directory containing the matching selected ultrasound MAT-file. |
 | `input.ultrasoundSequenceFileName` | Ultrasound MAT-file name only. |
@@ -156,11 +156,11 @@ The algorithm JSON groups its settings into `imageEvidence`, `surfaceTracing`, `
 6. **Regularize the curve.** Optional bounded regularization reduces pixel-scale roughness while limiting how far the final curve may move from the image-supported path.
 7. **Save and review.** The script saves `surfaceResults` and `extractionMetadata`, then opens an interactive review interface showing the ultrasound image, segmentation overlay, observed surface points, interpolated points, and extraction settings.
 
-Unprocessed Part 1 records are preserved with status `skippedUnprocessed`. A processed record with no candidate coordinates is preserved with status `noSurface`.
+Records left unprocessed during Bone Segmentation (from Part 1) are preserved with status `skippedUnprocessed`. A processed record with no candidate coordinates is preserved with status `noSurface`.
 
 ## Running the Project
 
-1. Export the Part 1 segmentation results.
+1. Export the results from Bone Segmentation (from Part 1).
 2. Set the segmentation file, matching ultrasound file, extraction settings file, and output directory in `tools/boneSegmentationProcess/configs/boneSegmentation_extractSurface.json`.
 3. Review algorithm parameters in `tools/boneSegmentationProcess/configs/boneSurfaceExtraction.json`.
 4. Start MATLAB and run:
@@ -191,6 +191,7 @@ surfaceResults(1..G)
 +-- data(1..N)
     +-- sequencePosition, sourceIndex, status
     +-- surfacePixelCoordinatesXY
+    +-- surfaceCoordinatesRefXYZ
     +-- surfaceRowByColumn, rawSurfaceRowByColumn
     +-- observedColumnMask, interpolatedColumnMask
     +-- segmentIdByColumn
@@ -212,13 +213,14 @@ Important result fields are:
 
 | Field | Explanation |
 | --- | --- |
-| `sequencePosition` | One-based position copied from the matching Part 1 record. It preserves the image order within the source group. |
-| `sourceIndex` | Identifier copied from the matching Part 1 and ultrasound records. Use it with the group metadata to trace the surface back to the exact source image. |
+| `sequencePosition` | One-based position copied from the matching Bone Segmentation (from Part 1) record. It preserves the image order within the source group. |
+| `sourceIndex` | Identifier copied from the matching Bone Segmentation (from Part 1) and ultrasound records. Use it with the group metadata to trace the surface back to the exact source image. |
 | `surfacePixelCoordinatesXY` | Final retained surface points in MATLAB 1-based `[x, y] = [column, row]` image coordinates. Unlike ordinary integer pixel coordinates, the final `y` values may be fractional because regularization can place the curve between pixel centres. |
+| `surfaceCoordinatesRefXYZ` | Reserved for the extracted surface points after they are transformed into 3D coordinates in the common reference frame. Part 2 does not perform that assignment, so this field is intentionally empty (`[]`) in the output produced here. It is included now to keep the `surfaceResults` structure ready for the upcoming processing part. |
 | `surfaceRowByColumn` | Final surface depth for every image column, expressed as a possibly subpixel row number. A finite value means that column belongs to an extracted surface; `NaN` means no surface was retained there. |
-| `rawSurfaceRowByColumn` | Surface depth before regularization. Directly observed values come from Part 1 boundary pixels selected by dynamic programming, while accepted gaps are interpolated. Comparing this field with `surfaceRowByColumn` shows how much smoothing changed the curve. |
-| `observedColumnMask` | Logical vector marking columns whose raw surface point is an actual exported Part 1 boundary coordinate. These are the columns with direct segmentation and image support. |
-| `interpolatedColumnMask` | Logical vector marking columns filled across an accepted short gap between observed points. These points maintain continuity but were not directly present in the Part 1 boundary coordinates. |
+| `rawSurfaceRowByColumn` | Surface depth before regularization. Directly observed values come from boundary pixels exported by Bone Segmentation (from Part 1) and selected by dynamic programming, while accepted gaps are interpolated. Comparing this field with `surfaceRowByColumn` shows how much smoothing changed the curve. |
+| `observedColumnMask` | Logical vector marking columns whose raw surface point is an actual boundary coordinate exported by Bone Segmentation (from Part 1). These are the columns with direct segmentation and image support. |
+| `interpolatedColumnMask` | Logical vector marking columns filled across an accepted short gap between observed points. These points maintain continuity but were not directly present in the boundary coordinates from Bone Segmentation (from Part 1). |
 | `segmentIdByColumn` | Integer label for each retained column. Columns with the same nonzero label belong to one continuous surface segment; zero means that no surface is present in that column. |
 | `rawConfidenceByColumn` | Confidence before regularization, on a scale from 0 to 1. At observed candidates it combines first-echo position, bright reflection/ridge, and acoustic-shadow evidence; interpolated gaps receive a reduced value based on their endpoints and gap length. Higher values mean stronger image support. |
 | `confidenceByColumn` | Final 0–1 confidence after regularization. Observed-point confidence decreases when the final curve moves away from its raw image-supported location; gap confidence is based on the weaker adjusted endpoint and decreases for longer gaps. `NaN` means no retained surface at that column. |
@@ -229,11 +231,11 @@ Important result fields are:
 | `regularizationRmsDisplacementMm` | Typical regularization movement over the retained surface, calculated as the root mean square of the per-column displacement. It summarizes overall adjustment without preserving movement direction. |
 | `regularizationMaxDisplacementMm` | Largest absolute regularization movement anywhere on the retained surface. Compare it with the configured `maximumDisplacementMm` to see whether smoothing approached its allowed limit. |
 | `pixelSpacingXYMm` | Physical distance between adjacent pixel centres as `[lateral spacing, axial spacing]` in millimetres. It converts image columns and rows into physical distances and makes thresholds independent of image resolution. |
-| `observedLengthMm` | Lateral support length calculated as the number of directly observed columns multiplied by the lateral pixel spacing. It measures how much of the result is backed by Part 1 boundary coordinates, not the curved arc length. |
+| `observedLengthMm` | Lateral support length calculated as the number of directly observed columns multiplied by the lateral pixel spacing. It measures how much of the result is backed by boundary coordinates from Bone Segmentation (from Part 1), not the curved arc length. |
 | `interpolatedLengthMm` | Lateral length added across accepted gaps, calculated from the number of interpolated columns and lateral pixel spacing. A large value relative to `observedLengthMm` means more of the curve was inferred rather than directly observed. |
 | `meanConfidence` | Arithmetic mean of `confidenceByColumn` over directly observed columns only; interpolated columns are excluded. Each included 0–1 score summarizes first-echo position, bright reflection/ridge, and shadow evidence, then decreases if regularization moves the point away from its raw location. A value near 1 indicates consistently strong image support with little movement, while a value near 0 indicates weak support or substantial adjustment; `NaN` means there are no observed surface points. |
 | `numberOfSegments` | Number of separate continuous surface pieces retained in the image. A value greater than one means the extractor found disconnected pieces rather than one uninterrupted curve. |
-| `status` | `extracted` means at least one surface segment passed the configured checks. `noSurface` means the image was processed but no usable surface remained. `skippedUnprocessed` means its Part 1 record was not processed, so absence of a surface was not inferred. |
+| `status` | `extracted` means at least one surface segment passed the configured checks. `noSurface` means the image was processed but no usable surface remained. `skippedUnprocessed` means the matching Bone Segmentation (from Part 1) record was not processed, so absence of a surface was not inferred. |
 
 `extractionMetadata` records the resolved algorithm settings, coordinate conventions, input provenance, output filename, processing counts, and creation time so the extraction can be reproduced.
 
@@ -250,10 +252,10 @@ extractionMetadata = loadedSurface.extractionMetadata;
 
 - The segmentation MAT-file does not contain a variable named `segmentationResults`.
 - The ultrasound MAT-file contains zero variables or more than one variable.
-- Part 1 and Part 2 use different ultrasound snapshot files, so group metadata or `sourceIndex` values do not match.
+- Bone Segmentation (from Part 1) and Bone Surface Extraction (from Part 2) use different ultrasound snapshot files, so group metadata or `sourceIndex` values do not match.
 - A configured filename contains directory components or has the wrong `.mat` or `.json` extension.
 - A relative input path is interpreted from the wrong location; it is resolved from the directory containing `boneSegmentation_extractSurface.json`.
-- A Part 1 record is still marked `unprocessed`, so extraction correctly returns `skippedUnprocessed`.
+- A Bone Segmentation (from Part 1) record is still marked `unprocessed`, so extraction correctly returns `skippedUnprocessed`.
 - A processed segmentation has no boundary coordinates, so extraction returns `noSurface`.
 - Surface segments disappear because the configured minimum length, confidence threshold, or evidence settings are too strict for the dataset.
 - Pixel spacing or plane dimensions in the ultrasound input are missing or inconsistent with the stored image size.
