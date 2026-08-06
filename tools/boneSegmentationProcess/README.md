@@ -106,8 +106,7 @@ segmentationResults(1..G)
 Load the result with:
 
 ```matlab
-loadedSegmentation = load('boneSegmentation_yyyyMMdd_HHmmss.mat', ...
-    'segmentationResults');
+loadedSegmentation = load('boneSegmentation_yyyyMMdd_HHmmss.mat', 'segmentationResults');
 segmentationResults = loadedSegmentation.segmentationResults;
 ```
 
@@ -245,8 +244,7 @@ Important result fields are:
 Load the result with:
 
 ```matlab
-loadedSurface = load('boneSurface_yyyyMMdd_HHmmss.mat', ...
-    'surfaceResults', 'extractionMetadata');
+loadedSurface = load('boneSurface_yyyyMMdd_HHmmss.mat', 'surfaceResults', 'extractionMetadata');
 surfaceResults = loadedSurface.surfaceResults;
 extractionMetadata = loadedSurface.extractionMetadata;
 ```
@@ -332,8 +330,7 @@ The output MAT-file also retains `extractionMetadata` unchanged from Bone Surfac
 Load the recovered result with:
 
 ```matlab
-loadedSurface3D = load('boneSurface_yyyyMMdd_HHmmss.mat', ...
-    'surfaceResults', 'extractionMetadata');
+loadedSurface3D = load('boneSurface_yyyyMMdd_HHmmss.mat', 'surfaceResults', 'extractionMetadata');
 surfaceResults = loadedSurface3D.surfaceResults;
 extractionMetadata = loadedSurface3D.extractionMetadata;
 ```
