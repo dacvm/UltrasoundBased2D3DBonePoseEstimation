@@ -2,12 +2,13 @@
 
 ## Short Summary
 
-This MATLAB tool continues the workflow in [`tools/ultrasoundSpatialProcessing`](../ultrasoundSpatialProcessing/README.md). The spatial-processing tool prepares selected, tracked ultrasound images; this tool then segments the bone response in each B-mode image and extracts a thin bone-surface curve. These results provide the image-space bone surface information needed to obtain the bone surface in 3D from the tracked ultrasound data.
+This MATLAB tool continues the workflow in [`tools/ultrasoundSpatialProcessing`](../ultrasoundSpatialProcessing/README.md). The spatial-processing tool prepares selected, tracked ultrasound images; this tool then segments the bone response in each B-mode image, extracts a thin bone-surface curve, and transforms that curve into the common 3D reference frame.
 
-The workflow has two consecutive parts:
+The workflow has three consecutive parts:
 
 1. `boneSegmentation_semiAutomatic.m` interactively segments likely bone regions and exports their boundary pixels.
 2. `boneSegmentation_extractSurface.m` selects a stable, probe-facing thin surface from those boundary candidates and saves confidence and quality information.
+3. `boneSegmentation_recover3Dsurface.m` converts the extracted image coordinates into physical 3D bone-surface points using each tracked ultrasound image plane.
 
 ## Experiment Setup
 
@@ -179,6 +180,8 @@ The output is saved automatically before the review interface opens. Its default
 boneSurface_yyyyMMdd_HHmmss.mat
 ```
 
+<a id="part-2-output-structure"></a>
+
 ## Output Structure
 
 The MATLAB v7.3 output contains `surfaceResults` and `extractionMetadata`:
@@ -259,3 +262,88 @@ extractionMetadata = loadedSurface.extractionMetadata;
 - A processed segmentation has no boundary coordinates, so extraction returns `noSurface`.
 - Surface segments disappear because the configured minimum length, confidence threshold, or evidence settings are too strict for the dataset.
 - Pixel spacing or plane dimensions in the ultrasound input are missing or inconsistent with the stored image size.
+
+<hr style="border: 0; border-top: 5px solid #333; margin: 2.5em 0;">
+
+# (Part 3) Recovering 3D Surface
+
+## Required Input Data
+
+Part 3 requires two matching MAT-files:
+
+- The output from Bone Surface Extraction (from Part 2). It must contain `surfaceResults` and `extractionMetadata`, and every surface record must already include the reserved `surfaceCoordinatesXYZRef` field.
+- The same selected ultrasound snapshot MAT-file used by the earlier parts. It must contain `validSnapshots`, including the image-plane geometry and `T_image_ref` transform for every matching surface record.
+
+Edit `tools/boneSegmentationProcess/configs/boneSegmentation_recover3Dsurface.json` to select these inputs and the output location:
+
+| Setting | Meaning |
+| --- | --- |
+| `input.boneSurfaceFilePath` | Directory containing the MAT-file produced by Bone Surface Extraction (from Part 2). |
+| `input.boneSurfaceFileName` | Bone-surface MAT-file name only, including the `.mat` extension. |
+| `input.ultrasoundImageFilePath` | Directory containing the matching selected ultrasound snapshot MAT-file. |
+| `input.ultrasoundImageFileName` | Ultrasound snapshot MAT-file name only, including the `.mat` extension. |
+| `output.boneSurface3DOutputPath` | Directory in which the recovered 3D surface MAT-file is saved. |
+
+Paths may be absolute or relative. Relative paths are resolved from the directory containing `boneSegmentation_recover3Dsurface.json`. The output directory is created automatically when it does not exist.
+
+## Processing Workflow
+
+1. **Load the extracted surfaces.** The script loads `surfaceResults` and `extractionMetadata` from the output of Bone Surface Extraction (from Part 2). It also verifies that the reserved `surfaceCoordinatesXYZRef` field is present in every group.
+2. **Load the tracked ultrasound snapshots.** The script loads `validSnapshots`, which supplies the physical image-plane dimensions and the `T_image_ref` transform associated with each surface.
+3. **Verify one-to-one correspondence.** Surface and ultrasound data must have equal group and record counts. The script also compares each group's `name`, `bone`, and `path`, followed by the record-level `sourceIndex` sequence, before combining the inputs.
+4. **Convert pixels to physical image coordinates.** Each one-based `[column, row]` point in `surfaceCoordinatesXY` is converted to `[x_mm, y_mm, 0]` on its ultrasound image plane. Pixel spacing is calculated from the plane width, height, rows, and columns.
+5. **Transform the surface into the reference frame.** The matching `T_image_ref` rotation and translation map every image-plane point to `[X_ref, Y_ref, Z_ref]`. The result is assigned to `surfaceCoordinatesXYZRef` in the corresponding `surfaceResults` record.
+6. **Display the recovered surfaces.** A 3D figure shows the tracked ultrasound image planes and recovered surface points together. Surface groups use different colors, while the image planes remain translucent for spatial context.
+7. **Save the result.** The updated `surfaceResults` and the unchanged `extractionMetadata` are written to a new MATLAB v7.3 MAT-file.
+
+Records without an extracted 2D surface remain valid. Their `surfaceCoordinatesXYZRef` field is assigned an empty 0-by-3 array because there are no points to transform.
+
+## Running the Project
+
+1. Complete Bone Surface Extraction (from Part 2).
+2. Set the extracted surface file, matching ultrasound snapshot file, and output directory in `tools/boneSegmentationProcess/configs/boneSegmentation_recover3Dsurface.json`.
+3. Start MATLAB and run:
+
+   ```matlab
+   run('tools/boneSegmentationProcess/boneSegmentation_recover3Dsurface.m')
+   ```
+
+   If MATLAB is not currently in the project root, pass the absolute script path to `run`.
+
+4. Inspect the recovered points and ultrasound planes in the 3D figure.
+5. Read the number of recovered points and the saved output path in the MATLAB Command Window.
+
+The result is saved automatically after the 3D figure is created. Its default filename is:
+
+```text
+boneSurface_yyyyMMdd_HHmmss.mat
+```
+
+## Output Structure
+
+The saved `surfaceResults` structure is otherwise identical to the output of Bone Surface Extraction (from Part 2). Refer to [Output Structure in Bone Surface Extraction (Part 2)](#part-2-output-structure) for all shared group and record fields. Part 3 assigns the following previously reserved field:
+
+| Field | Explanation |
+| --- | --- |
+| `surfaceCoordinatesXYZRef` | N-by-3 physical coordinates `[X_ref, Y_ref, Z_ref]` of the recovered bone-surface points in the common reference frame. Each row corresponds to the same row in `surfaceCoordinatesXY`: the one-based image coordinate is first converted to a physical point on the ultrasound plane and then transformed by that record's `T_image_ref`. The project expects these coordinates in millimetres. When a record has no extracted 2D surface points, this field is an empty 0-by-3 array. |
+
+The output MAT-file also retains `extractionMetadata` unchanged from Bone Surface Extraction (from Part 2).
+
+Load the recovered result with:
+
+```matlab
+loadedSurface3D = load('boneSurface_yyyyMMdd_HHmmss.mat', ...
+    'surfaceResults', 'extractionMetadata');
+surfaceResults = loadedSurface3D.surfaceResults;
+extractionMetadata = loadedSurface3D.extractionMetadata;
+```
+
+## Common Input Problems
+
+- The selected bone-surface MAT-file does not contain both `surfaceResults` and `extractionMetadata`.
+- The selected bone-surface file is from an older extraction run and its records do not contain the reserved `surfaceCoordinatesXYZRef` field. Rerun Bone Surface Extraction (from Part 2) to create a compatible file.
+- The selected ultrasound MAT-file does not contain a variable named `validSnapshots`.
+- The surface and ultrasound files come from different processing runs, causing mismatched group counts, group metadata, record counts, or `sourceIndex` values.
+- A configured filename contains directory components or does not use the `.mat` extension.
+- A relative path is interpreted from the wrong location; it is resolved from the directory containing `boneSegmentation_recover3Dsurface.json`.
+- An ultrasound plane has invalid image dimensions, physical width or height, or a missing `T_image_ref`, so its pixels cannot be mapped reliably into 3D.
