@@ -92,15 +92,15 @@ segmentationResults(1..G)
 
 | Field | Explanation |
 | --- | --- |
-| `name`, `bone`, `path` | Metadata copied from the matching ultrasound source group. |
-| `sequencePosition` | Record position inside its source group. |
-| `sourceIndex` | Index that links the record to the matching ultrasound input record. |
-| `pixelCoordinates` | N-by-2 final boundary coordinates stored as `[row, column]`. Empty for an unprocessed image or a processed image with no segmented boundary. |
-| `segmentationMask` | Logical image-sized final foreground mask. |
-| `segmentationAreaMask` | Logical image-sized user-selected area; all pixels are true when the full image is used. |
-| `usesCustomSegmentationArea` | Logical value indicating whether a custom area limits the result. |
-| `processingParameters` | Brightness, contrast, threshold, opening radius, closing radius, and minimum-region-area settings used for the image. |
-| `status` | `processed` or `unprocessed`. |
+| `name`, `bone`, `path` | Identify the source group from which the images came. `name` is the source-directory name, `bone` is its bone code, and `path` is the original source directory. These fields keep results from different acquisitions or bones separate. |
+| `sequencePosition` | One-based position of the image inside this output group's `data` array. It describes output order and is not necessarily the image's original acquisition index. |
+| `sourceIndex` | Index copied from the matching ultrasound record. Use it together with the group metadata to find the exact source image used for this segmentation; the same value may occur in another group. |
+| `pixelCoordinates` | N-by-2 list of pixels on the outside edge of the final segmented regions, stored as MATLAB 1-based `[row, column]`. These boundary pixels, rather than every filled foreground pixel, are the candidate locations used by Part 2. The array is empty when no boundary was found or the image was not processed. |
+| `segmentationMask` | Image-sized logical array describing the complete filled segmentation. A `true` pixel was classified as foreground after thresholding, morphology, hole filling, small-region removal, and the optional area restriction; `false` means background. |
+| `segmentationAreaMask` | Image-sized logical array describing where segmentation was allowed. Pixels outside a user-drawn area are `false` and cannot appear in `segmentationMask`; when the full image is used, every value is `true`. |
+| `usesCustomSegmentationArea` | `true` when the user restricted this image with **Draw area**, and `false` when the complete image was processed. This makes it possible to distinguish an intentional region-of-interest restriction from an unrestricted result. |
+| `processingParameters` | Exact settings used to create this image's result. `brightness` and `contrast` modify intensity before segmentation; `threshold` separates foreground from background; `openingRadius` removes small bright details; `closingRadius` joins nearby regions; `minimumRegionArea` removes smaller connected regions; and `fillHoles` records the always-enabled hole-filling step. |
+| `status` | `processed` means a result was committed for the image, even if the final mask is empty. `unprocessed` means the image had not been accepted or batch-processed when export occurred, so its coordinates are empty and its masks contain safe default values. |
 
 Load the result with:
 
@@ -212,19 +212,28 @@ Important result fields are:
 
 | Field | Explanation |
 | --- | --- |
-| `surfacePixelCoordinatesXY` | Final surface points in MATLAB 1-based `[x, y] = [column, row]` image coordinates. |
-| `surfaceRowByColumn` | Final subpixel surface row for each image column; unavailable columns contain `NaN`. |
-| `rawSurfaceRowByColumn` | Image-supported surface before bounded regularization. |
-| `observedColumnMask` | Columns supported directly by exported segmentation boundary coordinates. |
-| `interpolatedColumnMask` | Columns inferred across accepted short gaps. |
-| `segmentIdByColumn` | Identifier connecting columns that belong to the same retained surface segment. |
-| `confidenceByColumn` | Final confidence after displacement and interpolation adjustments. |
-| `regularizationStatus` | Whether regularization was applied, disabled, not applicable, or required a fallback. |
-| `pixelSpacingXYMm` | Lateral and axial pixel spacing as `[xSpacing, ySpacing]` in millimetres. |
-| `observedLengthMm`, `interpolatedLengthMm` | Physical lengths supported by observations and added by interpolation. |
-| `meanConfidence` | Mean confidence for the extracted observed surface. |
-| `numberOfSegments` | Number of retained surface segments in the frame. |
-| `status` | `extracted`, `noSurface`, or `skippedUnprocessed`. |
+| `sequencePosition` | One-based position copied from the matching Part 1 record. It preserves the image order within the source group. |
+| `sourceIndex` | Identifier copied from the matching Part 1 and ultrasound records. Use it with the group metadata to trace the surface back to the exact source image. |
+| `surfacePixelCoordinatesXY` | Final retained surface points in MATLAB 1-based `[x, y] = [column, row]` image coordinates. Unlike ordinary integer pixel coordinates, the final `y` values may be fractional because regularization can place the curve between pixel centres. |
+| `surfaceRowByColumn` | Final surface depth for every image column, expressed as a possibly subpixel row number. A finite value means that column belongs to an extracted surface; `NaN` means no surface was retained there. |
+| `rawSurfaceRowByColumn` | Surface depth before regularization. Directly observed values come from Part 1 boundary pixels selected by dynamic programming, while accepted gaps are interpolated. Comparing this field with `surfaceRowByColumn` shows how much smoothing changed the curve. |
+| `observedColumnMask` | Logical vector marking columns whose raw surface point is an actual exported Part 1 boundary coordinate. These are the columns with direct segmentation and image support. |
+| `interpolatedColumnMask` | Logical vector marking columns filled across an accepted short gap between observed points. These points maintain continuity but were not directly present in the Part 1 boundary coordinates. |
+| `segmentIdByColumn` | Integer label for each retained column. Columns with the same nonzero label belong to one continuous surface segment; zero means that no surface is present in that column. |
+| `rawConfidenceByColumn` | Confidence before regularization, on a scale from 0 to 1. At observed candidates it combines first-echo position, bright reflection/ridge, and acoustic-shadow evidence; interpolated gaps receive a reduced value based on their endpoints and gap length. Higher values mean stronger image support. |
+| `confidenceByColumn` | Final 0–1 confidence after regularization. Observed-point confidence decreases when the final curve moves away from its raw image-supported location; gap confidence is based on the weaker adjusted endpoint and decreases for longer gaps. `NaN` means no retained surface at that column. |
+| `regularizationDisplacementMmByColumn` | Signed axial distance, in millimetres, from each raw surface point to its final regularized position. The magnitude shows how much the curve moved; the sign shows the row-direction of that movement. |
+| `regularizationBoundHitColumnMask` | Logical vector marking points that reached the configured maximum allowed displacement or an image boundary during regularization. Many `true` values can indicate that the requested smooth curve was strongly constrained by the safety bounds. |
+| `regularizationStatus` | Summary of the smoothing outcome: `applied`, `disabled`, or `notApplicable`, with `partialFallback` or `fallback` indicating that some or all segments kept safer unsmoothed values after refinement could not be completed reliably. |
+| `roughnessBeforePerMm`, `roughnessAfterPerMm` | Root-mean-square curvature before and after regularization, in inverse millimetres. Lower `roughnessAfterPerMm` usually means a smoother curve; straight depth and constant slope do not increase this measure. `NaN` is used when no segment has enough points to measure curvature. |
+| `regularizationRmsDisplacementMm` | Typical regularization movement over the retained surface, calculated as the root mean square of the per-column displacement. It summarizes overall adjustment without preserving movement direction. |
+| `regularizationMaxDisplacementMm` | Largest absolute regularization movement anywhere on the retained surface. Compare it with the configured `maximumDisplacementMm` to see whether smoothing approached its allowed limit. |
+| `pixelSpacingXYMm` | Physical distance between adjacent pixel centres as `[lateral spacing, axial spacing]` in millimetres. It converts image columns and rows into physical distances and makes thresholds independent of image resolution. |
+| `observedLengthMm` | Lateral support length calculated as the number of directly observed columns multiplied by the lateral pixel spacing. It measures how much of the result is backed by Part 1 boundary coordinates, not the curved arc length. |
+| `interpolatedLengthMm` | Lateral length added across accepted gaps, calculated from the number of interpolated columns and lateral pixel spacing. A large value relative to `observedLengthMm` means more of the curve was inferred rather than directly observed. |
+| `meanConfidence` | Arithmetic mean of `confidenceByColumn` over directly observed columns only; interpolated columns are excluded. Each included 0–1 score summarizes first-echo position, bright reflection/ridge, and shadow evidence, then decreases if regularization moves the point away from its raw location. A value near 1 indicates consistently strong image support with little movement, while a value near 0 indicates weak support or substantial adjustment; `NaN` means there are no observed surface points. |
+| `numberOfSegments` | Number of separate continuous surface pieces retained in the image. A value greater than one means the extractor found disconnected pieces rather than one uninterrupted curve. |
+| `status` | `extracted` means at least one surface segment passed the configured checks. `noSurface` means the image was processed but no usable surface remained. `skippedUnprocessed` means its Part 1 record was not processed, so absence of a surface was not inferred. |
 
 `extractionMetadata` records the resolved algorithm settings, coordinate conventions, input provenance, output filename, processing counts, and creation time so the extraction can be reproduced.
 
