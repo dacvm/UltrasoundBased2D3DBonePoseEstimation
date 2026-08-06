@@ -83,9 +83,9 @@ clear surfaceFileData;
 % creating a new field here, because that would make saved results inconsistent.
 for groupIndex = 1:numel(surfaceResults)
     currentSurfaceData = surfaceResults(groupIndex).data;
-    if ~isstruct(currentSurfaceData) || ~isfield(currentSurfaceData, 'surfaceCoordinatesRefXYZ')
-        error('boneSegmentation_recover3Dsurface:MissingSurfaceCoordinatesRefXYZ', ...
-              ['Surface group %d does not contain surfaceCoordinatesRefXYZ.' ...
+    if ~isstruct(currentSurfaceData) || ~isfield(currentSurfaceData, 'surfaceCoordinatesXYZRef')
+        error('boneSegmentation_recover3Dsurface:MissingSurfaceCoordinatesXYZRef', ...
+              ['Surface group %d does not contain surfaceCoordinatesXYZRef.' ...
                'Rerun boneSegmentation_extractSurface.m to create a compatible MAT-file.'], ...
             groupIndex);
     end
@@ -198,21 +198,21 @@ for groupIndex = 1:numberOfSurfaceGroups
             double(currentPlane.W) / (double(currentPlane.nCols) - 1), ...
             double(currentPlane.H) / (double(currentPlane.nRows) - 1)];
 
-        % surfacePixelCoordinatesXY stores one-based [column,row] positions.
+        % surfaceCoordinatesXY stores one-based [column,row] positions.
         % Subtract one to place the first pixel centre at image-frame [0,0].
-        surfacePixelCoordinatesXY  = double(currentSurfaceResult.surfacePixelCoordinatesXY);
-        numberOfSurfacePoints      = size(surfacePixelCoordinatesXY, 1);
+        surfaceCoordinatesXY       = double(currentSurfaceResult.surfaceCoordinatesXY);
+        numberOfSurfacePoints      = size(surfaceCoordinatesXY, 1);
         surfaceCoordinatesImageXYZ = [ ...
-            (surfacePixelCoordinatesXY(:, 1) - 1) * pixelSpacingXYMm(1), ...
-            (surfacePixelCoordinatesXY(:, 2) - 1) * pixelSpacingXYMm(2), ...
+            (surfaceCoordinatesXY(:, 1) - 1) * pixelSpacingXYMm(1), ...
+            (surfaceCoordinatesXY(:, 2) - 1) * pixelSpacingXYMm(2), ...
             zeros(numberOfSurfacePoints, 1)];
 
         % Ultrasound pixels lie on the image plane, so their local Z coordinate
         % is zero. applyRigidTransform applies both the rotation and translation
         % in T_image_ref to produce physical points in the ref frame. Fill the
         % field that was already declared by the surface extraction step.
-        surfaceCoordinatesRefXYZ = applyRigidTransform(surfaceCoordinatesImageXYZ, currentPlane.T_image_ref);
-        surfaceResults(groupIndex).data(recordIndex).surfaceCoordinatesRefXYZ = surfaceCoordinatesRefXYZ;
+        surfaceCoordinatesXYZRef = applyRigidTransform(surfaceCoordinatesImageXYZ, currentPlane.T_image_ref);
+        surfaceResults(groupIndex).data(recordIndex).surfaceCoordinatesXYZRef = surfaceCoordinatesXYZRef;
 
         totalRecoveredPointCount = totalRecoveredPointCount + numberOfSurfacePoints;
         totalSurfaceRecordCount  = totalSurfaceRecordCount + 1;
@@ -281,19 +281,19 @@ for groupIndex = 1:numberOfSurfaceGroups
     for recordIndex = 1:numel(surfaceResults(groupIndex).data)
 
         % Get current data
-        surfaceCoordinatesRefXYZ = surfaceResults(groupIndex).data(recordIndex).surfaceCoordinatesRefXYZ;
+        surfaceCoordinatesXYZRef = surfaceResults(groupIndex).data(recordIndex).surfaceCoordinatesXYZRef;
 
         % Some valid records may contain no detected surface. Their image plane
         % remains visible, but there are no 3D bone points to draw.
-        if isempty(surfaceCoordinatesRefXYZ)
+        if isempty(surfaceCoordinatesXYZRef)
             continue;
         end
 
         % Display the 3d bone surface
         boneSurfaceHandle = scatter3(ax1, ...
-            surfaceCoordinatesRefXYZ(:, 1), ...
-            surfaceCoordinatesRefXYZ(:, 2), ...
-            surfaceCoordinatesRefXYZ(:, 3), ...
+            surfaceCoordinatesXYZRef(:, 1), ...
+            surfaceCoordinatesXYZRef(:, 2), ...
+            surfaceCoordinatesXYZRef(:, 3), ...
             10, surfaceGroupColors(groupIndex, :), 'filled', ...
             'Tag', 'recovered_bone_surface');
 

@@ -190,8 +190,8 @@ surfaceResults(1..G)
 +-- path
 +-- data(1..N)
     +-- sequencePosition, sourceIndex, status
-    +-- surfacePixelCoordinatesXY
-    +-- surfaceCoordinatesRefXYZ
+    +-- surfaceCoordinatesXY
+    +-- surfaceCoordinatesXYZRef
     +-- surfaceRowByColumn, rawSurfaceRowByColumn
     +-- observedColumnMask, interpolatedColumnMask
     +-- segmentIdByColumn
@@ -215,8 +215,8 @@ Important result fields are:
 | --- | --- |
 | `sequencePosition` | One-based position copied from the matching Bone Segmentation (from Part 1) record. It preserves the image order within the source group. |
 | `sourceIndex` | Identifier copied from the matching Bone Segmentation (from Part 1) and ultrasound records. Use it with the group metadata to trace the surface back to the exact source image. |
-| `surfacePixelCoordinatesXY` | Final retained surface points in MATLAB 1-based `[x, y] = [column, row]` image coordinates. Unlike ordinary integer pixel coordinates, the final `y` values may be fractional because regularization can place the curve between pixel centres. |
-| `surfaceCoordinatesRefXYZ` | Reserved for the extracted surface points after they are transformed into 3D coordinates in the common reference frame. Part 2 does not perform that assignment, so this field is intentionally empty (`[]`) in the output produced here. It is included now to keep the `surfaceResults` structure ready for the upcoming processing part. |
+| `surfaceCoordinatesXY` | Final retained surface points in MATLAB 1-based `[x, y] = [column, row]` image coordinates. Unlike ordinary integer pixel coordinates, the final `y` values may be fractional because regularization can place the curve between pixel centres. |
+| `surfaceCoordinatesXYZRef` | Reserved for the extracted surface points after they are transformed into 3D coordinates in the common reference frame. Part 2 does not perform that assignment, so this field is intentionally empty (`[]`) in the output produced here. It is included now to keep the `surfaceResults` structure ready for the upcoming processing part. |
 | `surfaceRowByColumn` | Final surface depth for every image column, expressed as a possibly subpixel row number. A finite value means that column belongs to an extracted surface; `NaN` means no surface was retained there. |
 | `rawSurfaceRowByColumn` | Surface depth before regularization. Directly observed values come from boundary pixels exported by Bone Segmentation (from Part 1) and selected by dynamic programming, while accepted gaps are interpolated. Comparing this field with `surfaceRowByColumn` shows how much smoothing changed the curve. |
 | `observedColumnMask` | Logical vector marking columns whose raw surface point is an actual boundary coordinate exported by Bone Segmentation (from Part 1). These are the columns with direct segmentation and image support. |

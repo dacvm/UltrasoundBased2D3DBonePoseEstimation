@@ -389,11 +389,11 @@ surfaceResults = extractSingleGroupSurfaceData( ...
 
 verifyEqual(testCase, string(surfaceResults(1).status), "noSurface");
 verifyTrue(testCase, all(isnan(surfaceResults(1).surfaceRowByColumn)));
-verifyEmpty(testCase, surfaceResults(1).surfaceCoordinatesRefXYZ);
+verifyEmpty(testCase, surfaceResults(1).surfaceCoordinatesXYZRef);
 verifyEqual(testCase, string(surfaceResults(2).status), "skippedUnprocessed");
 verifyFalse(testCase, any(surfaceResults(2).observedColumnMask));
 verifyFalse(testCase, any(surfaceResults(2).interpolatedColumnMask));
-verifyEmpty(testCase, surfaceResults(2).surfaceCoordinatesRefXYZ);
+verifyEmpty(testCase, surfaceResults(2).surfaceCoordinatesXYZRef);
 end
 
 function testShuffledSourceIndexMatching(testCase)
@@ -1103,7 +1103,7 @@ ultrasoundSequence = makeUltrasoundFrame(81, displayedImage, 0.1, 0.1);
 verifyEqual(testCase, segmentationResults, segmentationResultsBeforeExtraction);
 
 requiredFields = {'sequencePosition', 'sourceIndex', 'status', ...
-    'surfacePixelCoordinatesXY', 'surfaceCoordinatesRefXYZ', ...
+    'surfaceCoordinatesXY', 'surfaceCoordinatesXYZRef', ...
     'surfaceRowByColumn', ...
     'rawSurfaceRowByColumn', 'rawConfidenceByColumn', ...
     'observedColumnMask', 'interpolatedColumnMask', ...
@@ -1119,16 +1119,16 @@ verifyTrue(testCase, all(isfield(surfaceResults, requiredFields)));
 
 % Extraction reserves the field without inventing a coordinate. Recovery will
 % replace this empty value with an N-by-3 array in the reference frame.
-verifyEmpty(testCase, surfaceResults.surfaceCoordinatesRefXYZ);
+verifyEmpty(testCase, surfaceResults.surfaceCoordinatesXYZRef);
 
 % Keep the 2D and 3D coordinate fields next to each other in the public schema
 % so their relationship remains clear when records are inspected or saved.
 resultFieldNames = fieldnames(surfaceResults);
-surfacePixelFieldIndex = find( ...
-    strcmp(resultFieldNames, 'surfacePixelCoordinatesXY'), 1);
+surfaceCoordinateFieldIndex = find( ...
+    strcmp(resultFieldNames, 'surfaceCoordinatesXY'), 1);
 verifyEqual(testCase, ...
-    resultFieldNames{surfacePixelFieldIndex + 1}, ...
-    'surfaceCoordinatesRefXYZ');
+    resultFieldNames{surfaceCoordinateFieldIndex + 1}, ...
+    'surfaceCoordinatesXYZRef');
 removedMaskAuditFields = {'outsideSegmentationColumnMask', ...
     'outsideSegmentationFraction'};
 verifyFalse(testCase, any(isfield(surfaceResults, removedMaskAuditFields)));
@@ -1189,7 +1189,7 @@ verifyEqual(testCase, confidence(observedMask), ...
 
 % The compact coordinate array must be ordered, one point per finite column,
 % and use MATLAB [column,row] pixel coordinates.
-coordinates = surfaceResults.surfacePixelCoordinatesXY;
+coordinates = surfaceResults.surfaceCoordinatesXY;
 finiteColumns = find(isfinite(surfaceRows));
 finiteColumns = finiteColumns(:);
 expectedCoordinateRows = surfaceRows(finiteColumns);

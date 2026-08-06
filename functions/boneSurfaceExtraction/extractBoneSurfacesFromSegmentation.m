@@ -23,7 +23,7 @@ function [surfaceResults, extractionMetadata] = extractBoneSurfacesFromSegmentat
 %                         Every group retains name, bone, path, and data; each
 %                         data record contains the extracted-surface fields,
 %                         confidence, spacing, summary values, and an empty
-%                         surfaceCoordinatesRefXYZ field reserved for later 3D
+%                         surfaceCoordinatesXYZRef field reserved for later 3D
 %                         recovery in the reference coordinate frame.
 %   extractionMetadata : Scalar struct describing the algorithm, coordinate
 %                        convention, creation time, and resolved configuration.
@@ -143,7 +143,7 @@ for groupIndex = 1:numberOfGroups
         currentResult.numberOfSegments = frameSurface.numberOfSegments;
 
         validColumns = find(isfinite(frameSurface.surfaceRowByColumn));
-        currentResult.surfacePixelCoordinatesXY = [ ...
+        currentResult.surfaceCoordinatesXY = [ ...
             double(validColumns(:)), ...
             frameSurface.surfaceRowByColumn(validColumns).'];
 

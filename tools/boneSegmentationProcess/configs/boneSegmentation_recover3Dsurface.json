@@ -1,7 +1,7 @@
 {
   "input": {
     "boneSurfaceFilePath": "../outputs",
-    "boneSurfaceFileName": "boneSurface_20260806_011723.mat",
+    "boneSurfaceFileName": "boneSurface_20260806_124904.mat",
     "ultrasoundImageFilePath": "../../ultrasoundSpatialProcessing/outputs",
     "ultrasoundImageFileName": "validSnapshots_20260804_152821.mat"
   },
