@@ -6,6 +6,8 @@ tools/ultrasoundSpatialProcessing/outputs/*
 tools/ultrasoundSpatialProcessing/configs/*
 tools/boneSegmentationProcess/outputs/*
 tools/boneSegmentationProcess/configs/*
+tools/bonePreRegistration/outputs/*
+tools/bonePreRegistration/configs/*
 functions/fcal_related/split_sequence_image_frames_demo/*
 AGENTS.md
 *.asv

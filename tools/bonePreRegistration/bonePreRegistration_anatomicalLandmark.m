@@ -20,6 +20,8 @@ kneeSide = "left";
 % origin. The mesh and ACS coordinates in this dataset are in millimetres.
 tibiaDistalOffset_mm = 10;
 
+
+
 %% LOAD AND VALIDATE THE BONE DATA
 
 % Locate the project from this script instead of depending on MATLAB's
@@ -49,17 +51,17 @@ if ~isfield(loadedCtData, 'bones')
         ctmatFullPath);
 end
 bones = loadedCtData.bones;
-if ~isstruct(bones) || numel(bones) < 2
+if ~isstruct(bones) || numel(bones) ~= 2
     error('bonePreRegistration:InvalidBonesVariable', ...
-        'Variable bones must contain at least the femur and tibia records.');
+        'Variable bones must contain exactly the femur and tibia records.');
 end
 
-% The saved CT interface defines element 1 as femur and element 2 as tibia.
-% Validate this contract before using those fixed indices.
-femurBone = bones(1);
-tibiaBone = bones(2);
-validateBoneRecord(femurBone, 'Femur', 1);
-validateBoneRecord(tibiaBone, 'Tibia', 2);
+% Select each bone by its saved anatomical code because femur and tibia can
+% appear in either array order in different CT MAT files.
+[femurBone, femurBoneIndex] = selectBoneRecordByCode( bones, "F", 'Femur');
+[tibiaBone, tibiaBoneIndex] = selectBoneRecordByCode( bones, "T", 'Tibia');
+validateBoneRecord(femurBone, 'Femur', femurBoneIndex);
+validateBoneRecord(tibiaBone, 'Tibia', tibiaBoneIndex);
 
 % Normalize and validate the side setting once so every later label uses
 % exactly the same left/right interpretation.
@@ -79,6 +81,8 @@ if ~isnumeric(tibiaDistalOffset_mm) || ...
         'tibiaDistalOffset_mm must be one finite, nonnegative number.');
 end
 
+
+
 %% FIND THE FEMORAL LANDMARKS
 
 % Read the femoral ACS origin and mediolateral direction from the saved
@@ -97,6 +101,8 @@ vector_femurZ_CT         = normalizeVector(T_femurBone_CT(1:3, 3).', 'femoral z-
     distance_femurNegativeZ_mm, distance_femurPositiveZ_mm] = ...
     selectOuterLineIntersections(points_femurIntersections_CT, ...
     distances_femurIntersections_mm, 'femur');
+
+
 
 %% FIND THE TIBIAL LANDMARKS
 
@@ -118,6 +124,8 @@ point_tibiaLineOrigin_CT = point_tibiaAcsOrigin_CT - tibiaDistalOffset_mm * vect
     selectOuterLineIntersections(points_tibiaIntersections_CT, ...
     distances_tibiaIntersections_mm, 'tibia');
 
+
+
 %% MAP THE SIGNED POINTS TO ANATOMICAL SIDES
 
 % Use the selected knee side to give stable anatomical names while keeping
@@ -137,37 +145,82 @@ switch kneeSide
         point_tibiaLateral_CT = point_tibiaPositiveZ_CT;
 end
 
+
+
 %% COLLECT AND REPORT THE LANDMARK RESULTS
 
-% Keep the final public result self-describing. Each points_CT array uses
-% the fixed row order [medial; lateral] for straightforward downstream use.
-landmarks.kneeSide              = kneeSide;
-landmarks.units                 = "mm";
-landmarks.positiveZSide         = positiveZSide;
-landmarks.tibiaDistalOffset_mm  = tibiaDistalOffset_mm;
-landmarks.femur.medial_CT       = point_femurMedial_CT;
-landmarks.femur.lateral_CT      = point_femurLateral_CT;
-landmarks.femur.points_CT       = [point_femurMedial_CT; point_femurLateral_CT];
-landmarks.tibia.medial_CT       = point_tibiaMedial_CT;
-landmarks.tibia.lateral_CT      = point_tibiaLateral_CT;
-landmarks.tibia.points_CT       = [point_tibiaMedial_CT; point_tibiaLateral_CT];
+% Match the 1-by-2 bones interface so the same index always identifies the
+% same anatomy in bones, landmarks, and intersectionDiagnostics.
+landmarkTemplate = struct( ...
+    'name', '', ...
+    'bone', '', ...
+    'T_bone_CT', eye(4), ...
+    'coordinateFrame', "CT", ...
+    'units', "mm", ...
+    'kneeSide', kneeSide, ...
+    'positiveZSide', positiveZSide, ...
+    'distalOffset_mm', 0, ...
+    'medial', zeros(1, 3), ...
+    'lateral', zeros(1, 3), ...
+    'points', zeros(2, 3));
+landmarks = repmat(landmarkTemplate, size(bones));
 
-% Retain the line definitions and all unique crossings so unexpected mesh
-% topology can be diagnosed without rerunning the calculations by hand.
-intersectionDiagnostics.femur.lineOrigin_CT         = point_femurLineOrigin_CT;
-intersectionDiagnostics.femur.lineDirection_CT      = vector_femurZ_CT;
-intersectionDiagnostics.femur.points_CT             = points_femurIntersections_CT;
-intersectionDiagnostics.femur.signedDistances_mm    = distances_femurIntersections_mm;
-intersectionDiagnostics.tibia.lineOrigin_CT         = point_tibiaLineOrigin_CT;
-intersectionDiagnostics.tibia.lineDirection_CT      = vector_tibiaZ_CT;
-intersectionDiagnostics.tibia.points_CT             = points_tibiaIntersections_CT;
-intersectionDiagnostics.tibia.signedDistances_mm    = distances_tibiaIntersections_mm;
+% Copy only the identity and coordinate context from bones. The source mesh
+% and path stay in bones and remain reachable through the aligned index.
+for boneIndex = 1:numel(bones)
+    landmarks(boneIndex).name = bones(boneIndex).name;
+    landmarks(boneIndex).bone = bones(boneIndex).bone;
+end
+
+% Store each pair in the fixed row order [medial; lateral]. A zero femoral
+% offset records that its line passes through the original ACS origin.
+landmarks(1).distalOffset_mm = 0;
+landmarks(1).medial          = point_femurMedial_CT;
+landmarks(1).lateral         = point_femurLateral_CT;
+landmarks(1).points          = [point_femurMedial_CT; point_femurLateral_CT];
+landmarks(2).distalOffset_mm = tibiaDistalOffset_mm;
+landmarks(2).medial          = point_tibiaMedial_CT;
+landmarks(2).lateral         = point_tibiaLateral_CT;
+landmarks(2).points          = [point_tibiaMedial_CT; point_tibiaLateral_CT];
+
+% Build a matching diagnostics array without duplicating either bone mesh.
+% These fields retain every unique crossing for later topology inspection.
+diagnosticTemplate = struct( ...
+    'name', '', ...
+    'bone', '', ...
+    'T_bone_CT', eye(4), ...
+    'coordinateFrame', "CT", ...
+    'units', "mm", ...
+    'distalOffset_mm', 0, ...
+    'lineOrigin', zeros(1, 3), ...
+    'lineDirection', zeros(1, 3), ...
+    'points', zeros(0, 3), ...
+    'signedDistances_mm', zeros(0, 1));
+intersectionDiagnostics = repmat(diagnosticTemplate, size(bones));
+
+% Copy the shared bone identity so diagnostics(i) always describes bones(i).
+for boneIndex = 1:numel(bones)
+    intersectionDiagnostics(boneIndex).name = bones(boneIndex).name;
+    intersectionDiagnostics(boneIndex).bone = bones(boneIndex).bone;
+end
+
+% Record the femoral and tibial line calculations in their matching slots.
+intersectionDiagnostics(1).distalOffset_mm    = 0;
+intersectionDiagnostics(1).lineOrigin         = point_femurLineOrigin_CT;
+intersectionDiagnostics(1).lineDirection      = vector_femurZ_CT;
+intersectionDiagnostics(1).points             = points_femurIntersections_CT;
+intersectionDiagnostics(1).signedDistances_mm = distances_femurIntersections_mm;
+intersectionDiagnostics(2).distalOffset_mm    = tibiaDistalOffset_mm;
+intersectionDiagnostics(2).lineOrigin         = point_tibiaLineOrigin_CT;
+intersectionDiagnostics(2).lineDirection      = vector_tibiaZ_CT;
+intersectionDiagnostics(2).points             = points_tibiaIntersections_CT;
+intersectionDiagnostics(2).signedDistances_mm = distances_tibiaIntersections_mm;
 
 % Display one compact table so the four requested coordinates can be read
 % or copied directly from the MATLAB command window.
 boneName                = ["Femur"; "Femur"; "Tibia"; "Tibia"];
 anatomicalSide          = ["Medial"; "Lateral"; "Medial"; "Lateral"];
-landmarkCoordinates_CT  = [landmarks.femur.points_CT; landmarks.tibia.points_CT];
+landmarkCoordinates_CT  = vertcat(landmarks.points);
 landmarkTable = table(boneName, anatomicalSide, ...
     landmarkCoordinates_CT(:, 1), ...
     landmarkCoordinates_CT(:, 2), ...
@@ -244,16 +297,16 @@ plot3(axes_landmarks, ...
 % Match the requested visual convention: blue dots for the femur and red
 % dots for the tibia, both with dark outlines for contrast on the meshes.
 scatter_femur = scatter3(axes_landmarks, ...
-    landmarks.femur.points_CT(:, 1), ...
-    landmarks.femur.points_CT(:, 2), ...
-    landmarks.femur.points_CT(:, 3), ...
+    landmarks(1).points(:, 1), ...
+    landmarks(1).points(:, 2), ...
+    landmarks(1).points(:, 3), ...
     130, [0.00, 0.45, 0.85], 'filled', ...
     'MarkerEdgeColor', 'k', 'LineWidth', 1.2, ...
     'DisplayName', 'Femur landmarks');
 scatter_tibia = scatter3(axes_landmarks, ...
-    landmarks.tibia.points_CT(:, 1), ...
-    landmarks.tibia.points_CT(:, 2), ...
-    landmarks.tibia.points_CT(:, 3), ...
+    landmarks(2).points(:, 1), ...
+    landmarks(2).points(:, 2), ...
+    landmarks(2).points(:, 3), ...
     130, [1.00, 0.10, 0.10], 'filled', ...
     'MarkerEdgeColor', 'k', 'LineWidth', 1.2, ...
     'DisplayName', 'Tibia landmarks');
@@ -344,9 +397,119 @@ legend(axes_landmarks, [patch_femur, patch_tibia, scatter_femur, scatter_tibia],
 camlight(axes_landmarks, 'headlight');
 lighting(axes_landmarks, 'gouraud');
 
+%% SAVE THE OUTPUT
+
+% Keep generated results beside this tool so they do not depend on the
+% current MATLAB folder and remain separate from the source CT inputs.
+outputDirectory = fullfile(scriptDirectory, 'outputs');
+if ~isfolder(outputDirectory)
+    [wasOutputDirectoryCreated, mkdirMessage] = mkdir(outputDirectory);
+    if ~wasOutputDirectoryCreated
+        error('bonePreRegistration:OutputDirectoryCreationFailed', 'Could not create output directory %s: %s', outputDirectory, mkdirMessage);
+    end
+end
+
+% Capture the time once so the MAT, FIG, and PNG always share one base name.
+% Uppercase HH uses a 24-hour clock and avoids AM/PM ambiguity.
+outputTimestamp = char(datetime('now', 'Format', 'yyyyMMdd_HHmmss'));
+outputBaseName = ['boneLandmarks_', outputTimestamp];
+outputMatPath = fullfile(outputDirectory, [outputBaseName, '.mat']);
+outputFigPath = fullfile(outputDirectory, [outputBaseName, '.fig']);
+outputPngPath = fullfile(outputDirectory, [outputBaseName, '.png']);
+
+% Refuse a same-second collision rather than silently replacing an earlier
+% landmark result or creating artifacts with mismatched contents.
+if any(isfile({outputMatPath, outputFigPath, outputPngPath}))
+    error('bonePreRegistration:OutputFileAlreadyExists', ...
+        'An output file already exists for timestamp %s.', outputTimestamp);
+end
+
+% Ensure the exact verification figure is still available before starting
+% the three-file export sequence.
+if ~isgraphics(figure_landmarks, 'figure')
+    error('bonePreRegistration:VerificationFigureUnavailable', ...
+        'The landmark verification figure is not available for saving.');
+end
+
+% Save only the two requested public data structures. Version 7.3 remains
+% usable if future diagnostic arrays become much larger.
+save(outputMatPath, 'landmarks', 'intersectionDiagnostics', '-v7.3');
+
+% Finish pending drawing before storing both the editable MATLAB figure and
+% a high-resolution image of the same visual state.
+drawnow;
+savefig(figure_landmarks, outputFigPath);
+exportgraphics(figure_landmarks, outputPngPath, 'Resolution', 300);
+
+% Verify and report every artifact so missing output is caught immediately
+% and the user can find the completed run from the command window.
+if ~all(isfile({outputMatPath, outputFigPath, outputPngPath}))
+    error('bonePreRegistration:OutputSaveIncomplete', ...
+        'One or more landmark output files were not created successfully.');
+end
+fprintf('Saved bone landmark outputs:\n');
+fprintf('  MAT: %s\n', outputMatPath);
+fprintf('  FIG: %s\n', outputFigPath);
+fprintf('  PNG: %s\n', outputPngPath);
+
+
+
 %% LOCAL VALIDATION AND GEOMETRY HELPERS
 
-function validateBoneRecord(boneRecord, expectedName, expectedIndex)
+function [boneRecord, boneIndex] = selectBoneRecordByCode( ...
+        bones, requestedCode, boneLabel)
+%SELECTBONERECORDBYCODE Find one anatomical bone without assuming its index.
+%   Different MAT files can save femur and tibia in different array orders.
+%   This helper uses the bones(...).bone indicator so the correct mesh and
+%   transform are selected regardless of that order.
+%
+%   Inputs:
+%       bones         - Struct array containing the saved bone records.
+%       requestedCode - One-character indicator, such as "F" or "T".
+%       boneLabel     - Human-readable anatomical name for error messages.
+%
+%   Outputs:
+%       boneRecord - The single record matching requestedCode.
+%       boneIndex  - Its one-based index in the original bones array.
+
+% Require the indicator before reading individual records so a legacy MAT
+% file fails with a direct explanation.
+if ~isfield(bones, 'bone')
+    error('bonePreRegistration:MissingBoneCodeField', ...
+        'Every record in bones must contain the field bone.');
+end
+
+% Normalize each saved indicator independently because MAT files may store
+% the values as either character vectors or string scalars.
+boneCodes = strings(size(bones));
+for currentIndex = 1:numel(bones)
+    currentCode = convertCharsToStrings(bones(currentIndex).bone);
+    if ~isscalar(currentCode) || ismissing(currentCode) || ...
+            strlength(strtrim(currentCode)) == 0
+        error('bonePreRegistration:InvalidBoneCode', ...
+            'bones(%d).bone must contain one valid bone indicator.', ...
+            currentIndex);
+    end
+    boneCodes(currentIndex) = upper(strtrim(currentCode));
+end
+
+% Exactly one match is required because no safe automatic choice exists
+% when a requested bone is absent or duplicated.
+requestedCode = upper(strtrim(convertCharsToStrings(requestedCode)));
+matchingIndices = find(boneCodes == requestedCode);
+if numel(matchingIndices) ~= 1
+    error('bonePreRegistration:BoneCodeNotUnique', ...
+        ['Expected exactly one %s record with bones(...).bone == "%s", ', ...
+         'but found %d.'], boneLabel, requestedCode, numel(matchingIndices));
+end
+
+% Return both the selected record and its source index for later validation
+% messages and workspace diagnostics.
+boneIndex = matchingIndices(1);
+boneRecord = bones(boneIndex);
+end
+
+function validateBoneRecord(boneRecord, expectedName, boneIndex)
 %VALIDATEBONERECORD Check one saved bone record before landmark extraction.
 %   This function verifies the mesh and anatomical transform because an
 %   invalid record would otherwise produce misleading surface landmarks.
@@ -354,7 +517,7 @@ function validateBoneRecord(boneRecord, expectedName, expectedIndex)
 %   Inputs:
 %       boneRecord   - Scalar struct containing name, mesh, and T_bone_CT.
 %       expectedName - Expected anatomical name, such as 'Femur'.
-%       expectedIndex - Expected one-based position inside the bones array.
+%       boneIndex    - Selected one-based position inside the bones array.
 %
 %   Outputs:
 %       None. The function throws a descriptive error when validation fails.
@@ -363,16 +526,17 @@ function validateBoneRecord(boneRecord, expectedName, expectedIndex)
 if ~isstruct(boneRecord) || ~isscalar(boneRecord) || ...
         ~all(isfield(boneRecord, {'name', 'mesh', 'T_bone_CT'}))
     error('bonePreRegistration:InvalidBoneRecord', ...
-        'bones(%d) must contain name, mesh, and T_bone_CT.', expectedIndex);
+        'bones(%d) must contain name, mesh, and T_bone_CT.', boneIndex);
 end
 
-% Stop if the fixed femur/tibia array order does not match the saved names.
+% Confirm that the selected code and descriptive name refer to the same
+% anatomy rather than silently accepting inconsistent saved metadata.
 recordName = convertCharsToStrings(boneRecord.name);
 if ~isscalar(recordName) || ismissing(recordName) || ...
         ~strcmpi(strtrim(recordName), expectedName)
-    error('bonePreRegistration:UnexpectedBoneOrder', ...
+    error('bonePreRegistration:UnexpectedBoneName', ...
         'Expected bones(%d) to be %s, but found "%s".', ...
-        expectedIndex, expectedName, recordName);
+        boneIndex, expectedName, recordName);
 end
 
 % A triangulation supplies the triangle connectivity required by the exact
