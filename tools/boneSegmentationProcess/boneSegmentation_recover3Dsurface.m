@@ -7,29 +7,26 @@ clear; clc; close all;
 scriptFullPath = mfilename('fullpath');
 if isempty(scriptFullPath)
     error('boneSegmentation_recover3Dsurface:ScriptPathUnavailable', ...
-        ['Run boneSegmentation_recover3Dsurface.m as a complete script ' ...
-         'so its configuration file can be located.']);
+          'Run boneSegmentation_recover3Dsurface.m as a complete script so its configuration file can be located.');
 end
 scriptDirectory = fileparts(scriptFullPath);
 
 % Keep dataset-specific paths and filenames in JSON. A new processing run
 % can then be selected without changing this MATLAB script.
-configurationFilePath = fullfile( ...
-    scriptDirectory, 'configs', 'boneSegmentation_recover3Dsurface.json');
+configurationFilePath = fullfile(scriptDirectory, 'configs', 'boneSegmentation_recover3Dsurface.json');
 configuration = readBoneSurfaceRecoveryConfiguration(configurationFilePath);
 
 % Use short workflow names below while keeping the requested JSON field names
-% in the validated configuration structure.
-filepath_boneSurface = configuration.input.boneSurfaceFilePath;
-filename_boneSurface = configuration.input.boneSurfaceFileName;
-fullpath_boneSurface = fullfile(filepath_boneSurface, filename_boneSurface);
-
+% in the validated configuration structure. Grab the bone surface path:
+filepath_boneSurface     = configuration.input.boneSurfaceFilePath;
+filename_boneSurface     = configuration.input.boneSurfaceFileName;
+fullpath_boneSurface     = fullfile(filepath_boneSurface, filename_boneSurface);
+% Grab the ultrasound image path
 filepath_ultrasoundimage = configuration.input.ultrasoundImageFilePath;
 filename_ultrasoundimage = configuration.input.ultrasoundImageFileName;
-fullfile_ultrasoundimage = fullfile( ...
-    filepath_ultrasoundimage, filename_ultrasoundimage);
-
-boneSurface3DOutputPath = configuration.output.boneSurface3DOutputPath;
+fullfile_ultrasoundimage = fullfile(filepath_ultrasoundimage, filename_ultrasoundimage);
+% Grab the output path
+boneSurface3DOutputPath  = configuration.output.boneSurface3DOutputPath;
 
 %% PREPARE THE REQUIRED FUNCTION PATHS
 
@@ -56,17 +53,16 @@ if ~isfile(fullpath_boneSurface)
     error('boneSegmentation_recover3Dsurface:MissingSurfaceFile', ...
         'Bone-surface file not found: %s', fullpath_boneSurface);
 end
-surfaceFileData = load( ...
-    fullpath_boneSurface, 'surfaceResults', 'extractionMetadata');
+surfaceFileData = load(fullpath_boneSurface, 'surfaceResults', 'extractionMetadata');
 if ~isfield(surfaceFileData, 'surfaceResults')
     error('boneSegmentation_recover3Dsurface:MissingSurfaceResults', ...
-        'The selected MAT-file does not contain surfaceResults.');
+          'The selected MAT-file does not contain surfaceResults.');
 end
 if ~isfield(surfaceFileData, 'extractionMetadata')
     error('boneSegmentation_recover3Dsurface:MissingExtractionMetadata', ...
-        'The selected MAT-file does not contain extractionMetadata.');
+          'The selected MAT-file does not contain extractionMetadata.');
 end
-surfaceResults = surfaceFileData.surfaceResults;
+surfaceResults     = surfaceFileData.surfaceResults;
 extractionMetadata = surfaceFileData.extractionMetadata;
 clear surfaceFileData;
 
@@ -75,11 +71,10 @@ clear surfaceFileData;
 % creating a new field here, because that would make saved results inconsistent.
 for groupIndex = 1:numel(surfaceResults)
     currentSurfaceData = surfaceResults(groupIndex).data;
-    if ~isstruct(currentSurfaceData) || ...
-            ~isfield(currentSurfaceData, 'surfaceCoordinatesRefXYZ')
+    if ~isstruct(currentSurfaceData) || ~isfield(currentSurfaceData, 'surfaceCoordinatesRefXYZ')
         error('boneSegmentation_recover3Dsurface:MissingSurfaceCoordinatesRefXYZ', ...
-            ['Surface group %d does not contain surfaceCoordinatesRefXYZ. ' ...
-             'Rerun boneSegmentation_extractSurface.m to create a compatible MAT-file.'], ...
+              ['Surface group %d does not contain surfaceCoordinatesRefXYZ.' ...
+               'Rerun boneSegmentation_extractSurface.m to create a compatible MAT-file.'], ...
             groupIndex);
     end
 end
@@ -183,7 +178,7 @@ for groupIndex = 1:numberOfSurfaceGroups
         % supplies the pixels, while currentPlane supplies physical size and
         % the image-to-reference transformation.
         currentSurfaceResult = surfaceResults(groupIndex).data(recordIndex);
-        currentPlane = ultrasoundSequence(groupIndex).data(recordIndex).plane;
+        currentPlane         = ultrasoundSequence(groupIndex).data(recordIndex).plane;
 
         % W and H span the first-to-last pixel centres, so divide each extent
         % by one fewer than the corresponding number of pixels.
