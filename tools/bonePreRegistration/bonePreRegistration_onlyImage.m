@@ -12,7 +12,7 @@ filepath_ctmat = 'D:\Documents\BELANDA\SonoSkin\codes\matlab\bmodeimage_3dspace\
 filename_ctmat = 'kneephantom_bones_and_bonepins.mat';
 
 filepath_bonelandmarks = 'D:\Documents\BELANDA\SonoSkin\codes\matlab\bmodeimage_3dspace\tools\bonePreRegistration\outputs\';
-filename_bonelandmarks = 'boneLandmarks_20260806_171906.mat';
+filename_bonelandmarks = 'boneLandmarks_20260810_174351.mat';
 
 %% REQUIRED PATH
 
@@ -155,7 +155,6 @@ landmarks = loadedBoneLandmarks.landmarks;
 clear loadedBoneLandmarks;
 
 
-
 %% SHOW THE DETECTED BONE SURFACE IN 3D SPACE
 
 % The script uses this direct relationship:
@@ -271,57 +270,6 @@ axis(ax1, 'tight');
 axis(ax1, 'equal');
 drawnow;
 
-%% CALCULATE BONE SURFACE CENTROID
+%% PRE-REGISTRATION STEP
 
-% Keep one [X, Y, Z] centroid row for each surface group. NaN values make
-% groups without any detected surface points easy to identify downstream.
-surfaceCentroidsXYZRef = nan(numberOfSurfaceGroups, 3);
 
-for groupIndex = 1:numberOfSurfaceGroups
-    % Collect each curve from this group in a cell first. Combining the curves
-    % makes every detected 3D point contribute equally to the group centroid.
-    numberOfRecords = numel(surfaceResults(groupIndex).data);
-    groupCoordinateSets = cell(numberOfRecords, 1);
-
-    for recordIndex = 1:numberOfRecords
-        currentCoordinatesXYZRef = ...
-            surfaceResults(groupIndex).data(recordIndex).surfaceCoordinatesXYZRef;
-
-        % Empty records contain no points, so they must not affect the mean.
-        if ~isempty(currentCoordinatesXYZRef)
-            groupCoordinateSets{recordIndex} = currentCoordinatesXYZRef;
-        end
-    end
-
-    % Stack all curve points into one N-by-3 array for this surface group.
-    groupCoordinatesXYZRef = vertcat(groupCoordinateSets{:});
-
-    % Leave the initialized NaN row unchanged when the entire group is empty,
-    % because an empty point collection has no centroid to calculate or draw.
-    if isempty(groupCoordinatesXYZRef)
-        continue;
-    end
-
-    % Average every 3D point in this group and store the resulting centroid.
-    currentCentroidXYZRef = mean(groupCoordinatesXYZRef, 1);
-    surfaceCentroidsXYZRef(groupIndex, :) = currentCentroidXYZRef;
-
-    % Draw the centroid as a large diamond in the same color as its group.
-    % The black edge separates the centroid from nearby surface points.
-    centroidHandle = scatter3(ax1, ...
-        currentCentroidXYZRef(1), ...
-        currentCentroidXYZRef(2), ...
-        currentCentroidXYZRef(3), ...
-        100, surfaceGroupColors(groupIndex, :), 'd', 'filled', ...
-        'MarkerEdgeColor', 'k', ...
-        'LineWidth', 1.5, ...
-        'Tag', 'bone_surface_centroid');
-
-    % Keep the existing legend limited to one surface entry per group.
-    centroidHandle.HandleVisibility = 'off';
-end
-
-% Refit the view after adding the centroid markers to the shared axes.
-axis(ax1, 'tight');
-axis(ax1, 'equal');
-drawnow;
