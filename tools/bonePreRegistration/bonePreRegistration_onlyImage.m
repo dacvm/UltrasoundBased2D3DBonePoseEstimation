@@ -272,4 +272,126 @@ drawnow;
 
 %% PRE-REGISTRATION STEP
 
+%% FLATTEN AND GROUP THE REGIONAL BONE-SURFACE POINTS
 
+% Keep the same region names as landmarks. This allows later code to access a
+% surface and its landmark with the same field name.
+regionNames = ["medial", "lateral", "shaft"];
+
+% Make one output entry for each bone in landmarks. Empty regions start as
+% 0-by-3 matrices, so bones without surface measurements remain valid entries.
+regionalSurfacePoints = repmat(struct( ...
+    'name', "", ...
+    'bone', "", ...
+    'coordinateFrame', "ref", ...
+    'medial', zeros(0, 3), ...
+    'lateral', zeros(0, 3), ...
+    'shaft', zeros(0, 3)), size(landmarks));
+
+for boneIndex = 1:numel(landmarks)
+    regionalSurfacePoints(boneIndex).name = string(landmarks(boneIndex).name);
+    regionalSurfacePoints(boneIndex).bone = upper(string(landmarks(boneIndex).bone));
+end
+
+% Each surfaceResults entry already represents one anatomical region. Combine
+% all image records from that entry into the matching output region.
+for groupIndex = 1:numel(surfaceResults)
+    groupName = lower(string(surfaceResults(groupIndex).name));
+    boneCode = upper(string(surfaceResults(groupIndex).bone));
+
+    % Read the region from names such as tibia_medial. The existing name
+    % femur_mid refers to the femur shaft, so both names use the shaft field.
+    nameParts = split(groupName, "_");
+    regionName = nameParts(end);
+    if regionName == "mid"
+        regionName = "shaft";
+    end
+
+    if ~any(regionName == regionNames)
+        error('bonePreRegistration_onlyImage:UnknownSurfaceRegion', ...
+              'Cannot identify the region for surface group "%s".', groupName);
+    end
+
+    % There must be exactly one landmark entry for the group's bone code.
+    outputBoneIndex = find([regionalSurfacePoints.bone] == boneCode);
+    if numel(outputBoneIndex) ~= 1
+        error('bonePreRegistration_onlyImage:UnmatchedSurfaceBone', ...
+              'Expected one landmarks entry for bone code "%s", but found %d.', ...
+              boneCode, numel(outputBoneIndex));
+    end
+
+    % Append each nonempty image-level surface to the regional collection.
+    for recordIndex = 1:numel(surfaceResults(groupIndex).data)
+        points = surfaceResults(groupIndex).data(recordIndex).surfaceCoordinatesXYZRef;
+        if isempty(points)
+            continue;
+        end
+
+        % Registration expects one XYZ row per point. Stop early when an input
+        % cannot safely be used as a 3D point collection.
+        if ~isnumeric(points) || ~isreal(points) || ~ismatrix(points) || size(points, 2) ~= 3 || any(~isfinite(points(:)))
+            error('bonePreRegistration_onlyImage:InvalidSurfacePoints', ...
+                  'The surface points in group %d, record %d must be a finite numeric N-by-3 matrix.', ...
+                  groupIndex, recordIndex);
+        end
+
+        regionField = char(regionName);
+        regionalSurfacePoints(outputBoneIndex).(regionField) = [ regionalSurfacePoints(outputBoneIndex).(regionField); double(points)];
+    end
+end
+
+%% BUILD REGIONAL CORRESPONDENCE CANDIDATES
+
+% Store one correspondence set per bone. The two point matrices will always
+% have the same number of rows, which is required by estgeotform3d.
+boneCorrespondences = repmat(struct( ...
+    'name', "", ...
+    'bone', "", ...
+    'landmarkPointsCT', zeros(0, 3), ...
+    'surfacePointsRef', zeros(0, 3), ...
+    'regionLabels', strings(0, 1)), size(landmarks));
+
+for boneIndex = 1:numel(landmarks)
+    boneCorrespondences(boneIndex).name = regionalSurfacePoints(boneIndex).name;
+    boneCorrespondences(boneIndex).bone = regionalSurfacePoints(boneIndex).bone;
+
+    % Process the regions in a fixed order so the final rows are easy to
+    % inspect: medial first, followed by lateral and shaft.
+    for regionIndex = 1:numel(regionNames)
+        regionName = regionNames(regionIndex);
+        regionField = char(regionName);
+        surfacePoints = regionalSurfacePoints(boneIndex).(regionField);
+
+        % A missing regional measurement is valid. It contributes no rows to
+        % this bone's correspondence matrices.
+        if isempty(surfacePoints)
+            continue;
+        end
+
+        landmarkPoint = landmarks(boneIndex).(regionField);
+
+        % One regional landmark must be one finite XYZ point. A clear error
+        % here is easier to diagnose than a later estgeotform3d failure.
+        if ~isnumeric(landmarkPoint) || ~isreal(landmarkPoint) || ~isequal(size(landmarkPoint), [1, 3]) || any(~isfinite(landmarkPoint))
+            error('bonePreRegistration_onlyImage:InvalidLandmarkPoint', ...
+                  'landmarks(%d).%s must be a finite numeric 1-by-3 point.', ...
+                  boneIndex, regionField);
+        end
+
+        numberOfSurfacePoints = size(surfacePoints, 1);
+
+        % Repeat the regional landmark once for every surface point. Row k in
+        % landmarkPointsCT then corresponds to row k in surfacePointsRef.
+        repeatedLandmarkPoints = repmat( double(landmarkPoint), numberOfSurfacePoints, 1);
+        repeatedRegionLabels = repmat( regionName, numberOfSurfacePoints, 1);
+
+        boneCorrespondences(boneIndex).landmarkPointsCT = [ boneCorrespondences(boneIndex).landmarkPointsCT; repeatedLandmarkPoints];
+        boneCorrespondences(boneIndex).surfacePointsRef = [ boneCorrespondences(boneIndex).surfacePointsRef; surfacePoints];
+        boneCorrespondences(boneIndex).regionLabels     = [ boneCorrespondences(boneIndex).regionLabels; repeatedRegionLabels];
+
+        
+    end
+end
+
+
+%%
