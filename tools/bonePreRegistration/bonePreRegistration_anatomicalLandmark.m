@@ -4,9 +4,7 @@ close all;
 
 %% PATH DEFINITION
 
-% Keep the CT result path relative to the project so the script works when
-% the complete project folder is moved to another computer.
-filepath_ctmat = fullfile('tools', 'ctkneePostProcess', 'outputs', 'kneephantom');
+filepath_ctmat = 'D:\Documents\BELANDA\SonoSkin\codes\matlab\bmodeimage_3dspace\tools\ctkneePostProcess\outputs\kneephantom';
 filename_ctmat = 'kneephantom_bones_and_bonepins.mat';
 
 %% USER SETTINGS
@@ -19,6 +17,10 @@ kneeSide = "left";
 % Move the tibial landmark line this far distally from the tibial ACS
 % origin. The mesh and ACS coordinates in this dataset are in millimetres.
 tibiaDistalOffset_mm = 10;
+
+% Rotate both tibial landmark rays toward the local positive x-axis, which
+% is the anterior direction in the ERC anatomical coordinate system.
+tibiaAnteriorAngleOffset = 30;
 
 
 
@@ -35,11 +37,20 @@ scriptDirectory  = fileparts(scriptFullPath);
 toolsDirectory   = fileparts(scriptDirectory);
 projectDirectory = fileparts(toolsDirectory);
 
-% Build and check the exact MAT-file path before attempting to load it.
-ctmatFullPath = fullfile(projectDirectory, filepath_ctmat, filename_ctmat);
-if ~isfile(ctmatFullPath)
+% Accept either an absolute folder selected by the user or the original
+% project-relative folder. Trying the configured folder first avoids adding
+% the project path in front of an already absolute Windows path.
+configuredCtmatFullPath = fullfile(filepath_ctmat, filename_ctmat);
+projectCtmatFullPath = fullfile(projectDirectory, filepath_ctmat, filename_ctmat);
+if isfile(configuredCtmatFullPath)
+    ctmatFullPath = configuredCtmatFullPath;
+elseif isfile(projectCtmatFullPath)
+    ctmatFullPath = projectCtmatFullPath;
+else
     error('bonePreRegistration:MissingCtMatFile', ...
-        'The configured CT MAT file does not exist: %s', ctmatFullPath);
+        ['The configured CT MAT file does not exist at either resolved ', ...
+         'location:\n  %s\n  %s'], configuredCtmatFullPath, ...
+        projectCtmatFullPath);
 end
 
 % Load only the variable needed by this workflow so unrelated saved values
@@ -81,6 +92,19 @@ if ~isnumeric(tibiaDistalOffset_mm) || ...
         'tibiaDistalOffset_mm must be one finite, nonnegative number.');
 end
 
+% Keep the offset below 90 degrees so each ray remains on its intended
+% negative-z or positive-z side. Allow zero to reproduce the old z-axis
+% landmark definition when a user needs that behavior.
+if ~isnumeric(tibiaAnteriorAngleOffset) || ...
+        ~isscalar(tibiaAnteriorAngleOffset) || ...
+        ~isreal(tibiaAnteriorAngleOffset) || ...
+        ~isfinite(tibiaAnteriorAngleOffset) || ...
+        tibiaAnteriorAngleOffset < 0 || ...
+        tibiaAnteriorAngleOffset >= 90
+    error('bonePreRegistration:InvalidTibiaAnteriorAngleOffset', ...
+        'tibiaAnteriorAngleOffset must be one finite number in the range [0, 90) degrees.');
+end
+
 
 
 %% FIND THE FEMORAL LANDMARKS
@@ -110,15 +134,32 @@ vector_femurZ_CT         = normalizeVector(T_femurBone_CT(1:3, 3).', 'femoral z-
 % distance moves the tibial line origin distally along the condyles.
 T_tibiaBone_CT           = tibiaBone.T_bone_CT;
 point_tibiaAcsOrigin_CT  = T_tibiaBone_CT(1:3, 4).';
+vector_tibiaX_CT         = normalizeVector(T_tibiaBone_CT(1:3, 1).', 'tibial x-axis');
 vector_tibiaY_CT         = normalizeVector(T_tibiaBone_CT(1:3, 2).', 'tibial y-axis');
 vector_tibiaZ_CT         = normalizeVector(T_tibiaBone_CT(1:3, 3).', 'tibial z-axis');
 point_tibiaLineOrigin_CT = point_tibiaAcsOrigin_CT - tibiaDistalOffset_mm * vector_tibiaY_CT;
 
-% Reuse the exact surface calculation so both bones follow one consistent
-% landmark definition and one set of numerical tolerances.
+% Rotate the two outward z directions toward positive x. The first row is
+% the negative-z ray after a negative y-axis rotation, and the second row is
+% the positive-z ray after a positive y-axis rotation. Both therefore point
+% anteriorly while staying in the tibial xz-plane.
+vector_tibiaNegativeZRay_CT = normalizeVector( ...
+    sind(tibiaAnteriorAngleOffset) * vector_tibiaX_CT - ...
+    cosd(tibiaAnteriorAngleOffset) * vector_tibiaZ_CT, ...
+    'tibial negative-z anterior ray');
+vector_tibiaPositiveZRay_CT = normalizeVector( ...
+    sind(tibiaAnteriorAngleOffset) * vector_tibiaX_CT + ...
+    cosd(tibiaAnteriorAngleOffset) * vector_tibiaZ_CT, ...
+    'tibial positive-z anterior ray');
+vectors_tibiaRayDirections_CT = [vector_tibiaNegativeZRay_CT; ...
+                                 vector_tibiaPositiveZRay_CT];
+
+% Reuse the exact triangle intersection calculation in its ordered two-ray
+% mode. Negative signed distances identify the negative-z ray and positive
+% signed distances identify the positive-z ray.
 [points_tibiaIntersections_CT, distances_tibiaIntersections_mm] = ...
     intersectInfiniteLineWithMesh(tibiaBone.mesh, ...
-    point_tibiaLineOrigin_CT, vector_tibiaZ_CT, 'tibia');
+    point_tibiaLineOrigin_CT, vectors_tibiaRayDirections_CT, 'tibia');
 [point_tibiaNegativeZ_CT, point_tibiaPositiveZ_CT, ...
     distance_tibiaNegativeZ_mm, distance_tibiaPositiveZ_mm] = ...
     selectOuterLineIntersections(points_tibiaIntersections_CT, ...
@@ -160,6 +201,7 @@ landmarkTemplate = struct( ...
     'kneeSide', kneeSide, ...
     'positiveZSide', positiveZSide, ...
     'distalOffset_mm', 0, ...
+    'anteriorAngleOffset_deg', 0, ...
     'medial', zeros(1, 3), ...
     'lateral', zeros(1, 3), ...
     'points', zeros(2, 3));
@@ -175,10 +217,12 @@ end
 % Store each pair in the fixed row order [medial; lateral]. A zero femoral
 % offset records that its line passes through the original ACS origin.
 landmarks(1).distalOffset_mm = 0;
+landmarks(1).anteriorAngleOffset_deg = 0;
 landmarks(1).medial          = point_femurMedial_CT;
 landmarks(1).lateral         = point_femurLateral_CT;
 landmarks(1).points          = [point_femurMedial_CT; point_femurLateral_CT];
 landmarks(2).distalOffset_mm = tibiaDistalOffset_mm;
+landmarks(2).anteriorAngleOffset_deg = tibiaAnteriorAngleOffset;
 landmarks(2).medial          = point_tibiaMedial_CT;
 landmarks(2).lateral         = point_tibiaLateral_CT;
 landmarks(2).points          = [point_tibiaMedial_CT; point_tibiaLateral_CT];
@@ -192,6 +236,7 @@ diagnosticTemplate = struct( ...
     'coordinateFrame', "CT", ...
     'units', "mm", ...
     'distalOffset_mm', 0, ...
+    'anteriorAngleOffset_deg', 0, ...
     'lineOrigin', zeros(1, 3), ...
     'lineDirection', zeros(1, 3), ...
     'points', zeros(0, 3), ...
@@ -206,13 +251,15 @@ end
 
 % Record the femoral and tibial line calculations in their matching slots.
 intersectionDiagnostics(1).distalOffset_mm    = 0;
+intersectionDiagnostics(1).anteriorAngleOffset_deg = 0;
 intersectionDiagnostics(1).lineOrigin         = point_femurLineOrigin_CT;
 intersectionDiagnostics(1).lineDirection      = vector_femurZ_CT;
 intersectionDiagnostics(1).points             = points_femurIntersections_CT;
 intersectionDiagnostics(1).signedDistances_mm = distances_femurIntersections_mm;
 intersectionDiagnostics(2).distalOffset_mm    = tibiaDistalOffset_mm;
+intersectionDiagnostics(2).anteriorAngleOffset_deg = tibiaAnteriorAngleOffset;
 intersectionDiagnostics(2).lineOrigin         = point_tibiaLineOrigin_CT;
-intersectionDiagnostics(2).lineDirection      = vector_tibiaZ_CT;
+intersectionDiagnostics(2).lineDirection      = vectors_tibiaRayDirections_CT;
 intersectionDiagnostics(2).points             = points_tibiaIntersections_CT;
 intersectionDiagnostics(2).signedDistances_mm = distances_tibiaIntersections_mm;
 
@@ -229,7 +276,9 @@ landmarkTable = table(boneName, anatomicalSide, ...
 disp(landmarkTable);
 
 fprintf('Femoral landmark width: %.2f mm\n', norm(point_femurLateral_CT - point_femurMedial_CT));
-fprintf('Tibial landmark width at %.2f mm distal: %.2f mm\n', tibiaDistalOffset_mm, norm(point_tibiaLateral_CT - point_tibiaMedial_CT));
+fprintf('Tibial landmark width at %.2f mm distal and %.2f deg anterior: %.2f mm\n', ...
+    tibiaDistalOffset_mm, tibiaAnteriorAngleOffset, ...
+    norm(point_tibiaLateral_CT - point_tibiaMedial_CT));
 fprintf('Positive local z is mapped to the %s side for a %s knee.\n', positiveZSide, kneeSide);
 
 
@@ -275,10 +324,19 @@ plot3(axes_landmarks, ...
     'Color', [0.00, 0.20, 0.80], 'LineWidth', 2.0, ...
     'HandleVisibility', 'off');
 
-tibiaLineMargin_mm          = 0.08 * (distance_tibiaPositiveZ_mm - distance_tibiaNegativeZ_mm);
-tibiaLineDistances_mm       = [distance_tibiaNegativeZ_mm - tibiaLineMargin_mm; 
-                               distance_tibiaPositiveZ_mm + tibiaLineMargin_mm];
-points_tibiaLineDisplay_CT  = point_tibiaLineOrigin_CT + tibiaLineDistances_mm .* vector_tibiaZ_CT;
+% Extend both rays beyond their selected surface crossings by the same
+% small margin. Including the shared origin as the middle point displays
+% the intended anterior-facing V instead of a misleading straight line.
+tibiaRayMargin_mm = 0.08 * ...
+    (distance_tibiaPositiveZ_mm - distance_tibiaNegativeZ_mm);
+points_tibiaLineDisplay_CT = [ ...
+    point_tibiaLineOrigin_CT + ...
+        (abs(distance_tibiaNegativeZ_mm) + tibiaRayMargin_mm) * ...
+        vector_tibiaNegativeZRay_CT; ...
+    point_tibiaLineOrigin_CT; ...
+    point_tibiaLineOrigin_CT + ...
+        (distance_tibiaPositiveZ_mm + tibiaRayMargin_mm) * ...
+        vector_tibiaPositiveZRay_CT];
 plot3(axes_landmarks, ...
     points_tibiaLineDisplay_CT(:, 1), ...
     points_tibiaLineDisplay_CT(:, 2), ...
@@ -386,7 +444,9 @@ end
 
 % Finish with an undistorted frontal CT X-Z view that matches the supplied
 % reference image. The user can still rotate the interactive figure.
-title(axes_landmarks, sprintf('%s knee landmarks, tibia offset %.1f mm distal', upper(kneeSide), tibiaDistalOffset_mm));
+title(axes_landmarks, sprintf( ...
+    '%s knee landmarks, tibia offset %.1f mm distal, %.1f deg anterior', ...
+    upper(kneeSide), tibiaDistalOffset_mm, tibiaAnteriorAngleOffset));
 xlabel(axes_landmarks, 'CT X (mm)');
 ylabel(axes_landmarks, 'CT Y (mm)');
 zlabel(axes_landmarks, 'CT Z (mm)');
@@ -610,21 +670,26 @@ end
 function [intersectionPoints, signedDistances] = ...
         intersectInfiniteLineWithMesh(meshTri, lineOrigin, ...
         lineDirection, meshLabel)
-%INTERSECTINFINITELINEWITHMESH Find exact crossings of a line and triangles.
-%   The function applies the vectorized Moller-Trumbore test to an infinite
-%   line. It is needed because projecting a nearby mesh vertex onto the line
-%   does not guarantee a true point on the triangular surface.
+%INTERSECTINFINITELINEWITHMESH Find exact line or paired-ray mesh crossings.
+%   A one-row direction applies the vectorized Moller-Trumbore test to one
+%   infinite line. A two-row direction applies the same test to the ordered
+%   negative-z and positive-z outward rays. The paired-ray mode is needed so
+%   both tibial landmarks can move anteriorly without incorrectly joining
+%   them with one straight line.
 %
 %   Inputs:
 %       meshTri      - MATLAB triangulation describing the bone surface.
-%       lineOrigin   - One-by-three point located on the infinite line.
-%       lineDirection - One-by-three unit direction of the line.
+%       lineOrigin   - One-by-three common origin in CT coordinates.
+%       lineDirection - Either one three-element infinite-line direction or
+%                       a two-by-three matrix ordered as negative-z outward
+%                       ray followed by positive-z outward ray.
 %       meshLabel    - Human-readable bone name used in error messages.
 %
 %   Outputs:
 %       intersectionPoints - N-by-3 unique CT-space surface crossings,
-%                            sorted along the line direction.
-%       signedDistances    - N-by-1 signed distances from lineOrigin.
+%                            sorted by their signed branch distances.
+%       signedDistances    - N-by-1 distances from lineOrigin. In paired-ray
+%                            mode, negative values mark the negative-z ray.
 
 % Read all triangle corners once so the intersection calculation stays
 % vectorized across the complete mesh.
@@ -634,11 +699,43 @@ trianglePoint0 = vertices(faces(:, 1), :);
 triangleEdge1 = vertices(faces(:, 2), :) - trianglePoint0;
 triangleEdge2 = vertices(faces(:, 3), :) - trianglePoint0;
 
-% Normalize defensively because signed parameters should use mesh units.
+% Validate the common origin before subtracting it from every triangle.
 lineOrigin = lineOrigin(:).';
-lineDirection = normalizeVector(lineDirection, ...
-    sprintf('%s landmark line direction', meshLabel));
-repeatedLineDirection = repmat(lineDirection, size(faces, 1), 1);
+if ~isnumeric(lineOrigin) || numel(lineOrigin) ~= 3 || ...
+        ~isreal(lineOrigin) || any(~isfinite(lineOrigin))
+    error('bonePreRegistration:InvalidLineOrigin', ...
+        'The %s landmark origin must contain three finite real values.', ...
+        meshLabel);
+end
+
+% A single row keeps the original infinite-line behavior. Two rows enable
+% the ordered tibial rays without adding a separate intersection algorithm.
+if ~isnumeric(lineDirection) || ~isreal(lineDirection) || ...
+        any(~isfinite(lineDirection), 'all')
+    error('bonePreRegistration:InvalidLineDirection', ...
+        'The %s landmark direction must contain finite real values.', ...
+        meshLabel);
+end
+isSingleInfiniteLine = isvector(lineDirection) && numel(lineDirection) == 3;
+isOrderedRayPair = isequal(size(lineDirection), [2, 3]);
+if ~isSingleInfiniteLine && ~isOrderedRayPair
+    error('bonePreRegistration:InvalidLineDirectionShape', ...
+        ['The %s landmark direction must be one three-element direction ', ...
+         'or a two-by-three ordered ray pair.'], meshLabel);
+end
+
+% Normalize every direction so the intersection parameters retain the mesh
+% unit of millimetres even when a transform has small scale errors.
+if isSingleInfiniteLine
+    normalizedDirections = normalizeVector(lineDirection, ...
+        sprintf('%s landmark line direction', meshLabel));
+else
+    normalizedDirections = zeros(2, 3);
+    normalizedDirections(1, :) = normalizeVector(lineDirection(1, :), ...
+        sprintf('%s negative-z landmark ray', meshLabel));
+    normalizedDirections(2, :) = normalizeVector(lineDirection(2, :), ...
+        sprintf('%s positive-z landmark ray', meshLabel));
+end
 
 % Scale the parallel and duplicate tolerances to the current bone rather
 % than assuming every input mesh has the same physical dimensions.
@@ -651,54 +748,105 @@ end
 parallelTolerance = max(eps(meshScale ^ 2), 1e-12 * meshScale ^ 2);
 barycentricTolerance = 1e-10;
 mergeTolerance = max(1e-9, 1e-9 * meshScale);
+forwardRayTolerance = mergeTolerance;
 
-% Compute the Moller-Trumbore determinant and skip parallel or degenerate
-% triangles before division.
-crossDirectionEdge2 = cross(repeatedLineDirection, triangleEdge2, 2);
-determinant = sum(triangleEdge1 .* crossDirectionEdge2, 2);
-validTriangle = abs(determinant) > parallelTolerance;
-
-% Initialize invalid faces as NaN so they cannot pass the final hit mask.
-uCoordinate = nan(size(determinant));
-vCoordinate = nan(size(determinant));
-signedParameter = nan(size(determinant));
+% The origin-to-triangle vectors do not depend on the chosen direction, so
+% calculate them once before processing the line or the two rays.
 vectorPoint0ToOrigin = lineOrigin - trianglePoint0;
-inverseDeterminant = 1 ./ determinant(validTriangle);
-
-% Calculate the first barycentric coordinate for nonparallel triangles.
-uCoordinate(validTriangle) = sum( ...
-    vectorPoint0ToOrigin(validTriangle, :) .* ...
-    crossDirectionEdge2(validTriangle, :), 2) .* inverseDeterminant;
-
-% Calculate the second barycentric coordinate and the signed line distance.
 crossOriginEdge1 = cross(vectorPoint0ToOrigin, triangleEdge1, 2);
-vCoordinate(validTriangle) = sum( ...
-    repeatedLineDirection(validTriangle, :) .* ...
-    crossOriginEdge1(validTriangle, :), 2) .* inverseDeterminant;
-signedParameter(validTriangle) = sum( ...
-    triangleEdge2(validTriangle, :) .* ...
-    crossOriginEdge1(validTriangle, :), 2) .* inverseDeterminant;
+intersectionPoints = zeros(0, 3);
+signedDistances = zeros(0, 1);
 
-% Accept points inside triangle boundaries in both directions because this
-% is an infinite line rather than a one-sided ray.
-isIntersection = validTriangle & ...
-    uCoordinate >= -barycentricTolerance & ...
-    vCoordinate >= -barycentricTolerance & ...
-    (uCoordinate + vCoordinate) <= 1 + barycentricTolerance & ...
-    isfinite(signedParameter);
-rawSignedDistances = signedParameter(isIntersection);
-if isempty(rawSignedDistances)
-    error('bonePreRegistration:NoLineMeshIntersection', ...
-        ['The %s landmark line does not intersect the mesh. Check the ACS ', ...
-         'and, for the tibia, reduce the distal offset.'], meshLabel);
+% Run the same vectorized triangle test for the single line or for each of
+% the two ordered ray directions.
+for directionIndex = 1:size(normalizedDirections, 1)
+    currentDirection = normalizedDirections(directionIndex, :);
+    repeatedDirection = repmat(currentDirection, size(faces, 1), 1);
+
+    % Skip triangles that are parallel to the current direction because
+    % their determinant cannot produce a reliable intersection parameter.
+    crossDirectionEdge2 = cross(repeatedDirection, triangleEdge2, 2);
+    determinant = sum(triangleEdge1 .* crossDirectionEdge2, 2);
+    validTriangle = abs(determinant) > parallelTolerance;
+
+    % Use NaN for invalid faces so they cannot accidentally pass the final
+    % barycentric hit test after the valid faces have been calculated.
+    uCoordinate = nan(size(determinant));
+    vCoordinate = nan(size(determinant));
+    signedParameter = nan(size(determinant));
+    inverseDeterminant = 1 ./ determinant(validTriangle);
+
+    % Calculate both barycentric coordinates and the distance along the
+    % current direction for every nonparallel triangle.
+    uCoordinate(validTriangle) = sum( ...
+        vectorPoint0ToOrigin(validTriangle, :) .* ...
+        crossDirectionEdge2(validTriangle, :), 2) .* inverseDeterminant;
+    vCoordinate(validTriangle) = sum( ...
+        repeatedDirection(validTriangle, :) .* ...
+        crossOriginEdge1(validTriangle, :), 2) .* inverseDeterminant;
+    signedParameter(validTriangle) = sum( ...
+        triangleEdge2(validTriangle, :) .* ...
+        crossOriginEdge1(validTriangle, :), 2) .* inverseDeterminant;
+
+    % Accept triangle-boundary points within a small tolerance so shared
+    % edges are found before their duplicate distances are merged.
+    isIntersection = validTriangle & ...
+        uCoordinate >= -barycentricTolerance & ...
+        vCoordinate >= -barycentricTolerance & ...
+        (uCoordinate + vCoordinate) <= 1 + barycentricTolerance & ...
+        isfinite(signedParameter);
+    rawDirectionDistances = signedParameter(isIntersection);
+
+    if isSingleInfiniteLine
+        % An infinite line accepts hits on both sides of its origin, which is
+        % the unchanged behavior used for the femoral landmark pair.
+        if isempty(rawDirectionDistances)
+            error('bonePreRegistration:NoLineMeshIntersection', ...
+                ['The %s landmark line does not intersect the mesh. Check ', ...
+                 'the ACS and, for the tibia, reduce the distal offset.'], ...
+                meshLabel);
+        end
+        signedDistances = uniquetol(rawDirectionDistances, ...
+            mergeTolerance, 'DataScale', 1);
+        signedDistances = sort(signedDistances(:));
+        intersectionPoints = lineOrigin + ...
+            signedDistances .* currentDirection;
+        return;
+    end
+
+    % Each tibial direction is an outward ray, so discard intersections
+    % behind its shared origin and numerical hits directly at that origin.
+    forwardDistances = rawDirectionDistances( ...
+        rawDirectionDistances > forwardRayTolerance);
+    if isempty(forwardDistances)
+        raySideNames = {'negative-z', 'positive-z'};
+        error('bonePreRegistration:NoRayMeshIntersection', ...
+            ['The %s %s landmark ray does not intersect the mesh in its ', ...
+             'forward direction. Check the ACS and reduce ', ...
+             'tibiaDistalOffset_mm or tibiaAnteriorAngleOffset.'], ...
+            meshLabel, raySideNames{directionIndex});
+    end
+
+    % Merge duplicate triangle hits within this ray before recording their
+    % exact points. The first ray receives negative diagnostic distances so
+    % the existing negative-z/positive-z selection remains usable.
+    forwardDistances = uniquetol(forwardDistances, mergeTolerance, ...
+        'DataScale', 1);
+    forwardDistances = sort(forwardDistances(:));
+    currentPoints = lineOrigin + forwardDistances .* currentDirection;
+    if directionIndex == 1
+        currentSignedDistances = -forwardDistances;
+    else
+        currentSignedDistances = forwardDistances;
+    end
+    intersectionPoints = [intersectionPoints; currentPoints]; %#ok<AGROW>
+    signedDistances = [signedDistances; currentSignedDistances]; %#ok<AGROW>
 end
 
-% Shared edges and vertices can report the same crossing from several
-% triangles. Merge those distances before reconstructing exact line points.
-signedDistances = uniquetol(rawSignedDistances, mergeTolerance, ...
-    'DataScale', 1);
-signedDistances = sort(signedDistances(:));
-intersectionPoints = lineOrigin + signedDistances .* lineDirection;
+% Sort the combined ray results so the first and last entries remain the
+% outer negative-z and positive-z crossings used by the existing selector.
+[signedDistances, sortedIndices] = sort(signedDistances);
+intersectionPoints = intersectionPoints(sortedIndices, :);
 end
 
 function [negativePoint, positivePoint, negativeDistance, ...
@@ -727,7 +875,8 @@ positiveIndices = find(signedDistances > sideTolerance);
 if isempty(negativeIndices) || isempty(positiveIndices)
     error('bonePreRegistration:MissingOppositeSideIntersections', ...
         ['The %s landmark line must cross the mesh on both sides of its ', ...
-         'origin. Check the ACS and, for the tibia, reduce the offset.'], ...
+         'origin. Check the ACS and, for the tibia, reduce the distal or ', ...
+         'anterior angle offset.'], ...
         meshLabel);
 end
 
