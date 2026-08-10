@@ -1,6 +1,10 @@
 data/*
 output/*
 configs/*
+
+# Ignore configuration directories anywhere below tools.
+/tools/**/configs/
+
 tools/ctkneePostProcess/outputs/*
 tools/ultrasoundSpatialProcessing/outputs/*
 tools/ultrasoundSpatialProcessing/configs/*
