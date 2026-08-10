@@ -351,9 +351,45 @@ boneCorrespondences = repmat(struct( ...
     'surfacePointsRef', zeros(0, 3), ...
     'regionLabels', strings(0, 1)), size(landmarks));
 
+% Use one color per bone for its CT mesh and landmarks. Correspondence lines
+% use region colors so medial, lateral, and shaft candidates can be separated.
+boneDisplayColors = lines(max(numel(landmarks), 1));
+regionLineColors = lines(numel(regionNames));
+availableBoneCodes = upper(string({bones.bone}));
+
 for boneIndex = 1:numel(landmarks)
-    boneCorrespondences(boneIndex).name = regionalSurfacePoints(boneIndex).name;
-    boneCorrespondences(boneIndex).bone = regionalSurfacePoints(boneIndex).bone;
+    boneCorrespondences(boneIndex).name = ...
+        regionalSurfacePoints(boneIndex).name;
+    boneCorrespondences(boneIndex).bone = ...
+        regionalSurfacePoints(boneIndex).bone;
+
+    % Find the CT mesh by bone code instead of assuming bones and landmarks
+    % were saved in the same order.
+    currentBoneCode = boneCorrespondences(boneIndex).bone;
+    meshBoneIndex = find(availableBoneCodes == currentBoneCode);
+    if numel(meshBoneIndex) ~= 1
+        error('bonePreRegistration_onlyImage:UnmatchedBoneMesh', ...
+              'Expected one CT mesh for bone code "%s", but found %d.', ...
+              currentBoneCode, numel(meshBoneIndex));
+    end
+
+    currentBoneMesh = bones(meshBoneIndex).mesh;
+    if ~isa(currentBoneMesh, 'triangulation')
+        error('bonePreRegistration_onlyImage:InvalidBoneMesh', ...
+              'The CT mesh for bone code "%s" must be a triangulation.', ...
+              currentBoneCode);
+    end
+
+    % Keep the mesh in its original CT coordinates. It will appear away from
+    % the ultrasound data, which remains in the ref coordinate system.
+    patch(ax1, ...
+        'Faces', currentBoneMesh.ConnectivityList, ...
+        'Vertices', currentBoneMesh.Points, ...
+        'FaceColor', boneDisplayColors(boneIndex, :), ...
+        'FaceAlpha', 0.25, ...
+        'EdgeColor', 'none', ...
+        'DisplayName', sprintf('%s mesh (CT)', ...
+            boneCorrespondences(boneIndex).name));
 
     % Process the regions in a fixed order so the final rows are easy to
     % inspect: medial first, followed by lateral and shaft.
@@ -361,37 +397,83 @@ for boneIndex = 1:numel(landmarks)
         regionName = regionNames(regionIndex);
         regionField = char(regionName);
         surfacePoints = regionalSurfacePoints(boneIndex).(regionField);
-
-        % A missing regional measurement is valid. It contributes no rows to
-        % this bone's correspondence matrices.
-        if isempty(surfacePoints)
-            continue;
-        end
-
         landmarkPoint = landmarks(boneIndex).(regionField);
 
         % One regional landmark must be one finite XYZ point. A clear error
         % here is easier to diagnose than a later estgeotform3d failure.
-        if ~isnumeric(landmarkPoint) || ~isreal(landmarkPoint) || ~isequal(size(landmarkPoint), [1, 3]) || any(~isfinite(landmarkPoint))
+        if ~isnumeric(landmarkPoint) || ~isreal(landmarkPoint) || ...
+                ~isequal(size(landmarkPoint), [1, 3]) || ...
+                any(~isfinite(landmarkPoint))
             error('bonePreRegistration_onlyImage:InvalidLandmarkPoint', ...
-                  'landmarks(%d).%s must be a finite numeric 1-by-3 point.', ...
-                  boneIndex, regionField);
+                  ['landmarks(%d).%s must be a finite numeric ' ...
+                   '1-by-3 point.'], boneIndex, regionField);
+        end
+        landmarkPoint = double(landmarkPoint);
+
+        % Plot all three CT landmarks, including landmarks whose regional
+        % ultrasound measurement is currently empty.
+        landmarkHandle = scatter3(ax1, ...
+            landmarkPoint(1), landmarkPoint(2), landmarkPoint(3), ...
+            90, boneDisplayColors(boneIndex, :), 'filled', ...
+            'MarkerEdgeColor', 'k', ...
+            'LineWidth', 1.0);
+        if regionIndex == 1
+            landmarkHandle.DisplayName = sprintf('%s landmarks (CT)', ...
+                boneCorrespondences(boneIndex).name);
+        else
+            landmarkHandle.HandleVisibility = 'off';
+        end
+
+        % A missing regional measurement is valid. It contributes no rows or
+        % correspondence lines for this bone and region.
+        if isempty(surfacePoints)
+            continue;
         end
 
         numberOfSurfacePoints = size(surfacePoints, 1);
 
         % Repeat the regional landmark once for every surface point. Row k in
         % landmarkPointsCT then corresponds to row k in surfacePointsRef.
-        repeatedLandmarkPoints = repmat( double(landmarkPoint), numberOfSurfacePoints, 1);
-        repeatedRegionLabels = repmat( regionName, numberOfSurfacePoints, 1);
+        repeatedLandmarkPoints = repmat( ...
+            landmarkPoint, numberOfSurfacePoints, 1);
+        repeatedRegionLabels = repmat( ...
+            regionName, numberOfSurfacePoints, 1);
 
-        boneCorrespondences(boneIndex).landmarkPointsCT = [ boneCorrespondences(boneIndex).landmarkPointsCT; repeatedLandmarkPoints];
-        boneCorrespondences(boneIndex).surfacePointsRef = [ boneCorrespondences(boneIndex).surfacePointsRef; surfacePoints];
-        boneCorrespondences(boneIndex).regionLabels     = [ boneCorrespondences(boneIndex).regionLabels; repeatedRegionLabels];
+        boneCorrespondences(boneIndex).landmarkPointsCT = [ ...
+            boneCorrespondences(boneIndex).landmarkPointsCT; ...
+            repeatedLandmarkPoints];
+        boneCorrespondences(boneIndex).surfacePointsRef = [ ...
+            boneCorrespondences(boneIndex).surfacePointsRef; ...
+            surfacePoints];
+        boneCorrespondences(boneIndex).regionLabels = [ ...
+            boneCorrespondences(boneIndex).regionLabels; ...
+            repeatedRegionLabels];
 
-        
+        % Draw one line for every candidate pair. The line starts at the CT
+        % landmark and ends at its regional surface point in ref.
+        for pointIndex = 1:numberOfSurfacePoints
+            plot3(ax1, ...
+                [landmarkPoint(1), surfacePoints(pointIndex, 1)], ...
+                [landmarkPoint(2), surfacePoints(pointIndex, 2)], ...
+                [landmarkPoint(3), surfacePoints(pointIndex, 3)], ...
+                '-', ...
+                'Color', regionLineColors(regionIndex, :), ...
+                'LineWidth', 0.25, ...
+                'HandleVisibility', 'off', ...
+                'Tag', 'regional_correspondence_candidate');
+        end
     end
 end
 
+% Refit the axes after adding the distant CT geometry and correspondence lines.
+% The labels make clear that two coordinate frames share this one view.
+xlabel(ax1, 'X coordinate (mm), CT and ref frames');
+ylabel(ax1, 'Y coordinate (mm), CT and ref frames');
+zlabel(ax1, 'Z coordinate (mm), CT and ref frames');
+title(ax1, 'CT bones and landmarks linked to regional surfaces in ref');
+legend(ax1, 'show', 'Location', 'best', 'Interpreter', 'none');
+axis(ax1, 'tight');
+axis(ax1, 'equal');
+drawnow;
 
 %%
