@@ -1,87 +1,45 @@
-clear;
-clc;
-close all;
+clear; clc; close all;
 
-%% PATH DEFINITION
+%% LOAD AND VALIDATE THE CONFIGURATION
 
-filepath_ctmat = 'D:\Documents\BELANDA\SonoSkin\codes\matlab\bmodeimage_3dspace\tools\ctkneePostProcess\outputs\kneephantom';
-filename_ctmat = 'kneephantom_bones_and_bonepins.mat';
-
-%% USER SETTINGS
-
-% Select the anatomical side represented by both meshes. The ERC frame
-% convention used by this project points positive z medially for a left
-% knee and laterally for a right knee.
-kneeSide = "left";
-
-% Move the femoral landmark-ray origin proximally from the femoral ACS
-% origin. The default keeps the rays at the original epicondylar-axis location.
-femur_epicondyleProximalOffset_mm = 0;
-
-% Rotate both femoral landmark rays toward the local positive x-axis. A zero
-% angle preserves the original straight mediolateral landmark definition.
-femur_epicondyleAnteriorAngleOffset_deg = 20;
-
-% Move the tibial landmark line this far distally from the tibial ACS
-% origin. The mesh and ACS coordinates in this dataset are in millimetres.
-tibia_condyleDistalOffset_mm = 10;
-
-% Rotate both tibial landmark rays toward the local positive x-axis, which
-% is the anterior direction in the ERC anatomical coordinate system.
-tibia_condyleAnteriorAngleOffset_deg = 25;
-
-% Move the center of the femoral shaft band proximally from the femoral ACS
-% origin. This places the new surface landmark on the diaphysis rather than
-% near the epicondyles.
-femur_shaftProximalOffset_mm = 120;
-
-% Rotate the femoral shaft ray about the ACS positive y-axis. Positive
-% angles rotate local positive x toward local negative z.
-femur_shaftAnteriorAngleOffset_deg = 0;
-
-% Move the center of the tibial shaft band distally from the tibial ACS
-% origin. The setting is stored as a positive distance and applied along
-% the ACS negative y-axis below.
-tibia_shaftDistalOffset_mm = 150;
-
-% Rotate the tibial shaft ray about the ACS positive y-axis using the same
-% signed convention as the femoral shaft ray.
-tibia_shaftAnteriorAngleOffset_deg = -45;
-
-% Keep the two shaft-cutting planes five millimetres from the band center.
-% The resulting band is therefore ten millimetres thick for both bones.
-shaftHalfThickness_mm = 5;
-
-
-
-%% LOAD AND VALIDATE THE BONE DATA
-
-% Locate the project from this script instead of depending on MATLAB's
-% current folder when the user starts the workflow.
+% Locate this tool from the script so the configuration can be found even
+% when MATLAB was started from another working directory.
 scriptFullPath = mfilename('fullpath');
 if isempty(scriptFullPath)
     error('bonePreRegistration:ScriptPathUnavailable', ...
-          'Run bonePreRegistration_anatomicalLandmark.m as a complete script so its input path can be resolved.');
+          'Run bonePreRegistration_anatomicalLandmark.m as a complete script so its configuration file can be located.');
 end
-scriptDirectory  = fileparts(scriptFullPath);
-toolsDirectory   = fileparts(scriptDirectory);
-projectDirectory = fileparts(toolsDirectory);
+scriptDirectory = fileparts(scriptFullPath);
 
-% Accept either an absolute folder selected by the user or the original
-% project-relative folder. Trying the configured folder first avoids adding
-% the project path in front of an already absolute Windows path.
-configuredCtmatFullPath = fullfile(filepath_ctmat, filename_ctmat);
-projectCtmatFullPath = fullfile(projectDirectory, filepath_ctmat, filename_ctmat);
-if isfile(configuredCtmatFullPath)
-    ctmatFullPath = configuredCtmatFullPath;
-elseif isfile(projectCtmatFullPath)
-    ctmatFullPath = projectCtmatFullPath;
-else
-    error('bonePreRegistration:MissingCtMatFile', ...
-        ['The configured CT MAT file does not exist at either resolved ', ...
-         'location:\n  %s\n  %s'], configuredCtmatFullPath, ...
-        projectCtmatFullPath);
+% Add the tool-local helper folder before calling the configuration reader.
+% Keeping this dependency beside the tool avoids adding unrelated helpers.
+helperDirectory = fullfile(scriptDirectory, 'helpers');
+if ~isfolder(helperDirectory)
+    error('bonePreRegistration:HelperDirectoryNotFound', ...
+          'Required helper directory was not found: %s', helperDirectory);
 end
+addpath(helperDirectory, '-begin');
+
+% Read dataset choices and adjustable landmark values from one JSON file.
+% Changing an input dataset now changes configuration rather than MATLAB code.
+configurationFilePath = fullfile(scriptDirectory, 'configs', 'bonePreRegistration_anatomicalLandmark.json');
+configuration = readBonePreRegistrationConfiguration(configurationFilePath);
+
+% Give the checked JSON fields short names used by the geometry workflow.
+% These assignments also make the source of every adjustable value explicit.
+ctmatFullPath = fullfile(configuration.input.ctPostProcessedFilePath, configuration.input.ctPostProcessedFileName);
+kneeSide                                = configuration.parameters.kneeSide;
+femur_epicondyleProximalOffset_mm       = configuration.parameters.femur.femur_epicondyleProximalOffset_mm;
+femur_epicondyleAnteriorAngleOffset_deg = configuration.parameters.femur.femur_epicondyleAnteriorAngleOffset_deg;
+femur_shaftProximalOffset_mm            = configuration.parameters.femur.femur_shaftProximalOffset_mm;
+femur_shaftAnteriorAngleOffset_deg      = configuration.parameters.femur.femur_shaftAnteriorAngleOffset_deg;
+tibia_condyleDistalOffset_mm            = configuration.parameters.tibia.tibia_condyleDistalOffset_mm;
+tibia_condyleAnteriorAngleOffset_deg    = configuration.parameters.tibia.tibia_condyleAnteriorAngleOffset_deg;
+tibia_shaftDistalOffset_mm              = configuration.parameters.tibia.tibia_shaftDistalOffset_mm;
+tibia_shaftAnteriorAngleOffset_deg      = configuration.parameters.tibia.tibia_shaftAnteriorAngleOffset_deg;
+shaftHalfThickness_mm                   = configuration.parameters.shaftHalfThickness_mm;
+
+%% LOAD AND VALIDATE THE BONE DATA
 
 % Load only the variable needed by this workflow so unrelated saved values
 % cannot accidentally replace settings or intermediate variables.
@@ -756,9 +714,9 @@ lighting(axes_landmarks, 'gouraud');
 
 %% SAVE THE OUTPUT
 
-% Keep generated results beside this tool so they do not depend on the
-% current MATLAB folder and remain separate from the source CT inputs.
-outputDirectory = fullfile(scriptDirectory, 'outputs');
+% Use the resolved configuration value so changing the output location does
+% not require editing this script or depend on MATLAB's current directory.
+outputDirectory = configuration.output.boneLandmarkOutputPath;
 if ~isfolder(outputDirectory)
     [wasOutputDirectoryCreated, mkdirMessage] = mkdir(outputDirectory);
     if ~wasOutputDirectoryCreated
@@ -778,14 +736,14 @@ outputPngPath = fullfile(outputDirectory, [outputBaseName, '.png']);
 % landmark result or creating artifacts with mismatched contents.
 if any(isfile({outputMatPath, outputFigPath, outputPngPath}))
     error('bonePreRegistration:OutputFileAlreadyExists', ...
-        'An output file already exists for timestamp %s.', outputTimestamp);
+          'An output file already exists for timestamp %s.', outputTimestamp);
 end
 
 % Ensure the exact verification figure is still available before starting
 % the three-file export sequence.
 if ~isgraphics(figure_landmarks, 'figure')
     error('bonePreRegistration:VerificationFigureUnavailable', ...
-        'The landmark verification figure is not available for saving.');
+          'The landmark verification figure is not available for saving.');
 end
 
 % Save only the two requested public data structures. Version 7.3 remains

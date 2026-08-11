@@ -1,0 +1,25 @@
+{
+  "input": {
+    "ctPostProcessedFilePath": "../../ctkneePostProcess/outputs/kneephantom",
+    "ctPostProcessedFileName": "kneephantom_bones_and_bonepins.mat"
+  },
+  "output": {
+    "boneLandmarkOutputPath": "../outputs"
+  },
+  "parameters": {
+    "kneeSide": "left",
+    "femur": {
+      "femur_epicondyleProximalOffset_mm": 0,
+      "femur_epicondyleAnteriorAngleOffset_deg": 20,
+      "femur_shaftProximalOffset_mm": 120,
+      "femur_shaftAnteriorAngleOffset_deg": 0
+    },
+    "tibia": {
+      "tibia_condyleDistalOffset_mm": 10,
+      "tibia_condyleAnteriorAngleOffset_deg": 25,
+      "tibia_shaftDistalOffset_mm": 150,
+      "tibia_shaftAnteriorAngleOffset_deg": -45
+    },
+    "shaftHalfThickness_mm": 5
+  }
+}

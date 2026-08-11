@@ -38,7 +38,7 @@ end
 addpath(geometryFunctionDirectory, displayFunctionDirectory);
 
 
-%% LOAD THE ULTRASOUND IMAGE DATA
+%% LOAD THE ULTRASOUND IMAGE DATA AND BONE POSES GROUND TRUTH
 
 % Load the reviewed ultrasound data and the ground-truth bone poses that were
 % produced together by the Snapshot spatial-processing workflow.
@@ -86,7 +86,7 @@ for groupIndex = 1:numel(surfaceResults)
         error('bonePreRegistration:MissingSurfaceCoordinatesXYZRef', ...
               ['Surface group %d does not contain surfaceCoordinatesXYZRef.' ...
                'Rerun boneSegmentation_extractSurface.m to create a compatible MAT-file.'], ...
-            groupIndex);
+              groupIndex);
     end
 end
 
@@ -98,7 +98,7 @@ end
 ctmatFullPath = char(validBonePoses.ctPostProcessedMatFile);
 if ~isfile(ctmatFullPath)
     error('bonePreRegistration:MissingCtMatFile', ...
-        'The configured CT MAT file does not exist: %s', ctmatFullPath);
+          'The configured CT MAT file does not exist: %s', ctmatFullPath);
 end
 
 % Load the CT bones used for coarse registration. The saved ground-truth
@@ -106,8 +106,7 @@ end
 loadedCtData = load(ctmatFullPath, 'bones');
 if ~isfield(loadedCtData, 'bones')
     error('bonePreRegistration:MissingBonesVariable', ...
-          'The CT MAT file does not contain a variable named bones: %s', ...
-          ctmatFullPath);
+          'The CT MAT file does not contain a variable named bones: %s', ctmatFullPath);
 end
 bones = loadedCtData.bones;
 
@@ -117,25 +116,20 @@ bones = loadedCtData.bones;
 bonelandmarksFullPath = fullfile(filepath_bonelandmarks, filename_bonelandmarks);
 if ~isfile(bonelandmarksFullPath)
     error('bonePreRegistration:MissingBoneLandmarksFile', ...
-          'The configured bone-landmarks MAT file does not exist: %s', ...
-          bonelandmarksFullPath);
+          'The configured bone-landmarks MAT file does not exist: %s', bonelandmarksFullPath);
 end
 
 % Load only the two expected variables so unrelated saved values cannot
 % accidentally replace settings or intermediate variables in this script.
-loadedBoneLandmarks = load(bonelandmarksFullPath, ...
-                           'intersectionDiagnostics', 'landmarks');
+loadedBoneLandmarks = load(bonelandmarksFullPath, 'intersectionDiagnostics', 'landmarks');
 if ~isfield(loadedBoneLandmarks, 'intersectionDiagnostics')
     error('bonePreRegistration:MissingIntersectionDiagnosticsVariable', ...
-          ['The bone-landmarks MAT file does not contain a variable named ' ...
-           'intersectionDiagnostics: %s'], bonelandmarksFullPath);
+          'The bone-landmarks MAT file does not contain a variable named intersectionDiagnostics: %s', bonelandmarksFullPath);
 end
 intersectionDiagnostics = loadedBoneLandmarks.intersectionDiagnostics;
-
 if ~isfield(loadedBoneLandmarks, 'landmarks')
     error('bonePreRegistration:MissingLandmarksVariable', ...
-          ['The bone-landmarks MAT file does not contain a variable named ' ...
-           'landmarks: %s'], bonelandmarksFullPath);
+          'The bone-landmarks MAT file does not contain a variable named landmarks: %s', bonelandmarksFullPath);
 end
 landmarks = loadedBoneLandmarks.landmarks;
 
