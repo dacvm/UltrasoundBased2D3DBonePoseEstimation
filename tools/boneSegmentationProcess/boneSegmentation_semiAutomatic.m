@@ -35,23 +35,21 @@ segmentationOutputDirectory = configuration.output.segmentationOutputPath;
 
 %% LOAD THE ULTRASOUND IMAGE DATA
 
-% Load the MAT-file into a structure so its saved variable does not appear
-% directly in the script workspace under an unknown name.
+% Load only validSnapshots because validBonePoses belongs to the later
+% pre-registration workflow and is not needed for image segmentation.
 ultrasoundFilePath = fullfile(filepath_ultrasoundimage, filename_ultrasoundimage);
-ultrasoundFileData = load(ultrasoundFilePath);
+ultrasoundFileData = load(ultrasoundFilePath, 'validSnapshots');
 
-% Require one saved variable so the script cannot silently choose the wrong
-% data when a MAT-file contains unrelated values.
-savedVariableNames = fieldnames(ultrasoundFileData);
-if numel(savedVariableNames) ~= 1
-    error('boneSegmentation_semiAutomatic:UnexpectedUltrasoundVariables', ...
-          'Expected exactly one variable in "%s", but found %d.', ...
-          filename_ultrasoundimage, numel(savedVariableNames));
+% Give a clear message when an incompatible MAT file was selected.
+if ~isfield(ultrasoundFileData, 'validSnapshots')
+    error('boneSegmentation_semiAutomatic:MissingValidSnapshots', ...
+          'The selected MAT file does not contain validSnapshots: %s', ...
+          ultrasoundFilePath);
 end
 
 % Give the loaded sequence one stable name for the segmentation workflow.
-ultrasoundSequence = ultrasoundFileData.(savedVariableNames{1});
-clear ultrasoundFileData savedVariableNames;
+ultrasoundSequence = ultrasoundFileData.validSnapshots;
+clear ultrasoundFileData;
 
 %% PREPARE THE TOOL PATHS
 
