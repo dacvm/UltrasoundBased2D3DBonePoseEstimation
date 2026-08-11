@@ -31,14 +31,17 @@ scriptDirectory = fileparts(scriptFullPath);
 projectDirectory = fileparts(fileparts(scriptDirectory));
 geometryFunctionDirectory = fullfile(projectDirectory, 'functions', 'geometry');
 displayFunctionDirectory  = fullfile(projectDirectory, 'functions', 'display');
+qualisysFunctionDirectory = fullfile(projectDirectory, 'functions', 'qualisys_related');
 
 % Stop here when the project layout is incomplete. Otherwise MATLAB would fail
 % later with a less helpful "undefined function" message.
-if ~isfolder(geometryFunctionDirectory) || ~isfolder(displayFunctionDirectory)
+if ~isfolder(geometryFunctionDirectory) || ...
+        ~isfolder(displayFunctionDirectory) || ...
+        ~isfolder(qualisysFunctionDirectory)
     error('bonePreRegistration:MissingFunctionDirectory', ...
-          'The geometry or display function folder is missing.');
+          'The geometry, display, or Qualisys function folder is missing.');
 end
-addpath(geometryFunctionDirectory, displayFunctionDirectory);
+addpath(geometryFunctionDirectory, displayFunctionDirectory, qualisysFunctionDirectory);
 
 
 %% LOAD THE ULTRASOUND IMAGE DATA
@@ -490,7 +493,7 @@ ax2 = axes(fig2);
 xlabel(ax2, 'X_{ref} (mm)');
 ylabel(ax2, 'Y_{ref} (mm)');
 zlabel(ax2, 'Z_{ref} (mm)');
-title(ax2, 'Coarsely registered CT bone meshes and measured surfaces');
+title(ax2, 'Coarse registration versus ground-truth bone poses in ref');
 grid(ax2, 'on');
 axis(ax2, 'equal');
 hold(ax2, 'on');
@@ -523,6 +526,97 @@ for boneIndex = 1:numel(regionalSurfacePoints)
         10, boneDisplayColors(boneIndex, :), 'filled', ...
         'DisplayName', sprintf('%s surface (ref)', regionalSurfacePoints(boneIndex).name), ...
         'Tag', 'coarse_registration_surface');
+end
+
+%% CALCULATE AND DISPLAY THE GROUND-TRUTH BONE POSES
+
+% STEP 1: Read the Qualisys CSV files stored beside the ultrasound snapshots.
+% The saved ultrasound data contains the source folder for each measurement.
+csvFileGroups = cell(numel(ultrasoundSequence), 1);
+for groupIndex = 1:numel(ultrasoundSequence)
+    currentSnapshotDirectory = char(ultrasoundSequence(groupIndex).path);
+    csvFileGroups{groupIndex} = dir(fullfile(currentSnapshotDirectory, '*.csv'));
+end
+
+csvFiles = vertcat(csvFileGroups{:});
+if isempty(csvFiles)
+    error('bonePreRegistration_onlyImage:NoSnapshotCsvFiles', ...
+          'No Qualisys CSV files were found beside the ultrasound snapshots.');
+end
+
+% Read every CSV into a table, then join the one-row tables into one dataset.
+rigidBodyTables = cell(numel(csvFiles), 1);
+for csvIndex = 1:numel(csvFiles)
+    csvFilePath = fullfile(csvFiles(csvIndex).folder, csvFiles(csvIndex).name);
+    rigidBodyTables{csvIndex} = readCSV_qualisysRigidBodySnapshot(csvFilePath);
+end
+allRigidBodies = vertcat(rigidBodyTables{:});
+
+% STEP 2: Average the reference pose and the tracked pose of every bone pin.
+% The pin names follow the Qualisys convention, such as C_F_PRO.
+pinBoneCodes            = upper(string({bonepins.bone}));
+pinPlaces               = upper(string({bonepins.place}));
+pinRigidBodyNames       = "C_" + pinBoneCodes + "_" + pinPlaces;
+rigidBodyNamesToAverage = ["B_N_REF", pinRigidBodyNames];
+
+averagedGroundTruthTransforms = struct();
+for rigidBodyIndex = 1:numel(rigidBodyNamesToAverage)
+    rigidBodyName = char(rigidBodyNamesToAverage(rigidBodyIndex));
+    averagedGroundTruthTransforms.(rigidBodyName) = averageRigidBodyTransform(allRigidBodies, rigidBodyName);
+end
+
+% STEP 3: Use each tracked pin to place its CT bone mesh in the ref frame.
+T_ref_global = averagedGroundTruthTransforms.B_N_REF;
+
+% Store the transforms and meshes so they are available after the script ends.
+groundTruthRegistrations = repmat(struct( ...
+    'name', "", ...
+    'bone', "", ...
+    'T_CT_ref', [], ...
+    'boneMeshRef', []), size(boneCorrespondences));
+
+for boneIndex = 1:numel(boneCorrespondences)
+    currentBoneCode = upper(string(boneCorrespondences(boneIndex).bone));
+
+    % Match the bone and its pin by their short bone code, F or T.
+    meshBoneIndex    = find(availableBoneCodes == currentBoneCode, 1);
+    pinIndex         = find(pinBoneCodes == currentBoneCode, 1);
+
+    % Get the current bone and pin
+    currentBone      = bones(meshBoneIndex);
+    currentPin       = bonepins(pinIndex);
+
+    % Get the transformation of the average ground truth transform
+    pinRigidBodyName = char(pinRigidBodyNames(pinIndex));
+    T_pin_global     = averagedGroundTruthTransforms.(pinRigidBodyName);
+
+    % Express the tracked pin in ref. Left division is the numerically 
+    % safer equivalent of inv(T_ref_global) * T_pin_global from the frame rule.
+    T_pin_ref            = T_ref_global \ T_pin_global;
+
+    % Then use the known pin pose in CT to calculate the ground-truth transform from CT to ref. 
+    % Right division is equivalent to T_pin_ref * inv(T_pin_CT).
+    T_CT_ref_groundTruth = T_pin_ref / currentPin.T_pin_CT;
+
+    % Transform the original CT-frame mesh vertices and preserve connectivity.
+    bonePointsRefGroundTruth    = applyRigidTransform(currentBone.mesh.Points, T_CT_ref_groundTruth);
+    boneMeshRefGroundTruth      = triangulation(currentBone.mesh.ConnectivityList, bonePointsRefGroundTruth);
+
+    groundTruthRegistrations(boneIndex).name        = boneCorrespondences(boneIndex).name;
+    groundTruthRegistrations(boneIndex).bone        = currentBoneCode;
+    groundTruthRegistrations(boneIndex).T_CT_ref    = T_CT_ref_groundTruth;
+    groundTruthRegistrations(boneIndex).boneMeshRef = boneMeshRefGroundTruth;
+
+    % Gray distinguishes ground truth from the colored coarse registration.
+    % Transparency keeps both overlaid surfaces and measured points visible.
+    patch(ax2, ...
+        'Faces', boneMeshRefGroundTruth.ConnectivityList, ...
+        'Vertices', boneMeshRefGroundTruth.Points, ...
+        'FaceColor', [0.55, 0.55, 0.55], ...
+        'FaceAlpha', 0.25, ...
+        'EdgeColor', 'none', ...
+        'DisplayName', sprintf('%s mesh (ground truth)', boneCorrespondences(boneIndex).name), ...
+        'Tag', 'ground_truth_bone_mesh');
 end
 
 % Estimate and apply one independent rigid transformation for each bone.
@@ -598,3 +692,43 @@ legend(ax2, 'show', 'Location', 'best', 'Interpreter', 'none');
 axis(ax2, 'tight');
 axis(ax2, 'equal');
 drawnow;
+
+function T_rigidBody_global = averageRigidBodyTransform(rigidBodyTable, rigidBodyName)
+%AVERAGERIGIDBODYTRANSFORM Average repeated measurements of one rigid body.
+% This helper creates one stable rigid transform from several Qualisys
+% snapshots. Rotation uses a quaternion mean so orientation is averaged on
+% the rotation manifold. Translation uses the regular arithmetic mean.
+%
+% INPUTS:
+%   rigidBodyTable - Table containing one row for each Qualisys snapshot.
+%                    The requested column contains structs with q and t.
+%   rigidBodyName  - Name of the table column to average, for example B_N_REF.
+%
+% OUTPUT:
+%   T_rigidBody_global - 4-by-4 transform from the rigid-body frame to the
+%                        global tracking frame.
+
+% Extract the cell array of measurements for the requested rigid body.
+rigidBodySamples = rigidBodyTable.(rigidBodyName);
+numberOfSamples  = numel(rigidBodySamples);
+
+% Copy the quaternion and translation values into numeric matrices so MATLAB
+% can average all samples together.
+quaternionSamples  = zeros(numberOfSamples, 4);
+translationSamples = zeros(numberOfSamples, 3);
+for sampleIndex = 1:numberOfSamples
+    currentSample = rigidBodySamples{sampleIndex};
+    quaternionSamples(sampleIndex, :)  = reshape(currentSample.q, 1, 4);
+    translationSamples(sampleIndex, :) = reshape(currentSample.t, 1, 3);
+end
+
+% Average rotation and translation separately because they use different math.
+meanQuaternion  = meanrot(quaternion(quaternionSamples));
+meanRotation    = quat2rotm(compact(meanQuaternion));
+meanTranslation = mean(translationSamples, 1);
+
+% Combine the averaged rotation and translation into one rigid transform.
+T_rigidBody_global           = eye(4);
+T_rigidBody_global(1:3, 1:3) = meanRotation;
+T_rigidBody_global(1:3, 4)   = meanTranslation(:);
+end
