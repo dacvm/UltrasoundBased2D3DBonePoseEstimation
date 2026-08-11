@@ -1,8 +1,11 @@
 data/*
 output/*
-tools/ctkneePostProcess/outputs/*
-tools/ultrasoundSpatialProcessing/outputs/*
-tools/boneSegmentationProcess/outputs/*
+configs/*
+
+# Ignore configuration directories anywhere below tools.
+/tools/**/configs/
+/tools/**/outputs/
+
 functions/fcal_related/split_sequence_image_frames_demo/*
 AGENTS.md
 *.asv

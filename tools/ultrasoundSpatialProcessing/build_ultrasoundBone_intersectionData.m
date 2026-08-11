@@ -21,6 +21,15 @@ if ~isfolder(functionsDirectory)
 end
 addpath(genpath(functionsDirectory));
 
+% Add this workflow's extracted helpers so the script remains runnable from
+% any current working directory without embedding its utility functions.
+helperDirectory = fullfile(scriptDirectory, 'helpers');
+if ~isfolder(helperDirectory)
+    error('build_ultrasoundBone_intersectionData:HelperDirectoryNotFound', ...
+          'Required helper directory not found: %s', helperDirectory);
+end
+addpath(helperDirectory);
+
 % Keep this tool's settings beside the workflow so its configuration does
 % not get mixed with configuration files owned by other project tools.
 configurationPath = fullfile(scriptDirectory, 'configs', 'extra_snapshotProcess_config.json');
@@ -140,6 +149,7 @@ for snapshotIndex = 1:numel(snapshotDirectories)
 
     % Read both members of each coupled snapshot in the existing file loop.
     for fileIndex = 1:numel(mhaFiles)
+
         mhaPath = fullfile(snapshotPath, mhaFiles(fileIndex).name);
         snapshotSequences(fileIndex) = read_sequence_image(mhaPath);
 
@@ -155,14 +165,11 @@ for snapshotIndex = 1:numel(snapshotDirectories)
 
         % Every configured rigid body is needed by the later averaging loop.
         % Check each CSV here so the error identifies the exact bad snapshot.
-        missingRigidBodyNames = setdiff( ...
-            rigidBodyNamesToAverage, ...
-            currentRigidBodies.Properties.VariableNames, ...
-            'stable');
+        missingRigidBodyNames = setdiff(rigidBodyNamesToAverage, currentRigidBodies.Properties.VariableNames, 'stable');
         if ~isempty(missingRigidBodyNames)
             error('build_ultrasoundBone_intersectionData:MissingCsvRigidBody', ...
-                'CSV file "%s" does not contain configured rigid body "%s".', ...
-                csvPath, missingRigidBodyNames{1});
+                  'CSV file "%s" does not contain configured rigid body "%s".', ...
+                  csvPath, missingRigidBodyNames{1});
         end
         snapshotRigidBodyTables{fileIndex} = currentRigidBodies;
     end
@@ -201,12 +208,10 @@ imageToProbeTransformIndex = find(strcmp( ...
     {transformations.Name}, 'ImageToProbe'));
 if numel(imageToProbeTransformIndex) ~= 1
     error('build_ultrasoundBone_intersectionData:InvalidFcalImageToProbeTransform', ...
-        ['Expected exactly one ImageToProbe transform in "%s", but found ' ...
-         '%d.'], ...
-        fullfile_fcalconfig, numel(imageToProbeTransformIndex));
+          'Expected exactly one ImageToProbe transform in "%s", but found %d.', ...
+          fullfile_fcalconfig, numel(imageToProbeTransformIndex));
 end
-T_image_probecalib = ...
-    transformations(imageToProbeTransformIndex).Matrix;
+T_image_probecalib = transformations(imageToProbeTransformIndex).Matrix;
 
 % The original T_image_probe contains
 % Extract the original 3x3 rotation block from Image->Probe transform.
@@ -306,13 +311,11 @@ for snapshotIndex = 1:numel(snapshotData)
     % Count this directory's packets so only its local plane array is
     % preallocated. Invalid packets are trimmed from this array below.
     currentSnapshotSequences = currentSnapshotData.sequences;
-    maximumGroupPlaneCount = 0;
+    maximumGroupPlaneCount   = 0;
     for sequenceIndex = 1:numel(currentSnapshotSequences)
-        maximumGroupPlaneCount = maximumGroupPlaneCount + ...
-            numel(currentSnapshotSequences(sequenceIndex).packets);
+        maximumGroupPlaneCount = maximumGroupPlaneCount + numel(currentSnapshotSequences(sequenceIndex).packets);
     end
-    currentGroupPlanes = repmat( ...
-        snapshotPlaneTemplate, 1, maximumGroupPlaneCount);
+    currentGroupPlanes     = repmat(snapshotPlaneTemplate, 1, maximumGroupPlaneCount);
     currentGroupPlaneCount = 0;
 
     % Visit every MHA file stored in the current snapshot directory.
@@ -610,8 +613,7 @@ for boneIndex = 1:numel(boneUnits)
 
     % The marker centroids are CT-frame columns in a 3-by-N matrix. Transpose
     % them for the shared point helper so the displayed markers also use ref.
-    pinMarkerCentroidsRef = applyRigidTransform( ...
-        currentPin.marker_centroids.', T_CT_ref);
+    pinMarkerCentroidsRef = applyRigidTransform(currentPin.marker_centroids.', T_CT_ref);
 
     % Only markers belonging to the pin selected above are displayed.
     scatter3(ax1, ...
@@ -677,12 +679,14 @@ intersections = repmat(intersectionGroupTemplate, 1, numel(snapshotPlanes));
 
 % Count all local records only for progress reporting. This does not flatten
 % the stored data or change the directory-based indexing contract.
-totalSnapshotPlaneCount = sum(arrayfun(@(snapshotGroup) numel(snapshotGroup.data), snapshotPlanes));
+totalSnapshotPlaneCount     = sum(arrayfun(@(snapshotGroup) numel(snapshotGroup.data), snapshotPlanes));
 processedSnapshotPlaneCount = 0;
 
 % Compute every result once so table browsing only redraws the selected image
 % and never repeats the expensive mesh-plane intersection calculation.
 for groupIndex = 1:numel(snapshotPlanes)
+
+    % Get current plane group
     currentPlaneGroup = snapshotPlanes(groupIndex);
 
     % Copy the group metadata so both result containers expose the same outer
@@ -694,6 +698,8 @@ for groupIndex = 1:numel(snapshotPlanes)
         intersectionTemplate, 1, numel(currentPlaneGroup.data));
 
     for planeIndex = 1:numel(currentPlaneGroup.data)
+
+        % Get current snapshot
         processedSnapshotPlaneCount = processedSnapshotPlaneCount + 1;
 
         % Read the aligned plane and initialize its timestamp before geometry
@@ -770,413 +776,3 @@ end
         snapshotPlanes, intersections, boneMeshesRefByCode, ...
         'Mode', displayMode, ...
         'OutputDirectory', defaultOutputDirectory);
-
-
-
-
-%% HELPER: READ SNAPSHOT PROCESS CONFIGURATION
-
-function configuration = readSnapshotProcessConfiguration(configurationPath)
-%READSNAPSHOTPROCESSCONFIGURATION Load and validate snapshot workflow settings.
-% This function reads the user-editable JSON file and prepares the paths and
-% options needed by the snapshot workflow. Keeping this work here prevents
-% experiment-specific values from being hardcoded in the processing script.
-%
-% Input:
-%   configurationPath - Path to the JSON configuration file.
-%
-% Output:
-%   configuration - Scalar struct containing validated absolute input paths,
-%                   normalized pin selections and rigid-body names, and the
-%                   normalized browser mode.
-
-% Check the file first so a missing config is reported separately from bad
-% JSON syntax.
-if ~isfile(configurationPath)
-    error('build_ultrasoundBone_intersectionData:ConfigurationNotFound', ...
-        'Configuration file not found: %s', configurationPath);
-end
-
-% Include the config path in parsing errors because that is the file the user
-% needs to correct.
-try
-    configurationText = fileread(configurationPath);
-    rawConfiguration = jsondecode(configurationText);
-catch configurationError
-    error('build_ultrasoundBone_intersectionData:InvalidConfigurationJson', ...
-        'Could not read configuration JSON "%s". Reason: %s', ...
-        configurationPath, configurationError.message);
-end
-
-% One top-level JSON object gives every required setting one unambiguous
-% location.
-if ~isstruct(rawConfiguration) || ~isscalar(rawConfiguration)
-    error('build_ultrasoundBone_intersectionData:InvalidConfigurationRoot', ...
-        'Configuration JSON must contain one object at its top level: %s', ...
-        configurationPath);
-end
-configurationDirectory = fileparts(configurationPath);
-
-% Read path text before resolving it so missing fields and path failures have
-% separate, useful messages.
-snapshotDirectorySetting = requireConfigurationText( ...
-    rawConfiguration, 'snapshotDirectory', 'snapshotDirectory');
-fcalConfigFileSetting = requireConfigurationText( ...
-    rawConfiguration, 'fcalConfigFile', 'fcalConfigFile');
-ctPostProcessedMatFileSetting = requireConfigurationText( ...
-    rawConfiguration, ...
-    'ctPostProcessedMatFile', ...
-    'ctPostProcessedMatFile');
-
-% Relative settings start beside the JSON file. Existing absolute paths are
-% preserved, which supports both portable and machine-specific configs.
-snapshotDirectory = resolveConfiguredInputPath( ...
-    snapshotDirectorySetting, ...
-    configurationDirectory, ...
-    'snapshotDirectory', ...
-    'directory', ...
-    '');
-fcalConfigFile = resolveConfiguredInputPath( ...
-    fcalConfigFileSetting, ...
-    configurationDirectory, ...
-    'fcalConfigFile', ...
-    'file', ...
-    '.xml');
-ctPostProcessedMatFile = resolveConfiguredInputPath( ...
-    ctPostProcessedMatFileSetting, ...
-    configurationDirectory, ...
-    'ctPostProcessedMatFile', ...
-    'file', ...
-    '.mat');
-
-% Read the two required pin places and normalize them before they are used to
-% build motion-capture rigid-body names.
-rawPinSelection = requireConfigurationObject( ...
-    rawConfiguration, 'pinSelection', 'pinSelection');
-femurPinPlace = normalizePinPlace( ...
-    requireConfigurationText(rawPinSelection, 'F', 'pinSelection.F'), ...
-    'F', ...
-    'pinSelection.F');
-tibiaPinPlace = normalizePinPlace( ...
-    requireConfigurationText(rawPinSelection, 'T', 'pinSelection.T'), ...
-    'T', ...
-    'pinSelection.T');
-pinSelection = struct('F', femurPinPlace, 'T', tibiaPinPlace);
-
-% Preserve the configured averaging order while normalizing the names to the
-% table-field spelling used by the processing loop.
-rigidBodyNamesToAverage = requireConfigurationTextArray( ...
-    rawConfiguration, ...
-    'rigidBodyNamesToAverage', ...
-    'rigidBodyNamesToAverage');
-rigidBodyNamesToAverage = cellfun( ...
-    @(name) upper(strtrim(name)), ...
-    rigidBodyNamesToAverage, ...
-    'UniformOutput', false);
-
-% Reject invalid or duplicate names before any CSV files are opened.
-for rigidBodyIndex = 1:numel(rigidBodyNamesToAverage)
-    currentRigidBodyName = rigidBodyNamesToAverage{rigidBodyIndex};
-    if isempty(currentRigidBodyName) || ~isvarname(currentRigidBodyName)
-        error('build_ultrasoundBone_intersectionData:InvalidRigidBodyName', ...
-            ['Configuration field "rigidBodyNamesToAverage" contains an ' ...
-             'invalid MATLAB table variable name: "%s".'], ...
-            currentRigidBodyName);
-    end
-end
-if numel(unique(rigidBodyNamesToAverage, 'stable')) ...
-        ~= numel(rigidBodyNamesToAverage)
-    error('build_ultrasoundBone_intersectionData:DuplicateRigidBodyName', ...
-        ['Configuration field "rigidBodyNamesToAverage" must not contain ' ...
-         'duplicate names.']);
-end
-
-% Registration always needs the reference and both selected bone pins.
-% Enforcing this relationship here prevents a later missing-field failure.
-requiredRigidBodyNames = { ...
-    'B_N_REF', ...
-    sprintf('C_F_%s', femurPinPlace), ...
-    sprintf('C_T_%s', tibiaPinPlace)};
-missingRequiredRigidBodyNames = requiredRigidBodyNames( ...
-    ~ismember(requiredRigidBodyNames, rigidBodyNamesToAverage));
-if ~isempty(missingRequiredRigidBodyNames)
-    error('build_ultrasoundBone_intersectionData:MissingRequiredRigidBodyName', ...
-        ['Configuration field "rigidBodyNamesToAverage" must include "%s" ' ...
-         'for the selected reference and pin configuration.'], ...
-        missingRequiredRigidBodyNames{1});
-end
-
-% Normalize the browser option once so the main workflow can pass it directly
-% to displaySnapshotIntersectionBrowser.
-displayMode = lower(requireConfigurationText( ...
-    rawConfiguration, 'displayMode', 'displayMode'));
-if ~ismember(displayMode, {'display', 'review'})
-    error('build_ultrasoundBone_intersectionData:InvalidDisplayMode', ...
-        'Configuration field "displayMode" must be "display" or "review".');
-end
-
-% Return only checked values so the processing sections never need to access
-% raw JSON data.
-configuration = struct();
-configuration.snapshotDirectory = snapshotDirectory;
-configuration.fcalConfigFile = fcalConfigFile;
-configuration.ctPostProcessedMatFile = ctPostProcessedMatFile;
-configuration.pinSelection = pinSelection;
-configuration.rigidBodyNamesToAverage = rigidBodyNamesToAverage;
-configuration.displayMode = displayMode;
-end
-
-
-%% HELPER: REQUIRE CONFIGURATION OBJECT
-
-function requiredObject = requireConfigurationObject(parentObject, fieldName, fieldLabel)
-%REQUIRECONFIGURATIONOBJECT Return one required scalar JSON object.
-% This helper gives missing and incorrectly typed config sections a direct
-% error instead of allowing an unclear field-access failure later.
-%
-% Inputs:
-%   parentObject - Scalar MATLAB struct decoded from a JSON object.
-%   fieldName    - Field name to read from parentObject.
-%   fieldLabel   - User-facing field path included in error messages.
-%
-% Output:
-%   requiredObject - Required scalar struct stored in the named field.
-
-% Check both presence and type because nested config code assumes one object.
-if ~isstruct(parentObject) ...
-        || ~isscalar(parentObject) ...
-        || ~isfield(parentObject, fieldName)
-    error('build_ultrasoundBone_intersectionData:MissingConfigurationField', ...
-        'Required configuration object "%s" is missing.', fieldLabel);
-end
-requiredObject = parentObject.(fieldName);
-if ~isstruct(requiredObject) || ~isscalar(requiredObject)
-    error('build_ultrasoundBone_intersectionData:InvalidConfigurationField', ...
-        'Configuration field "%s" must contain one JSON object.', ...
-        fieldLabel);
-end
-end
-
-
-%% HELPER: REQUIRE CONFIGURATION TEXT
-
-function textValue = requireConfigurationText(parentObject, fieldName, fieldLabel)
-%REQUIRECONFIGURATIONTEXT Return one required nonempty JSON text value.
-% This helper normalizes JSON text to a MATLAB character vector so later
-% path and option checks use one predictable representation.
-%
-% Inputs:
-%   parentObject - Scalar MATLAB struct decoded from a JSON object.
-%   fieldName    - Field name to read from parentObject.
-%   fieldLabel   - User-facing field path included in error messages.
-%
-% Output:
-%   textValue - Trimmed, nonempty character vector from the named field.
-
-% Report a missing value before trying to inspect its type.
-if ~isstruct(parentObject) ...
-        || ~isscalar(parentObject) ...
-        || ~isfield(parentObject, fieldName)
-    error('build_ultrasoundBone_intersectionData:MissingConfigurationField', ...
-        'Required configuration field "%s" is missing.', fieldLabel);
-end
-rawValue = parentObject.(fieldName);
-
-% Accept either MATLAB text type because jsondecode behavior can differ by
-% release and JSON shape.
-if isstring(rawValue) && isscalar(rawValue)
-    textValue = char(rawValue);
-elseif ischar(rawValue) && isrow(rawValue)
-    textValue = rawValue;
-else
-    error('build_ultrasoundBone_intersectionData:InvalidConfigurationField', ...
-        'Configuration field "%s" must contain one text value.', ...
-        fieldLabel);
-end
-textValue = strtrim(textValue);
-if isempty(textValue)
-    error('build_ultrasoundBone_intersectionData:InvalidConfigurationField', ...
-        'Configuration field "%s" cannot be empty.', fieldLabel);
-end
-end
-
-
-%% HELPER: REQUIRE CONFIGURATION TEXT ARRAY
-
-function textValues = requireConfigurationTextArray(parentObject, fieldName, fieldLabel)
-%REQUIRECONFIGURATIONTEXTARRAY Return a required nonempty JSON string array.
-% This helper preserves the JSON element order because the averaging loop
-% should follow the order chosen in the configuration.
-%
-% Inputs:
-%   parentObject - Scalar MATLAB struct decoded from the top-level JSON object.
-%   fieldName    - Field name of the JSON string array.
-%   fieldLabel   - User-facing field path included in error messages.
-%
-% Output:
-%   textValues - Row cell array of trimmed, nonempty character vectors.
-
-% Check field presence before converting the decoded array.
-if ~isstruct(parentObject) ...
-        || ~isscalar(parentObject) ...
-        || ~isfield(parentObject, fieldName)
-    error('build_ultrasoundBone_intersectionData:MissingConfigurationField', ...
-        'Required configuration field "%s" is missing.', fieldLabel);
-end
-rawValues = parentObject.(fieldName);
-
-% JSON string arrays normally decode as cell arrays of char vectors. Also
-% accept MATLAB string vectors for compatibility with prepared structs.
-if iscell(rawValues) && isvector(rawValues)
-    textValues = rawValues(:).';
-elseif isstring(rawValues) && isvector(rawValues)
-    textValues = cellstr(rawValues(:).');
-else
-    error('build_ultrasoundBone_intersectionData:InvalidConfigurationField', ...
-        'Configuration field "%s" must be a JSON string array.', ...
-        fieldLabel);
-end
-if isempty(textValues)
-    error('build_ultrasoundBone_intersectionData:InvalidConfigurationField', ...
-        'Configuration field "%s" cannot be empty.', fieldLabel);
-end
-
-% Normalize every entry separately so one invalid item identifies its array
-% index in the error.
-for valueIndex = 1:numel(textValues)
-    currentValue = textValues{valueIndex};
-    if isstring(currentValue) && isscalar(currentValue)
-        currentValue = char(currentValue);
-    end
-    if ~ischar(currentValue) || ~isrow(currentValue)
-        error('build_ultrasoundBone_intersectionData:InvalidConfigurationField', ...
-            ['Configuration field "%s" item %d must contain one text ' ...
-             'value.'], ...
-            fieldLabel, valueIndex);
-    end
-
-    currentValue = strtrim(currentValue);
-    if isempty(currentValue)
-        error('build_ultrasoundBone_intersectionData:InvalidConfigurationField', ...
-            'Configuration field "%s" item %d cannot be empty.', ...
-            fieldLabel, valueIndex);
-    end
-    textValues{valueIndex} = currentValue;
-end
-end
-
-
-%% HELPER: NORMALIZE PLACE
-
-function normalizedPlace = normalizePinPlace(rawPlace, boneCode, fieldLabel)
-%NORMALIZEPINPLACE Normalize and validate one configured bone-pin location.
-% The normalized place is used both for CT pin selection and for building the
-% matching motion-capture table variable, so both systems stay consistent.
-%
-% Inputs:
-%   rawPlace   - Nonempty configured pin-location text.
-%   boneCode   - Bone code used in the rigid-body name, such as F or T.
-%   fieldLabel - User-facing configuration field path for error messages.
-%
-% Output:
-%   normalizedPlace - Uppercase pin-location character vector.
-
-% Uppercase the place because CT and motion-capture identifiers use the same
-% case-insensitive convention.
-normalizedPlace = upper(strtrim(rawPlace));
-candidateRigidBodyName = sprintf('C_%s_%s', boneCode, normalizedPlace);
-
-% The CSV reader stores rigid bodies as table variable names, so the generated
-% name must be valid for dynamic table access.
-if ~isvarname(candidateRigidBodyName)
-    error('build_ultrasoundBone_intersectionData:InvalidPinSelection', ...
-        ['Configuration field "%s" creates invalid rigid-body name ' ...
-         '"%s".'], ...
-        fieldLabel, candidateRigidBodyName);
-end
-end
-
-
-%% HELPER: RESOLVE PATH
-
-function resolvedPath = resolveConfiguredInputPath( ...
-        configuredPath, configurationDirectory, fieldLabel, ...
-        expectedKind, expectedExtension)
-%RESOLVECONFIGUREDINPUTPATH Resolve and validate one configured input path.
-% Relative paths are anchored beside the JSON file so configuration behavior
-% does not depend on MATLAB's current working directory.
-%
-% Inputs:
-%   configuredPath        - Absolute path or path relative to the JSON file.
-%   configurationDirectory - Directory containing the JSON configuration.
-%   fieldLabel            - User-facing field name for error messages.
-%   expectedKind          - Expected path kind: 'file' or 'directory'.
-%   expectedExtension     - Required file extension, or empty for a directory.
-%
-% Output:
-%   resolvedPath - Canonical absolute path to the existing input.
-
-% Build the candidate path without changing already absolute settings.
-if isAbsolutePath(configuredPath)
-    candidatePath = configuredPath;
-else
-    candidatePath = fullfile(configurationDirectory, configuredPath);
-end
-
-% File settings include an extension check so selecting the wrong input type
-% is reported before the workflow calls a specialized reader.
-if strcmp(expectedKind, 'file')
-    [~, ~, actualExtension] = fileparts(candidatePath);
-    if ~strcmpi(actualExtension, expectedExtension)
-        error('build_ultrasoundBone_intersectionData:InvalidInputExtension', ...
-            'Configuration field "%s" must identify a %s file.', ...
-            fieldLabel, expectedExtension);
-    end
-    inputExists = isfile(candidatePath);
-elseif strcmp(expectedKind, 'directory')
-    inputExists = isfolder(candidatePath);
-else
-    error('build_ultrasoundBone_intersectionData:InvalidExpectedPathKind', ...
-        'Internal path kind "%s" is not supported.', expectedKind);
-end
-if ~inputExists
-    error('build_ultrasoundBone_intersectionData:ConfiguredInputNotFound', ...
-        'Configured input "%s" was not found: %s', ...
-        fieldLabel, candidatePath);
-end
-
-% Canonicalize the existing path for stable error messages and provenance.
-[pathFound, pathAttributes] = fileattrib(candidatePath);
-if ~pathFound
-    error('build_ultrasoundBone_intersectionData:PathResolutionFailed', ...
-        'Could not resolve configured input "%s": %s', ...
-        fieldLabel, candidatePath);
-end
-resolvedPath = pathAttributes.Name;
-end
-
-
-%% HELPER: IS ABSOLUTE PATH
-function isAbsolute = isAbsolutePath(pathValue)
-%ISABSOLUTEPATH Identify absolute Windows, UNC, and Unix-style paths.
-% This helper is needed so relative configuration paths can be anchored
-% beside the JSON file without changing paths that are already absolute.
-%
-% Input:
-%   pathValue - Path stored as a character vector.
-%
-% Output:
-%   isAbsolute - Logical true when pathValue is an absolute path.
-
-% Windows accepts drive-rooted, UNC, and separator-rooted paths. Other
-% platforms use a leading forward slash.
-if ispc
-    hasDriveRoot = ~isempty(regexp( ...
-        pathValue, '^[A-Za-z]:[\\/]', 'once'));
-    hasSeparatorRoot = startsWith(pathValue, filesep) ...
-        || startsWith(pathValue, '/');
-    isAbsolute = hasDriveRoot || hasSeparatorRoot;
-else
-    isAbsolute = startsWith(pathValue, '/');
-end
-end

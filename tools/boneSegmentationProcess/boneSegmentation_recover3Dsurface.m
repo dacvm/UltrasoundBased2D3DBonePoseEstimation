@@ -1,26 +1,50 @@
 clear; clc; close all;
 
-%% SELECT INPUTS AND CONFIGURATION
+%% LOAD AND VALIDATE THE CONFIGURATION
 
-% This script combines two artifacts from the same processing workflow:
-% - boneSurface contains the detected bone coordinates in 2D image pixels.
-% - validSnapshots contains the matching ultrasound images and their poses.
-% Keep each directory and filename separate so selecting another run only
-% requires changing these values.
-filepath_boneSurface = 'D:\Documents\BELANDA\SonoSkin\codes\matlab\bmodeimage_3dspace\tools\boneSegmentationProcess\outputs';
-filename_boneSurface = 'boneSurface_20260805_140438.mat';
-fullpath_boneSurface = fullfile(filepath_boneSurface, filename_boneSurface);
+% Locate this script first so the configuration file can be found even when
+% MATLAB was started from a different current folder.
+scriptFullPath = mfilename('fullpath');
+if isempty(scriptFullPath)
+    error('boneSegmentation_recover3Dsurface:ScriptPathUnavailable', ...
+          'Run boneSegmentation_recover3Dsurface.m as a complete script so its configuration file can be located.');
+end
+scriptDirectory = fileparts(scriptFullPath);
 
-filepath_ultrasoundimage = 'D:\Documents\BELANDA\SonoSkin\codes\matlab\bmodeimage_3dspace\tools\ultrasoundSpatialProcessing\outputs';
-filename_ultrasoundimage = 'validSnapshots_20260804_152821.mat';
+% Add the shared helpers and this script's specific helpers before reading
+% configuration because the reader now lives outside the main script.
+sharedHelperDirectory = fullfile(scriptDirectory, 'helpers');
+scriptHelperDirectory = fullfile( ...
+    sharedHelperDirectory, 'boneSegmentation_recover3Dsurface');
+if ~isfolder(sharedHelperDirectory) || ~isfolder(scriptHelperDirectory)
+    error('boneSegmentation_recover3Dsurface:HelperDirectoryNotFound', ...
+          'Required bone-segmentation helper directory was not found: %s', ...
+          scriptHelperDirectory);
+end
+addpath(sharedHelperDirectory, scriptHelperDirectory, '-begin');
+
+% Keep dataset-specific paths and filenames in JSON. A new processing run
+% can then be selected without changing this MATLAB script.
+configurationFilePath = fullfile(scriptDirectory, 'configs', 'boneSegmentation_recover3Dsurface.json');
+configuration = readBoneSurfaceRecoveryConfiguration(configurationFilePath);
+
+% Use short workflow names below while keeping the requested JSON field names
+% in the validated configuration structure. Grab the bone surface path:
+filepath_boneSurface     = configuration.input.boneSurfaceFilePath;
+filename_boneSurface     = configuration.input.boneSurfaceFileName;
+fullpath_boneSurface     = fullfile(filepath_boneSurface, filename_boneSurface);
+% Grab the ultrasound image path
+filepath_ultrasoundimage = configuration.input.ultrasoundImageFilePath;
+filename_ultrasoundimage = configuration.input.ultrasoundImageFileName;
 fullfile_ultrasoundimage = fullfile(filepath_ultrasoundimage, filename_ultrasoundimage);
+% Grab the output path
+boneSurface3DOutputPath  = configuration.output.boneSurface3DOutputPath;
 
 %% PREPARE THE REQUIRED FUNCTION PATHS
 
 % The script uses one geometry helper to transform points and one display
 % helper to draw ultrasound images in 3D. Find these folders relative to this
 % script instead of assuming that MATLAB was started in the project root.
-scriptDirectory  = fileparts(mfilename('fullpath'));
 projectDirectory = fileparts(fileparts(scriptDirectory));
 geometryFunctionDirectory = fullfile(projectDirectory, 'functions', 'geometry');
 displayFunctionDirectory  = fullfile(projectDirectory, 'functions', 'display');
@@ -35,19 +59,37 @@ addpath(geometryFunctionDirectory, displayFunctionDirectory);
 
 %% LOAD THE BONE SURFACE RESULTS
 
-% LOAD with an output returns a temporary structure. Requesting the variable
-% name explicitly avoids reading other large values stored in the MAT-file.
+% LOAD with an output returns a temporary structure. Requesting both required
+% variables explicitly avoids reading other large values stored in the MAT-file.
 if ~isfile(fullpath_boneSurface)
     error('boneSegmentation_recover3Dsurface:MissingSurfaceFile', ...
         'Bone-surface file not found: %s', fullpath_boneSurface);
 end
-surfaceFileData = load(fullpath_boneSurface, 'surfaceResults');
+surfaceFileData = load(fullpath_boneSurface, 'surfaceResults', 'extractionMetadata');
 if ~isfield(surfaceFileData, 'surfaceResults')
     error('boneSegmentation_recover3Dsurface:MissingSurfaceResults', ...
-        'The selected MAT-file does not contain surfaceResults.');
+          'The selected MAT-file does not contain surfaceResults.');
 end
-surfaceResults = surfaceFileData.surfaceResults;
+if ~isfield(surfaceFileData, 'extractionMetadata')
+    error('boneSegmentation_recover3Dsurface:MissingExtractionMetadata', ...
+          'The selected MAT-file does not contain extractionMetadata.');
+end
+surfaceResults     = surfaceFileData.surfaceResults;
+extractionMetadata = surfaceFileData.extractionMetadata;
 clear surfaceFileData;
+
+% The extraction step must declare the complete result schema before this
+% script fills the 3D coordinates. Reject older artifacts instead of silently
+% creating a new field here, because that would make saved results inconsistent.
+for groupIndex = 1:numel(surfaceResults)
+    currentSurfaceData = surfaceResults(groupIndex).data;
+    if ~isstruct(currentSurfaceData) || ~isfield(currentSurfaceData, 'surfaceCoordinatesXYZRef')
+        error('boneSegmentation_recover3Dsurface:MissingSurfaceCoordinatesXYZRef', ...
+              ['Surface group %d does not contain surfaceCoordinatesXYZRef.' ...
+               'Rerun boneSegmentation_extractSurface.m to create a compatible MAT-file.'], ...
+            groupIndex);
+    end
+end
 
 %% LOAD THE ULTRASOUND SEQUENCE
 
@@ -148,7 +190,7 @@ for groupIndex = 1:numberOfSurfaceGroups
         % supplies the pixels, while currentPlane supplies physical size and
         % the image-to-reference transformation.
         currentSurfaceResult = surfaceResults(groupIndex).data(recordIndex);
-        currentPlane = ultrasoundSequence(groupIndex).data(recordIndex).plane;
+        currentPlane         = ultrasoundSequence(groupIndex).data(recordIndex).plane;
 
         % W and H span the first-to-last pixel centres, so divide each extent
         % by one fewer than the corresponding number of pixels.
@@ -156,20 +198,21 @@ for groupIndex = 1:numberOfSurfaceGroups
             double(currentPlane.W) / (double(currentPlane.nCols) - 1), ...
             double(currentPlane.H) / (double(currentPlane.nRows) - 1)];
 
-        % surfacePixelCoordinatesXY stores one-based [column,row] positions.
+        % surfaceCoordinatesXY stores one-based [column,row] positions.
         % Subtract one to place the first pixel centre at image-frame [0,0].
-        surfacePixelCoordinatesXY  = double(currentSurfaceResult.surfacePixelCoordinatesXY);
-        numberOfSurfacePoints      = size(surfacePixelCoordinatesXY, 1);
+        surfaceCoordinatesXY       = double(currentSurfaceResult.surfaceCoordinatesXY);
+        numberOfSurfacePoints      = size(surfaceCoordinatesXY, 1);
         surfaceCoordinatesImageXYZ = [ ...
-            (surfacePixelCoordinatesXY(:, 1) - 1) * pixelSpacingXYMm(1), ...
-            (surfacePixelCoordinatesXY(:, 2) - 1) * pixelSpacingXYMm(2), ...
+            (surfaceCoordinatesXY(:, 1) - 1) * pixelSpacingXYMm(1), ...
+            (surfaceCoordinatesXY(:, 2) - 1) * pixelSpacingXYMm(2), ...
             zeros(numberOfSurfacePoints, 1)];
 
         % Ultrasound pixels lie on the image plane, so their local Z coordinate
         % is zero. applyRigidTransform applies both the rotation and translation
-        % in T_image_ref to produce physical points in the ref frame.
-        surfaceCoordinatesRefXYZ = applyRigidTransform(surfaceCoordinatesImageXYZ, currentPlane.T_image_ref);
-        surfaceResults(groupIndex).data(recordIndex).surfaceCoordinatesRefXYZ = surfaceCoordinatesRefXYZ;
+        % in T_image_ref to produce physical points in the ref frame. Fill the
+        % field that was already declared by the surface extraction step.
+        surfaceCoordinatesXYZRef = applyRigidTransform(surfaceCoordinatesImageXYZ, currentPlane.T_image_ref);
+        surfaceResults(groupIndex).data(recordIndex).surfaceCoordinatesXYZRef = surfaceCoordinatesXYZRef;
 
         totalRecoveredPointCount = totalRecoveredPointCount + numberOfSurfacePoints;
         totalSurfaceRecordCount  = totalSurfaceRecordCount + 1;
@@ -238,19 +281,19 @@ for groupIndex = 1:numberOfSurfaceGroups
     for recordIndex = 1:numel(surfaceResults(groupIndex).data)
 
         % Get current data
-        surfaceCoordinatesRefXYZ = surfaceResults(groupIndex).data(recordIndex).surfaceCoordinatesRefXYZ;
+        surfaceCoordinatesXYZRef = surfaceResults(groupIndex).data(recordIndex).surfaceCoordinatesXYZRef;
 
         % Some valid records may contain no detected surface. Their image plane
         % remains visible, but there are no 3D bone points to draw.
-        if isempty(surfaceCoordinatesRefXYZ)
+        if isempty(surfaceCoordinatesXYZRef)
             continue;
         end
 
         % Display the 3d bone surface
         boneSurfaceHandle = scatter3(ax1, ...
-            surfaceCoordinatesRefXYZ(:, 1), ...
-            surfaceCoordinatesRefXYZ(:, 2), ...
-            surfaceCoordinatesRefXYZ(:, 3), ...
+            surfaceCoordinatesXYZRef(:, 1), ...
+            surfaceCoordinatesXYZRef(:, 2), ...
+            surfaceCoordinatesXYZRef(:, 3), ...
             10, surfaceGroupColors(groupIndex, :), 'filled', ...
             'Tag', 'recovered_bone_surface');
 
@@ -276,3 +319,18 @@ axis(ax1, 'equal');
 drawnow;
 
 fprintf('Recovered %d bone-surface point(s) from %d record(s) in ref.\n', totalRecoveredPointCount, totalSurfaceRecordCount);
+
+%% SAVE THE RECOVERED BONE SURFACES
+
+% Use the same timestamped filename convention as the extraction step. Save
+% in the configured output directory while the original extraction metadata
+% stays unchanged.
+recoveryTimestamp = char(datetime('now', 'Format', 'yyyyMMdd_HHmmss'));
+recoveredSurfaceOutputFilePath = fullfile( ...
+    boneSurface3DOutputPath, ['boneSurface_', recoveryTimestamp, '.mat']);
+
+% surfaceResults now contains the recovered reference-frame coordinates. Keep
+% extractionMetadata with it so the processing provenance is not separated from
+% the numerical result.
+save(recoveredSurfaceOutputFilePath, 'surfaceResults', 'extractionMetadata', '-v7.3');
+fprintf('Saved recovered bone surfaces to:\n%s\n', recoveredSurfaceOutputFilePath);
