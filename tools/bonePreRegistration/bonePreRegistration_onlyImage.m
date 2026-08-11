@@ -271,7 +271,6 @@ axis(ax1, 'equal');
 drawnow;
 
 %% PRE-REGISTRATION STEP
-
 %% FLATTEN AND GROUP THE REGIONAL BONE-SURFACE POINTS
 
 % Keep the same region names as landmarks. This allows later code to access a
@@ -296,6 +295,8 @@ end
 % Each surfaceResults entry already represents one anatomical region. Combine
 % all image records from that entry into the matching output region.
 for groupIndex = 1:numel(surfaceResults)
+
+    % Get the current data
     groupName = lower(string(surfaceResults(groupIndex).name));
     boneCode = upper(string(surfaceResults(groupIndex).bone));
 
@@ -307,6 +308,7 @@ for groupIndex = 1:numel(surfaceResults)
         regionName = "shaft";
     end
 
+    % Check if there is unknown region
     if ~any(regionName == regionNames)
         error('bonePreRegistration_onlyImage:UnknownSurfaceRegion', ...
               'Cannot identify the region for surface group "%s".', groupName);
@@ -353,26 +355,26 @@ boneCorrespondences = repmat(struct( ...
 
 % Use one color per bone for its CT mesh and landmarks. Correspondence lines
 % use region colors so medial, lateral, and shaft candidates can be separated.
-boneDisplayColors = lines(max(numel(landmarks), 1));
-regionLineColors = lines(numel(regionNames));
+boneDisplayColors  = lines(max(numel(landmarks), 1));
+regionLineColors   = lines(numel(regionNames));
 availableBoneCodes = upper(string({bones.bone}));
 
+% Loop for all landmarks
 for boneIndex = 1:numel(landmarks)
-    boneCorrespondences(boneIndex).name = ...
-        regionalSurfacePoints(boneIndex).name;
-    boneCorrespondences(boneIndex).bone = ...
-        regionalSurfacePoints(boneIndex).bone;
+
+    % Get current data
+    boneCorrespondences(boneIndex).name = regionalSurfacePoints(boneIndex).name;
+    boneCorrespondences(boneIndex).bone = regionalSurfacePoints(boneIndex).bone;
 
     % Find the CT mesh by bone code instead of assuming bones and landmarks
     % were saved in the same order.
     currentBoneCode = boneCorrespondences(boneIndex).bone;
-    meshBoneIndex = find(availableBoneCodes == currentBoneCode);
+    meshBoneIndex   = find(availableBoneCodes == currentBoneCode);
     if numel(meshBoneIndex) ~= 1
         error('bonePreRegistration_onlyImage:UnmatchedBoneMesh', ...
               'Expected one CT mesh for bone code "%s", but found %d.', ...
               currentBoneCode, numel(meshBoneIndex));
     end
-
     currentBoneMesh = bones(meshBoneIndex).mesh;
     if ~isa(currentBoneMesh, 'triangulation')
         error('bonePreRegistration_onlyImage:InvalidBoneMesh', ...
@@ -388,38 +390,35 @@ for boneIndex = 1:numel(landmarks)
         'FaceColor', boneDisplayColors(boneIndex, :), ...
         'FaceAlpha', 0.25, ...
         'EdgeColor', 'none', ...
-        'DisplayName', sprintf('%s mesh (CT)', ...
-            boneCorrespondences(boneIndex).name));
+        'DisplayName', sprintf('%s mesh (CT)', boneCorrespondences(boneIndex).name));
 
     % Process the regions in a fixed order so the final rows are easy to
     % inspect: medial first, followed by lateral and shaft.
     for regionIndex = 1:numel(regionNames)
-        regionName = regionNames(regionIndex);
-        regionField = char(regionName);
+
+        % Get current data
+        regionName    = regionNames(regionIndex);
+        regionField   = char(regionName);
         surfacePoints = regionalSurfacePoints(boneIndex).(regionField);
         landmarkPoint = landmarks(boneIndex).(regionField);
 
         % One regional landmark must be one finite XYZ point. A clear error
         % here is easier to diagnose than a later estgeotform3d failure.
-        if ~isnumeric(landmarkPoint) || ~isreal(landmarkPoint) || ...
-                ~isequal(size(landmarkPoint), [1, 3]) || ...
-                any(~isfinite(landmarkPoint))
+        if ~isnumeric(landmarkPoint) || ~isreal(landmarkPoint) || ~isequal(size(landmarkPoint), [1, 3]) || any(~isfinite(landmarkPoint))
             error('bonePreRegistration_onlyImage:InvalidLandmarkPoint', ...
-                  ['landmarks(%d).%s must be a finite numeric ' ...
-                   '1-by-3 point.'], boneIndex, regionField);
+                  'landmarks(%d).%s must be a finite numeric 1-by-3 point.', boneIndex, regionField);
         end
         landmarkPoint = double(landmarkPoint);
 
         % Plot all three CT landmarks, including landmarks whose regional
         % ultrasound measurement is currently empty.
         landmarkHandle = scatter3(ax1, ...
-            landmarkPoint(1), landmarkPoint(2), landmarkPoint(3), ...
-            90, boneDisplayColors(boneIndex, :), 'filled', ...
-            'MarkerEdgeColor', 'k', ...
-            'LineWidth', 1.0);
+                            landmarkPoint(1), landmarkPoint(2), landmarkPoint(3), ...
+                            90, boneDisplayColors(boneIndex, :), 'filled', ...
+                            'MarkerEdgeColor', 'k', ...
+                            'LineWidth', 1.0);
         if regionIndex == 1
-            landmarkHandle.DisplayName = sprintf('%s landmarks (CT)', ...
-                boneCorrespondences(boneIndex).name);
+            landmarkHandle.DisplayName = sprintf('%s landmarks (CT)', boneCorrespondences(boneIndex).name);
         else
             landmarkHandle.HandleVisibility = 'off';
         end
@@ -430,28 +429,24 @@ for boneIndex = 1:numel(landmarks)
             continue;
         end
 
-        numberOfSurfacePoints = size(surfacePoints, 1);
-
         % Repeat the regional landmark once for every surface point. Row k in
         % landmarkPointsCT then corresponds to row k in surfacePointsRef.
-        repeatedLandmarkPoints = repmat( ...
-            landmarkPoint, numberOfSurfacePoints, 1);
-        repeatedRegionLabels = repmat( ...
-            regionName, numberOfSurfacePoints, 1);
+        numberOfSurfacePoints  = size(surfacePoints, 1);
+        repeatedLandmarkPoints = repmat(landmarkPoint, numberOfSurfacePoints, 1);
+        repeatedRegionLabels   = repmat(regionName, numberOfSurfacePoints, 1);
 
-        boneCorrespondences(boneIndex).landmarkPointsCT = [ ...
-            boneCorrespondences(boneIndex).landmarkPointsCT; ...
-            repeatedLandmarkPoints];
-        boneCorrespondences(boneIndex).surfacePointsRef = [ ...
-            boneCorrespondences(boneIndex).surfacePointsRef; ...
-            surfacePoints];
-        boneCorrespondences(boneIndex).regionLabels = [ ...
-            boneCorrespondences(boneIndex).regionLabels; ...
-            repeatedRegionLabels];
+        % Store the bone correspondences for documentation
+        boneCorrespondences(boneIndex).landmarkPointsCT = [ boneCorrespondences(boneIndex).landmarkPointsCT; repeatedLandmarkPoints];
+        boneCorrespondences(boneIndex).surfacePointsRef = [ boneCorrespondences(boneIndex).surfacePointsRef; surfacePoints];
+        boneCorrespondences(boneIndex).regionLabels     = [ boneCorrespondences(boneIndex).regionLabels; repeatedRegionLabels];
 
-        % Draw one line for every candidate pair. The line starts at the CT
-        % landmark and ends at its regional surface point in ref.
-        for pointIndex = 1:numberOfSurfacePoints
+        % Randomly sample at most 20 pairs per region only for visualization,
+        % so drawing the correspondence lines remains fast.
+        numberOfPointsToPlot = min(20, numberOfSurfacePoints);
+        pointIndicesToPlot   = randperm(numberOfSurfacePoints, numberOfPointsToPlot);
+        % Each line starts at the CT landmark and ends at one sampled regional
+        % surface point in ref.
+        for pointIndex = pointIndicesToPlot
             plot3(ax1, ...
                 [landmarkPoint(1), surfacePoints(pointIndex, 1)], ...
                 [landmarkPoint(2), surfacePoints(pointIndex, 2)], ...
@@ -476,4 +471,130 @@ axis(ax1, 'tight');
 axis(ax1, 'equal');
 drawnow;
 
-%%
+%% PERFORM COARSE REGISTRATION AND DISPLAY THE TRANSFORMED MESHES
+
+% Keep both transformation directions as raw 4x4 matrices so their source
+% and target frames remain explicit throughout later processing.
+coarseRegistrations = repmat(struct( ...
+    'name', "", ...
+    'bone', "", ...
+    'status', "not processed", ...
+    'T_ref_CT', [], ...
+    'T_CT_ref', [], ...
+    'boneMeshRef', []), size(boneCorrespondences));
+
+% Use a separate figure so the registration result is not hidden by the
+% original CT meshes, ultrasound images, and correspondence lines in ax1.
+fig2 = figure('Name', 'Coarse Bone Registration');
+ax2 = axes(fig2);
+xlabel(ax2, 'X_{ref} (mm)');
+ylabel(ax2, 'Y_{ref} (mm)');
+zlabel(ax2, 'Z_{ref} (mm)');
+title(ax2, 'Coarsely registered CT bone meshes and measured surfaces');
+grid(ax2, 'on');
+axis(ax2, 'equal');
+hold(ax2, 'on');
+view(ax2, 35, 40);
+
+% Draw the measured surface points first. These points are already in ref,
+% which is also the target frame of each transformed CT mesh below.
+for boneIndex = 1:numel(regionalSurfacePoints)
+
+    % Collect each region in a cell first so the numeric point matrix can be
+    % joined once after the loop instead of repeatedly growing in memory.
+    boneRegionPointSets = cell(1, numel(regionNames));
+    for regionIndex = 1:numel(regionNames)
+        regionField = char(regionNames(regionIndex));
+        boneRegionPointSets{regionIndex} = regionalSurfacePoints(boneIndex).(regionField);
+    end
+    allBoneSurfacePoints = vertcat(boneRegionPointSets{:});
+
+    % Bones without measured points, such as the current femur data, do not
+    % add a surface object to this result figure.
+    if isempty(allBoneSurfacePoints)
+        continue;
+    end
+
+    % Plot the bone surface
+    scatter3(ax2, ...
+        allBoneSurfacePoints(:, 1), ...
+        allBoneSurfacePoints(:, 2), ...
+        allBoneSurfacePoints(:, 3), ...
+        10, boneDisplayColors(boneIndex, :), 'filled', ...
+        'DisplayName', sprintf('%s surface (ref)', regionalSurfacePoints(boneIndex).name), ...
+        'Tag', 'coarse_registration_surface');
+end
+
+% Estimate and apply one independent rigid transformation for each bone.
+for boneIndex = 1:numel(boneCorrespondences)
+    coarseRegistrations(boneIndex).name = boneCorrespondences(boneIndex).name;
+    coarseRegistrations(boneIndex).bone = boneCorrespondences(boneIndex).bone;
+
+    % matchedPoints1 and matchedPoints2 intentionally follow the requested
+    % stable order: measured surface in ref first, CT landmarks second.
+    matchedPoints1 = boneCorrespondences(boneIndex).surfacePointsRef;
+    matchedPoints2 = boneCorrespondences(boneIndex).landmarkPointsCT;
+
+    % A 3D rigid estimate needs at least three unique, non-collinear points
+    % in both sets. Skip incomplete bones instead of stopping other bones.
+    uniqueMatchedPoints1  = unique(matchedPoints1, 'rows', 'stable');
+    uniqueMatchedPoints2  = unique(matchedPoints2, 'rows', 'stable');
+    hasEnoughUniquePoints = size(uniqueMatchedPoints1, 1) >= 3 &&  size(uniqueMatchedPoints2, 1) >= 3;
+    hasNoncollinearPoints = hasEnoughUniquePoints && ...
+                            rank(uniqueMatchedPoints1 - mean(uniqueMatchedPoints1, 1)) >= 2 && ...
+                            rank(uniqueMatchedPoints2 - mean(uniqueMatchedPoints2, 1)) >= 2;
+    if ~hasNoncollinearPoints
+        coarseRegistrations(boneIndex).status = "skipped: fewer than three non-collinear correspondence points";
+        warning('bonePreRegistration_onlyImage:InsufficientRegistrationPoints', ...
+                'Skipping coarse registration for bone "%s" because it does not have three non-collinear correspondence points.', ...
+                boneCorrespondences(boneIndex).bone);
+        continue;
+    end
+
+    % Let MATLAB estimate the ref-to-CT transform, then immediately extract
+    % its premultiply matrix so the rest of the workflow uses raw 4x4 transforms.
+    tform_ref_CT = estgeotform3d(matchedPoints1, matchedPoints2, 'rigid', 'MaxDistance', 100);
+    T_ref_CT     = tform_ref_CT.A;
+
+    % The CT mesh must be moved into ref, so derive the opposite direction
+    % explicitly from the estimated ref-to-CT matrix.
+    T_CT_ref = inv(T_ref_CT);
+
+    % Find this bone's CT triangulation by its code, then transform every
+    % vertex while keeping the triangle connectivity unchanged.
+    currentBoneCode = boneCorrespondences(boneIndex).bone;
+    meshBoneIndex = find(availableBoneCodes == currentBoneCode);
+    if numel(meshBoneIndex) ~= 1
+        error('bonePreRegistration_onlyImage:UnmatchedBoneMesh', ...
+              'Expected one CT mesh for bone code "%s", but found %d.', ...
+              currentBoneCode, numel(meshBoneIndex));
+    end
+    currentBoneMesh = bones(meshBoneIndex).mesh;
+
+    % Transform only the CT-frame vertices and reuse the original triangle
+    % connectivity to build a mesh whose points are expressed in ref.
+    bonePointsRef = applyRigidTransform(currentBoneMesh.Points, T_CT_ref);
+    boneMeshRef   = triangulation(currentBoneMesh.ConnectivityList, bonePointsRef);
+
+    % Store frame-named matrices and the ref-frame mesh for later use.
+    coarseRegistrations(boneIndex).status      = "registered";
+    coarseRegistrations(boneIndex).T_CT_ref    = T_CT_ref;
+    coarseRegistrations(boneIndex).boneMeshRef = boneMeshRef;
+
+    % Display the transformed CT mesh in the same ref frame as the measured
+    % points. Transparency keeps surface points visible through the mesh.
+    patch(ax2, ...
+        'Faces', boneMeshRef.ConnectivityList, ...
+        'Vertices', boneMeshRef.Points, ...
+        'FaceColor', boneDisplayColors(boneIndex, :), ...
+        'FaceAlpha', 0.30, ...
+        'EdgeColor', 'none', ...
+        'DisplayName', sprintf('%s mesh (registered)', boneCorrespondences(boneIndex).name), ...
+        'Tag', 'coarsely_registered_bone_mesh');
+end
+
+% Fit the final view after all successful registrations have been drawn.
+legend(ax2, 'show', 'Location', 'best', 'Interpreter', 'none');
+axis(ax2, 'tight');
+axis(ax2, 'equal');
+drawnow;
