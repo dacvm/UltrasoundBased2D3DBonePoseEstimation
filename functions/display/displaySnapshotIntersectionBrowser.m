@@ -28,6 +28,8 @@ function [figBrowser, validSnapshots, outputFilePath] = displaySnapshotIntersect
 %   'OutputDirectory' : Existing directory initially shown by the review
 %                       export dialog. The default empty value lets MATLAB
 %                       choose the dialog's initial directory.
+%   'ValidBonePoses' : Snapshot bone poses and ref-frame meshes to save beside
+%                      validSnapshots. The default is an empty struct.
 %
 % Outputs:
 %   figBrowser      : Handle to the new uifigure that contains one sortable
@@ -62,6 +64,7 @@ addParameter(browserInputParser, 'Mode', 'display', ...
 addParameter(browserInputParser, 'OutputDirectory', '', ...
     @(value) (ischar(value) && isrow(value)) || ...
     (isstring(value) && isscalar(value)));
+addParameter(browserInputParser, 'ValidBonePoses', struct(), @isstruct);
 parse(browserInputParser, varargin{:});
 
 % Normalize text once so all later branches use one simple mode flag.
@@ -79,6 +82,10 @@ if ~isempty(outputDirectory) && ~isfolder(outputDirectory)
     error('displaySnapshotIntersectionBrowser:OutputDirectoryNotFound', ...
         'OutputDirectory was not found: %s', outputDirectory);
 end
+
+% Keep the supplied bone-pose data in the function workspace so the review
+% export callback can save it in the same MAT file as validSnapshots.
+validBonePoses = browserInputParser.Results.ValidBonePoses;
 
 % Initialize optional outputs before any GUI callback can run. The empty
 % struct keeps the review output fields clear even when no export is made.
@@ -940,10 +947,10 @@ end
         end
         outputFilePath = fullfile(selectedDirectory, selectedFileName);
 
-        % Keep the required variable name and v7.3 format because ultrasound
-        % image payloads can make the exported dataset larger than 2 GB.
+        % Keep validSnapshots unchanged and save the matching bone poses in
+        % the same v7.3 MAT file.
         try
-            save(outputFilePath, 'validSnapshots', '-v7.3');
+            save(outputFilePath, 'validSnapshots', 'validBonePoses', '-v7.3');
         catch saveError
             validSnapshots = previousValidSnapshots;
             outputFilePath = previousOutputFilePath;

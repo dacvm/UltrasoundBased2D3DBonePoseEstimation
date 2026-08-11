@@ -32,7 +32,7 @@ addpath(helperDirectory);
 
 % Keep this tool's settings beside the workflow so its configuration does
 % not get mixed with configuration files owned by other project tools.
-configurationPath = fullfile(scriptDirectory, 'configs', 'extra_snapshotProcess_config.json');
+configurationPath = fullfile(scriptDirectory, 'configs', 'ultrasoundBone_intersectionData_snapshotConfig.json');
 configuration     = readSnapshotProcessConfiguration(configurationPath);
 
 % Use the tool-local outputs folder as the first save location shown by the
@@ -550,6 +550,20 @@ boneUnits = coupleBonesAndPins(bones, bonepins, pinSelection);
 % can later be intersected only with their corresponding anatomy.
 boneMeshesRefByCode = struct();
 
+% Save the same Snapshot bone poses and meshes used for the intersections so
+% later workflows do not need to read and average the Qualisys CSV files again.
+bonePoseDataTemplate = struct( ...
+    'sourceIndex', [], ...
+    'T_CT_ref', [], ...
+    'mesh', []);
+bonePoseTemplate = struct( ...
+    'bone', '', ...
+    'data', bonePoseDataTemplate);
+validBonePoses = struct( ...
+    'processingMode', "snapshot", ...
+    'ctPostProcessedMatFile', string(fullfile_bonectpostprocess), ...
+    'bonePoses', repmat(bonePoseTemplate, 1, numel(boneUnits)));
+
 % Visit the coupled units instead of assuming that bones and pins have the
 % same array length or ordering.
 for boneIndex = 1:numel(boneUnits)
@@ -588,6 +602,13 @@ for boneIndex = 1:numel(boneUnits)
     % T_CT_ref rather than with the bone ACS transform itself.
     bonePointsRef = applyRigidTransform(currentBone.mesh.Points, T_CT_ref);
     boneMeshRef   = triangulation(currentBone.mesh.ConnectivityList, bonePointsRef);
+
+    % Snapshot mode stores one aggregate record per bone. Its sourceIndex is
+    % empty because the averaged pose does not belong to one raw frame.
+    validBonePoses.bonePoses(boneIndex).bone = char(currentUnit.bone);
+    validBonePoses.bonePoses(boneIndex).data.sourceIndex = [];
+    validBonePoses.bonePoses(boneIndex).data.T_CT_ref = T_CT_ref;
+    validBonePoses.bonePoses(boneIndex).data.mesh = boneMeshRef;
 
     % Store only V and F because meshPlaneIntersectionPixels intentionally
     % enforces this exact mesh interface.
@@ -743,7 +764,7 @@ for groupIndex = 1:numel(snapshotPlanes)
 
         % Store all geometry outputs at the same group and local indices as
         % the source plane so browser callbacks never need a flattened lookup.
-        intersections(groupIndex).data(planeIndex).mask                  = mask;
+        intersections(groupIndex).data(planeIndex).mask                   = mask;
         intersections(groupIndex).data(planeIndex).pixelList              = pixelList;
         intersections(groupIndex).data(planeIndex).segments3D             = segments3D;
         intersections(groupIndex).data(planeIndex).segmentsUV             = segmentsUV;
@@ -775,4 +796,5 @@ end
     displaySnapshotIntersectionBrowser( ...
         snapshotPlanes, intersections, boneMeshesRefByCode, ...
         'Mode', displayMode, ...
-        'OutputDirectory', defaultOutputDirectory);
+        'OutputDirectory', defaultOutputDirectory, ...
+        'ValidBonePoses', validBonePoses);
