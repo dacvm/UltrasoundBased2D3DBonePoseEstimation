@@ -84,16 +84,15 @@ end
 ultrasoundFileData      = load(ultrasoundFilePath);
 ultrasoundVariableNames = fieldnames(ultrasoundFileData);
 
-% This tool expects the ultrasound MAT-file to contain exactly one variable.
-% Requiring one variable makes the next dynamic field lookup unambiguous and
-% prevents the script from silently choosing the wrong dataset.
-if numel(ultrasoundVariableNames) ~= 1
-    error('boneSegmentation_extractSurface:UnexpectedUltrasoundVariables', ...
-          'Expected one ultrasound variable in "%s", but found %d.', ...
-          ultrasoundFileName, numel(ultrasoundVariableNames));
+% Give a clear message when an incompatible MAT file was selected.
+if ~isfield(ultrasoundFileData, 'validSnapshots')
+    error('boneSegmentation_semiAutomatic:MissingValidSnapshots', ...
+          'The selected MAT file does not contain validSnapshots: %s', ...
+          ultrasoundFilePath);
 end
-ultrasoundSequence = ultrasoundFileData.(ultrasoundVariableNames{1});
-clear ultrasoundFileData ultrasoundVariableNames;
+% Give the loaded sequence one stable name for the segmentation workflow.
+ultrasoundSequence = ultrasoundFileData.validSnapshots;
+clear ultrasoundFileData;
 
 % Verify that the JSON settings file exists before trying to read its text.
 % The extractor depends on these settings, so continuing without them could
