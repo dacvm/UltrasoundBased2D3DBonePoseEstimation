@@ -8,9 +8,6 @@ filename_ultrasoundimage = 'validSnapshots_20260810_120415.mat';
 filepath_bonesurface = 'D:\Documents\BELANDA\SonoSkin\codes\matlab\bmodeimage_3dspace\tools\boneSegmentationProcess\outputs';
 filename_bonesurface = 'boneSurface_20260810_123356.mat';
 
-filepath_ctmat = 'D:\Documents\BELANDA\SonoSkin\codes\matlab\bmodeimage_3dspace\tools\ctkneePostProcess\outputs\kneephantom';
-filename_ctmat = 'kneephantom_bones_and_bonepins.mat';
-
 filepath_bonelandmarks = 'D:\Documents\BELANDA\SonoSkin\codes\matlab\bmodeimage_3dspace\tools\bonePreRegistration\outputs\';
 filename_bonelandmarks = 'boneLandmarks_20260810_174351.mat';
 
@@ -31,38 +28,32 @@ scriptDirectory = fileparts(scriptFullPath);
 projectDirectory = fileparts(fileparts(scriptDirectory));
 geometryFunctionDirectory = fullfile(projectDirectory, 'functions', 'geometry');
 displayFunctionDirectory  = fullfile(projectDirectory, 'functions', 'display');
-qualisysFunctionDirectory = fullfile(projectDirectory, 'functions', 'qualisys_related');
 
 % Stop here when the project layout is incomplete. Otherwise MATLAB would fail
 % later with a less helpful "undefined function" message.
-if ~isfolder(geometryFunctionDirectory) || ...
-        ~isfolder(displayFunctionDirectory) || ...
-        ~isfolder(qualisysFunctionDirectory)
+if ~isfolder(geometryFunctionDirectory) || ~isfolder(displayFunctionDirectory)
     error('bonePreRegistration:MissingFunctionDirectory', ...
-          'The geometry, display, or Qualisys function folder is missing.');
+          'The geometry or display function folder is missing.');
 end
-addpath(geometryFunctionDirectory, displayFunctionDirectory, qualisysFunctionDirectory);
+addpath(geometryFunctionDirectory, displayFunctionDirectory);
 
 
 %% LOAD THE ULTRASOUND IMAGE DATA
 
-% Load the MAT-file into a structure so its saved variable does not appear
-% directly in the script workspace under an unknown name.
+% Load the reviewed ultrasound data and the ground-truth bone poses that were
+% produced together by the Snapshot spatial-processing workflow.
 ultrasoundFilePath = fullfile(filepath_ultrasoundimage, filename_ultrasoundimage);
 ultrasoundFileData = load(ultrasoundFilePath);
-
-% Require one saved variable so the script cannot silently choose the wrong
-% data when a MAT-file contains unrelated values.
-savedVariableNames = fieldnames(ultrasoundFileData);
-if numel(savedVariableNames) ~= 1
-    error('bonePreRegistration:UnexpectedUltrasoundVariables', ...
-          'Expected exactly one variable in "%s", but found %d.', ...
-          filename_ultrasoundimage, numel(savedVariableNames));
+if ~isfield(ultrasoundFileData, 'validSnapshots') || ...
+        ~isfield(ultrasoundFileData, 'validBonePoses')
+    error('bonePreRegistration:MissingSnapshotBonePoses', ...
+          ['The selected MAT file must contain validSnapshots and ' ...
+           'validBonePoses. Rerun the Snapshot spatial-processing workflow.']);
 end
 
-% Give the loaded sequence one stable name for the segmentation workflow.
-ultrasoundSequence = ultrasoundFileData.(savedVariableNames{1});
-clear ultrasoundFileData savedVariableNames;
+ultrasoundSequence = ultrasoundFileData.validSnapshots;
+validBonePoses     = ultrasoundFileData.validBonePoses;
+clear ultrasoundFileData;
 
 %% LOAD DETECTED SURFACE DATA
 
@@ -102,28 +93,23 @@ end
 
 %% LOAD BONE DATA
 
-% Build and check the exact MAT-file path before attempting to load it.
-ctmatFullPath = fullfile(filepath_ctmat, filename_ctmat);
+% Use the CT source recorded by spatial processing so the coarse and
+% ground-truth meshes come from the same CT dataset.
+ctmatFullPath = char(validBonePoses.ctPostProcessedMatFile);
 if ~isfile(ctmatFullPath)
     error('bonePreRegistration:MissingCtMatFile', ...
         'The configured CT MAT file does not exist: %s', ctmatFullPath);
 end
 
-% Load only the variable needed by this workflow so unrelated saved values
-% cannot accidentally replace settings or intermediate variables.
-loadedCtData = load(ctmatFullPath, 'bones', 'bonepins');
+% Load the CT bones used for coarse registration. The saved ground-truth
+% meshes are already in ref and do not require the pin data here.
+loadedCtData = load(ctmatFullPath, 'bones');
 if ~isfield(loadedCtData, 'bones')
     error('bonePreRegistration:MissingBonesVariable', ...
           'The CT MAT file does not contain a variable named bones: %s', ...
           ctmatFullPath);
 end
 bones = loadedCtData.bones;
-if ~isfield(loadedCtData, 'bonepins')
-    error('bonePreRegistration:MissingBonepinsVariable', ...
-          'The CT MAT file does not contain a variable named bonepins: %s', ...
-          ctmatFullPath);
-end
-bonepins = loadedCtData.bonepins;
 
 %% LOAD BONE LANDMARKS
 
@@ -274,6 +260,22 @@ axis(ax1, 'equal');
 drawnow;
 
 %% PRE-REGISTRATION STEP
+
+% Snapshot mode combines all valid observations because they describe one
+% static bone pose. Kinematic preparation will be added in a future workflow.
+processingMode = lower(string(validBonePoses.processingMode));
+switch processingMode
+    case "snapshot"
+        % Continue with the existing Snapshot surface grouping below.
+    case "kinematic"
+        % TODO: Select synchronized surface data for Kinematic pre-registration.
+        error('bonePreRegistration_onlyImage:KinematicNotImplemented', ...
+              'Kinematic pre-registration has not been implemented yet.');
+    otherwise
+        error('bonePreRegistration_onlyImage:UnknownProcessingMode', ...
+              'Unknown processing mode: %s', processingMode);
+end
+
 %% FLATTEN AND GROUP THE REGIONAL BONE-SURFACE POINTS
 
 % Keep the same region names as landmarks. This allows later code to access a
@@ -528,79 +530,25 @@ for boneIndex = 1:numel(regionalSurfacePoints)
         'Tag', 'coarse_registration_surface');
 end
 
-%% CALCULATE AND DISPLAY THE GROUND-TRUTH BONE POSES
+%% DISPLAY THE GROUND-TRUTH BONE POSES
 
-% STEP 1: Read the Qualisys CSV files stored beside the ultrasound snapshots.
-% The saved ultrasound data contains the source folder for each measurement.
-csvFileGroups = cell(numel(ultrasoundSequence), 1);
-for groupIndex = 1:numel(ultrasoundSequence)
-    currentSnapshotDirectory = char(ultrasoundSequence(groupIndex).path);
-    csvFileGroups{groupIndex} = dir(fullfile(currentSnapshotDirectory, '*.csv'));
-end
-
-csvFiles = vertcat(csvFileGroups{:});
-if isempty(csvFiles)
-    error('bonePreRegistration_onlyImage:NoSnapshotCsvFiles', ...
-          'No Qualisys CSV files were found beside the ultrasound snapshots.');
-end
-
-% Read every CSV into a table, then join the one-row tables into one dataset.
-rigidBodyTables = cell(numel(csvFiles), 1);
-for csvIndex = 1:numel(csvFiles)
-    csvFilePath = fullfile(csvFiles(csvIndex).folder, csvFiles(csvIndex).name);
-    rigidBodyTables{csvIndex} = readCSV_qualisysRigidBodySnapshot(csvFilePath);
-end
-allRigidBodies = vertcat(rigidBodyTables{:});
-
-% STEP 2: Average the reference pose and the tracked pose of every bone pin.
-% The pin names follow the Qualisys convention, such as C_F_PRO.
-pinBoneCodes            = upper(string({bonepins.bone}));
-pinPlaces               = upper(string({bonepins.place}));
-pinRigidBodyNames       = "C_" + pinBoneCodes + "_" + pinPlaces;
-rigidBodyNamesToAverage = ["B_N_REF", pinRigidBodyNames];
-
-averagedGroundTruthTransforms = struct();
-for rigidBodyIndex = 1:numel(rigidBodyNamesToAverage)
-    rigidBodyName = char(rigidBodyNamesToAverage(rigidBodyIndex));
-    averagedGroundTruthTransforms.(rigidBodyName) = averageRigidBodyTransform(allRigidBodies, rigidBodyName);
-end
-
-% STEP 3: Use each tracked pin to place its CT bone mesh in the ref frame.
-T_ref_global = averagedGroundTruthTransforms.B_N_REF;
-
-% Store the transforms and meshes so they are available after the script ends.
+% Use the poses and meshes saved by Snapshot spatial processing. These are the
+% same ground-truth meshes that were used to calculate the intersections.
 groundTruthRegistrations = repmat(struct( ...
     'name', "", ...
     'bone', "", ...
     'T_CT_ref', [], ...
     'boneMeshRef', []), size(boneCorrespondences));
+validBoneCodes = upper(string({validBonePoses.bonePoses.bone}));
 
 for boneIndex = 1:numel(boneCorrespondences)
     currentBoneCode = upper(string(boneCorrespondences(boneIndex).bone));
 
-    % Match the bone and its pin by their short bone code, F or T.
-    meshBoneIndex    = find(availableBoneCodes == currentBoneCode, 1);
-    pinIndex         = find(pinBoneCodes == currentBoneCode, 1);
-
-    % Get the current bone and pin
-    currentBone      = bones(meshBoneIndex);
-    currentPin       = bonepins(pinIndex);
-
-    % Get the transformation of the average ground truth transform
-    pinRigidBodyName = char(pinRigidBodyNames(pinIndex));
-    T_pin_global     = averagedGroundTruthTransforms.(pinRigidBodyName);
-
-    % Express the tracked pin in ref. Left division is the numerically 
-    % safer equivalent of inv(T_ref_global) * T_pin_global from the frame rule.
-    T_pin_ref            = T_ref_global \ T_pin_global;
-
-    % Then use the known pin pose in CT to calculate the ground-truth transform from CT to ref. 
-    % Right division is equivalent to T_pin_ref * inv(T_pin_CT).
-    T_CT_ref_groundTruth = T_pin_ref / currentPin.T_pin_CT;
-
-    % Transform the original CT-frame mesh vertices and preserve connectivity.
-    bonePointsRefGroundTruth    = applyRigidTransform(currentBone.mesh.Points, T_CT_ref_groundTruth);
-    boneMeshRefGroundTruth      = triangulation(currentBone.mesh.ConnectivityList, bonePointsRefGroundTruth);
+    % Match the saved ground truth to the coarse-registration bone by code.
+    validBoneIndex           = find(validBoneCodes == currentBoneCode, 1);
+    currentValidBonePoseData = validBonePoses.bonePoses(validBoneIndex).data;
+    T_CT_ref_groundTruth     = currentValidBonePoseData.T_CT_ref;
+    boneMeshRefGroundTruth   = currentValidBonePoseData.mesh;
 
     groundTruthRegistrations(boneIndex).name        = boneCorrespondences(boneIndex).name;
     groundTruthRegistrations(boneIndex).bone        = currentBoneCode;
@@ -692,43 +640,3 @@ legend(ax2, 'show', 'Location', 'best', 'Interpreter', 'none');
 axis(ax2, 'tight');
 axis(ax2, 'equal');
 drawnow;
-
-function T_rigidBody_global = averageRigidBodyTransform(rigidBodyTable, rigidBodyName)
-%AVERAGERIGIDBODYTRANSFORM Average repeated measurements of one rigid body.
-% This helper creates one stable rigid transform from several Qualisys
-% snapshots. Rotation uses a quaternion mean so orientation is averaged on
-% the rotation manifold. Translation uses the regular arithmetic mean.
-%
-% INPUTS:
-%   rigidBodyTable - Table containing one row for each Qualisys snapshot.
-%                    The requested column contains structs with q and t.
-%   rigidBodyName  - Name of the table column to average, for example B_N_REF.
-%
-% OUTPUT:
-%   T_rigidBody_global - 4-by-4 transform from the rigid-body frame to the
-%                        global tracking frame.
-
-% Extract the cell array of measurements for the requested rigid body.
-rigidBodySamples = rigidBodyTable.(rigidBodyName);
-numberOfSamples  = numel(rigidBodySamples);
-
-% Copy the quaternion and translation values into numeric matrices so MATLAB
-% can average all samples together.
-quaternionSamples  = zeros(numberOfSamples, 4);
-translationSamples = zeros(numberOfSamples, 3);
-for sampleIndex = 1:numberOfSamples
-    currentSample = rigidBodySamples{sampleIndex};
-    quaternionSamples(sampleIndex, :)  = reshape(currentSample.q, 1, 4);
-    translationSamples(sampleIndex, :) = reshape(currentSample.t, 1, 3);
-end
-
-% Average rotation and translation separately because they use different math.
-meanQuaternion  = meanrot(quaternion(quaternionSamples));
-meanRotation    = quat2rotm(compact(meanQuaternion));
-meanTranslation = mean(translationSamples, 1);
-
-% Combine the averaged rotation and translation into one rigid transform.
-T_rigidBody_global           = eye(4);
-T_rigidBody_global(1:3, 1:3) = meanRotation;
-T_rigidBody_global(1:3, 4)   = meanTranslation(:);
-end
