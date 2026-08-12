@@ -3,7 +3,7 @@ clear; clc; close all;
 %% PATH DEFINITION
 
 filepath_ultrasoundimage = 'D:\Documents\BELANDA\SonoSkin\codes\matlab\bmodeimage_3dspace\tools\ultrasoundSpatialProcessing\outputs';
-filename_ultrasoundimage = 'validSnapshots_20260811_204712.mat';
+filename_ultrasoundimage = 'validSnapshots_20260812_154625.mat';
 
 filepath_bonesurface = 'D:\Documents\BELANDA\SonoSkin\codes\matlab\bmodeimage_3dspace\tools\boneSegmentationProcess\outputs';
 filename_bonesurface = 'boneSurface_20260811_211029.mat';
@@ -494,6 +494,10 @@ axis(ax2, 'equal');
 hold(ax2, 'on');
 view(ax2, 35, 40);
 
+% Use one fixed length in millimetres so every ground-truth bone ACS is
+% visible at the same scale without changing the transform itself.
+boneAcsAxisScale_mm = 30;
+
 % Draw the measured surface points first. These points are already in ref,
 % which is also the target frame of each transformed CT mesh below.
 for boneIndex = 1:numel(regionalSurfacePoints)
@@ -531,6 +535,7 @@ groundTruthRegistrations = repmat(struct( ...
     'name', "", ...
     'bone', "", ...
     'T_CT_ref', [], ...
+    'T_bone_ref', [], ...
     'boneMeshRef', []), size(boneCorrespondences));
 validBoneCodes = upper(string({validBonePoses.bonePoses.bone}));
 
@@ -540,12 +545,20 @@ for boneIndex = 1:numel(boneCorrespondences)
     % Match the saved ground truth to the coarse-registration bone by code.
     validBoneIndex           = find(validBoneCodes == currentBoneCode, 1);
     currentValidBonePoseData = validBonePoses.bonePoses(validBoneIndex).data;
+    if ~isfield(currentValidBonePoseData, 'T_bone_ref')
+        error('bonePreRegistration:MissingGroundTruthBoneAcsPose', ...
+            ['The saved pose for bone "%s" does not contain T_bone_ref. ' ...
+             'Rerun build_ultrasoundBone_intersectionData.m with the updated output schema.'], ...
+            currentBoneCode);
+    end
     T_CT_ref_groundTruth     = currentValidBonePoseData.T_CT_ref;
+    T_bone_ref_groundTruth   = currentValidBonePoseData.T_bone_ref;
     boneMeshRefGroundTruth   = currentValidBonePoseData.mesh;
 
     groundTruthRegistrations(boneIndex).name        = boneCorrespondences(boneIndex).name;
     groundTruthRegistrations(boneIndex).bone        = currentBoneCode;
     groundTruthRegistrations(boneIndex).T_CT_ref    = T_CT_ref_groundTruth;
+    groundTruthRegistrations(boneIndex).T_bone_ref  = T_bone_ref_groundTruth;
     groundTruthRegistrations(boneIndex).boneMeshRef = boneMeshRefGroundTruth;
 
     % Gray distinguishes ground truth from the colored coarse registration.
@@ -558,6 +571,19 @@ for boneIndex = 1:numel(boneCorrespondences)
         'EdgeColor', 'none', ...
         'DisplayName', sprintf('%s mesh (ground truth)', boneCorrespondences(boneIndex).name), ...
         'Tag', 'ground_truth_bone_mesh');
+
+    % Draw the saved anatomical frame at its ground-truth pose in ref. The
+    % transform columns give the ACS directions and its last column gives the
+    % ACS origin, all already expressed in the plot's ref coordinate frame.
+    groundTruthAcsName = sprintf('%s ACS (ground truth)', ...
+        boneCorrespondences(boneIndex).name);
+    display_axis_v2(ax2, ...
+        T_bone_ref_groundTruth(1:3, 4), ...
+        T_bone_ref_groundTruth(1:3, 1:3), ...
+        boneAcsAxisScale_mm, ...
+        groundTruthAcsName, ...
+        'Tag', 'ground_truth_bone_acs', ...
+        'Mode', 'default');
 end
 
 % Estimate and apply one independent rigid transformation for each bone.
