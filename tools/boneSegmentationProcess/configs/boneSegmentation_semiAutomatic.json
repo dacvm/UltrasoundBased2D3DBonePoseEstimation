@@ -1,7 +1,7 @@
 {
   "input": {
     "ultrasoundImageFilePath": "../../ultrasoundSpatialProcessing/outputs",
-    "ultrasoundImageFileName": "validSnapshots_20260811_204712.mat"
+    "ultrasoundImageFileName": "validSnapshots_20260812_160247.mat"
   },
   "output": {
     "segmentationOutputPath": "../outputs"
