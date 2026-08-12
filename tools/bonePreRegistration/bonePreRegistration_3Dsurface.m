@@ -270,7 +270,7 @@ switch processingMode
               'Unknown processing mode: %s', processingMode);
 end
 
-%% FLATTEN AND GROUP THE REGIONAL BONE-SURFACE POINTS
+%% 1) FLATTEN AND GROUP THE REGIONAL BONE-SURFACE POINTS
 
 % Keep the same region names as landmarks. This allows later code to access a
 % surface and its landmark with the same field name.
@@ -341,7 +341,7 @@ for groupIndex = 1:numel(surfaceResults)
     end
 end
 
-%% BUILD REGIONAL CORRESPONDENCE CANDIDATES
+%% 2) BUILD REGIONAL CORRESPONDENCE CANDIDATES
 
 % Store one correspondence set per bone. The two point matrices will always
 % have the same number of rows, which is required by estgeotform3d.
@@ -470,7 +470,8 @@ axis(ax1, 'tight');
 axis(ax1, 'equal');
 drawnow;
 
-%% PERFORM COARSE REGISTRATION AND DISPLAY THE TRANSFORMED MESHES
+%% 3) COARSE REGISTRATION
+%% 3.0) PREPARE FOR COARSE REGISTRATION
 
 % Keep both transformation directions as raw 4x4 matrices so their source
 % and target frames remain explicit throughout later processing.
@@ -494,41 +495,8 @@ axis(ax2, 'equal');
 hold(ax2, 'on');
 view(ax2, 35, 40);
 
-% Use one fixed length in millimetres so every ground-truth bone ACS is
-% visible at the same scale without changing the transform itself.
-boneAcsAxisScale_mm = 30;
 
-% Draw the measured surface points first. These points are already in ref,
-% which is also the target frame of each transformed CT mesh below.
-for boneIndex = 1:numel(regionalSurfacePoints)
-
-    % Collect each region in a cell first so the numeric point matrix can be
-    % joined once after the loop instead of repeatedly growing in memory.
-    boneRegionPointSets = cell(1, numel(regionNames));
-    for regionIndex = 1:numel(regionNames)
-        regionField = char(regionNames(regionIndex));
-        boneRegionPointSets{regionIndex} = regionalSurfacePoints(boneIndex).(regionField);
-    end
-    allBoneSurfacePoints = vertcat(boneRegionPointSets{:});
-
-    % Bones without measured points, such as the current femur data, do not
-    % add a surface object to this result figure.
-    if isempty(allBoneSurfacePoints)
-        continue;
-    end
-
-    % Plot the bone surface
-    scatter3(ax2, ...
-        allBoneSurfacePoints(:, 1), ...
-        allBoneSurfacePoints(:, 2), ...
-        allBoneSurfacePoints(:, 3), ...
-        10, boneDisplayColors(boneIndex, :), 'filled', ...
-        'DisplayName', sprintf('%s surface (ref)', regionalSurfacePoints(boneIndex).name), ...
-        'Tag', 'coarse_registration_surface');
-end
-
-%% DISPLAY THE GROUND-TRUTH BONE POSES
-
+%% 3.1) DISPLAY THE GROUND-TRUTH BONE POSES
 % Use the poses and meshes saved by Snapshot spatial processing. These are the
 % same ground-truth meshes that were used to calculate the intersections.
 groundTruthRegistrations = repmat(struct( ...
@@ -538,6 +506,10 @@ groundTruthRegistrations = repmat(struct( ...
     'T_bone_ref', [], ...
     'boneMeshRef', []), size(boneCorrespondences));
 validBoneCodes = upper(string({validBonePoses.bonePoses.bone}));
+
+% Use one fixed length in millimetres so every ground-truth bone ACS is
+% visible at the same scale without changing the transform itself.
+boneAcsAxisScale_mm = 30;
 
 for boneIndex = 1:numel(boneCorrespondences)
     currentBoneCode = upper(string(boneCorrespondences(boneIndex).bone));
@@ -585,6 +557,38 @@ for boneIndex = 1:numel(boneCorrespondences)
         'Tag', 'ground_truth_bone_acs', ...
         'Mode', 'default');
 end
+
+%% 3.2) DISPLAY THE MEASURED 3D BONE SURFACE (AGAIN IN NEW FIGURE)
+% Draw the measured surface points first. These points are already in ref,
+% which is also the target frame of each transformed CT mesh below.
+for boneIndex = 1:numel(regionalSurfacePoints)
+
+    % Collect each region in a cell first so the numeric point matrix can be
+    % joined once after the loop instead of repeatedly growing in memory.
+    boneRegionPointSets = cell(1, numel(regionNames));
+    for regionIndex = 1:numel(regionNames)
+        regionField = char(regionNames(regionIndex));
+        boneRegionPointSets{regionIndex} = regionalSurfacePoints(boneIndex).(regionField);
+    end
+    allBoneSurfacePoints = vertcat(boneRegionPointSets{:});
+
+    % Bones without measured points, such as the current femur data, do not
+    % add a surface object to this result figure.
+    if isempty(allBoneSurfacePoints)
+        continue;
+    end
+
+    % Plot the bone surface
+    scatter3(ax2, ...
+        allBoneSurfacePoints(:, 1), ...
+        allBoneSurfacePoints(:, 2), ...
+        allBoneSurfacePoints(:, 3), ...
+        10, boneDisplayColors(boneIndex, :), 'filled', ...
+        'DisplayName', sprintf('%s surface (ref)', regionalSurfacePoints(boneIndex).name), ...
+        'Tag', 'coarse_registration_surface');
+end
+
+%% 3.3) PERFORM THE COARSE REGISTRATION
 
 % Estimate and apply one independent rigid transformation for each bone.
 for boneIndex = 1:numel(boneCorrespondences)
