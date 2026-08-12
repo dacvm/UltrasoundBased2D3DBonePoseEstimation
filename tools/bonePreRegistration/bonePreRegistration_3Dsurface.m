@@ -1,26 +1,41 @@
 clear; clc; close all;
 
-%% PATH DEFINITION
-
-filepath_ultrasoundimage = 'D:\Documents\BELANDA\SonoSkin\codes\matlab\bmodeimage_3dspace\tools\ultrasoundSpatialProcessing\outputs';
-filename_ultrasoundimage = 'validSnapshots_20260811_204712.mat';
-
-filepath_bonesurface = 'D:\Documents\BELANDA\SonoSkin\codes\matlab\bmodeimage_3dspace\tools\boneSegmentationProcess\outputs';
-filename_bonesurface = 'boneSurface_20260811_211029.mat';
-
-filepath_bonelandmarks = 'D:\Documents\BELANDA\SonoSkin\codes\matlab\bmodeimage_3dspace\tools\bonePreRegistration\outputs\';
-filename_bonelandmarks = 'boneLandmarks_20260810_174351.mat';
-
-%% REQUIRED PATH
+%% LOAD AND VALIDATE THE CONFIGURATION
 
 % Locate this script first so the configuration file can be found even when
 % MATLAB was started from a different current folder.
 scriptFullPath = mfilename('fullpath');
 if isempty(scriptFullPath)
     error('bonePreRegistration:ScriptPathUnavailable', ...
-          'Run boneSegmentation_recover3Dsurface.m as a complete script so its configuration file can be located.');
+          'Run bonePreRegistration_3Dsurface.m as a complete script so its configuration file can be located.');
 end
 scriptDirectory = fileparts(scriptFullPath);
+
+% Add this tool's helper folder before reading the configuration because the
+% dedicated JSON reader is kept outside the main processing script.
+helperDirectory = fullfile(scriptDirectory, 'helpers');
+if ~isfolder(helperDirectory)
+    error('bonePreRegistration:HelperDirectoryNotFound', ...
+          'Required bone pre-registration helper directory was not found: %s', helperDirectory);
+end
+addpath(helperDirectory, '-begin');
+
+% Keep run-specific input files and the output location in JSON. Selecting a
+% different dataset then changes only the configuration file tracked for it.
+configurationFilePath = fullfile(scriptDirectory, 'configs', 'bonePreRegistration_3Dsurface.json');
+configuration = readBonePreRegistration3DSurfaceConfiguration(configurationFilePath);
+
+% Use the established workflow variable names below while sourcing every
+% dataset-specific value from the validated configuration structure.
+filepath_ultrasoundimage     = configuration.input.ultrasoundImageFilePath;
+filename_ultrasoundimage     = configuration.input.ultrasoundImageFileName;
+filepath_bonesurface         = configuration.input.boneSurfaceFilePath;
+filename_bonesurface         = configuration.input.boneSurfaceFileName;
+filepath_bonelandmarks       = configuration.input.boneLandmarksFilePath;
+filename_bonelandmarks       = configuration.input.boneLandmarksFileName;
+coarseRegistrationOutputPath = configuration.output.coarseRegistrationOutputPath;
+
+%% REQUIRED PATH
 
 % The script uses one geometry helper to transform points and one display
 % helper to draw ultrasound images in 3D. Find these folders relative to this
@@ -38,7 +53,7 @@ end
 addpath(geometryFunctionDirectory, displayFunctionDirectory);
 
 
-%% LOAD THE ULTRASOUND IMAGE DATA
+%% LOAD THE ULTRASOUND IMAGE DATA AND BONE POSES GROUND TRUTH
 
 % Load the reviewed ultrasound data and the ground-truth bone poses that were
 % produced together by the Snapshot spatial-processing workflow.
@@ -86,7 +101,7 @@ for groupIndex = 1:numel(surfaceResults)
         error('bonePreRegistration:MissingSurfaceCoordinatesXYZRef', ...
               ['Surface group %d does not contain surfaceCoordinatesXYZRef.' ...
                'Rerun boneSegmentation_extractSurface.m to create a compatible MAT-file.'], ...
-            groupIndex);
+              groupIndex);
     end
 end
 
@@ -98,7 +113,7 @@ end
 ctmatFullPath = char(validBonePoses.ctPostProcessedMatFile);
 if ~isfile(ctmatFullPath)
     error('bonePreRegistration:MissingCtMatFile', ...
-        'The configured CT MAT file does not exist: %s', ctmatFullPath);
+          'The configured CT MAT file does not exist: %s', ctmatFullPath);
 end
 
 % Load the CT bones used for coarse registration. The saved ground-truth
@@ -106,8 +121,7 @@ end
 loadedCtData = load(ctmatFullPath, 'bones');
 if ~isfield(loadedCtData, 'bones')
     error('bonePreRegistration:MissingBonesVariable', ...
-          'The CT MAT file does not contain a variable named bones: %s', ...
-          ctmatFullPath);
+          'The CT MAT file does not contain a variable named bones: %s', ctmatFullPath);
 end
 bones = loadedCtData.bones;
 
@@ -117,25 +131,20 @@ bones = loadedCtData.bones;
 bonelandmarksFullPath = fullfile(filepath_bonelandmarks, filename_bonelandmarks);
 if ~isfile(bonelandmarksFullPath)
     error('bonePreRegistration:MissingBoneLandmarksFile', ...
-          'The configured bone-landmarks MAT file does not exist: %s', ...
-          bonelandmarksFullPath);
+          'The configured bone-landmarks MAT file does not exist: %s', bonelandmarksFullPath);
 end
 
 % Load only the two expected variables so unrelated saved values cannot
 % accidentally replace settings or intermediate variables in this script.
-loadedBoneLandmarks = load(bonelandmarksFullPath, ...
-                           'intersectionDiagnostics', 'landmarks');
+loadedBoneLandmarks = load(bonelandmarksFullPath, 'intersectionDiagnostics', 'landmarks');
 if ~isfield(loadedBoneLandmarks, 'intersectionDiagnostics')
     error('bonePreRegistration:MissingIntersectionDiagnosticsVariable', ...
-          ['The bone-landmarks MAT file does not contain a variable named ' ...
-           'intersectionDiagnostics: %s'], bonelandmarksFullPath);
+          'The bone-landmarks MAT file does not contain a variable named intersectionDiagnostics: %s', bonelandmarksFullPath);
 end
 intersectionDiagnostics = loadedBoneLandmarks.intersectionDiagnostics;
-
 if ~isfield(loadedBoneLandmarks, 'landmarks')
     error('bonePreRegistration:MissingLandmarksVariable', ...
-          ['The bone-landmarks MAT file does not contain a variable named ' ...
-           'landmarks: %s'], bonelandmarksFullPath);
+          'The bone-landmarks MAT file does not contain a variable named landmarks: %s', bonelandmarksFullPath);
 end
 landmarks = loadedBoneLandmarks.landmarks;
 
@@ -276,7 +285,7 @@ switch processingMode
               'Unknown processing mode: %s', processingMode);
 end
 
-%% FLATTEN AND GROUP THE REGIONAL BONE-SURFACE POINTS
+%% 1) FLATTEN AND GROUP THE REGIONAL BONE-SURFACE POINTS
 
 % Keep the same region names as landmarks. This allows later code to access a
 % surface and its landmark with the same field name.
@@ -286,7 +295,7 @@ regionNames = ["medial", "lateral", "shaft"];
 % 0-by-3 matrices, so bones without surface measurements remain valid entries.
 regionalSurfacePoints = repmat(struct( ...
     'name', "", ...
-    'bone', "", ...
+    'bone', '', ...
     'coordinateFrame', "ref", ...
     'medial', zeros(0, 3), ...
     'lateral', zeros(0, 3), ...
@@ -294,7 +303,7 @@ regionalSurfacePoints = repmat(struct( ...
 
 for boneIndex = 1:numel(landmarks)
     regionalSurfacePoints(boneIndex).name = string(landmarks(boneIndex).name);
-    regionalSurfacePoints(boneIndex).bone = upper(string(landmarks(boneIndex).bone));
+    regionalSurfacePoints(boneIndex).bone = landmarks(boneIndex).bone;
 end
 
 % Each surfaceResults entry already represents one anatomical region. Combine
@@ -303,7 +312,7 @@ for groupIndex = 1:numel(surfaceResults)
 
     % Get the current data
     groupName = lower(string(surfaceResults(groupIndex).name));
-    boneCode = upper(string(surfaceResults(groupIndex).bone));
+    boneCode = surfaceResults(groupIndex).bone;
 
     % Read the region from names such as tibia_medial. The existing name
     % femur_mid refers to the femur shaft, so both names use the shaft field.
@@ -347,13 +356,13 @@ for groupIndex = 1:numel(surfaceResults)
     end
 end
 
-%% BUILD REGIONAL CORRESPONDENCE CANDIDATES
+%% 2) BUILD REGIONAL CORRESPONDENCE CANDIDATES
 
 % Store one correspondence set per bone. The two point matrices will always
 % have the same number of rows, which is required by estgeotform3d.
 boneCorrespondences = repmat(struct( ...
     'name', "", ...
-    'bone', "", ...
+    'bone', '', ...
     'landmarkPointsCT', zeros(0, 3), ...
     'surfacePointsRef', zeros(0, 3), ...
     'regionLabels', strings(0, 1)), size(landmarks));
@@ -476,17 +485,18 @@ axis(ax1, 'tight');
 axis(ax1, 'equal');
 drawnow;
 
-%% PERFORM COARSE REGISTRATION AND DISPLAY THE TRANSFORMED MESHES
+%% 3) COARSE REGISTRATION
+%% 3.0) PREPARE FOR COARSE REGISTRATION
 
 % Keep both transformation directions as raw 4x4 matrices so their source
 % and target frames remain explicit throughout later processing.
-coarseRegistrations = repmat(struct( ...
+coarseRegistration = repmat(struct( ...
     'name', "", ...
-    'bone', "", ...
+    'bone', '', ...
     'status', "not processed", ...
-    'T_ref_CT', [], ...
-    'T_CT_ref', [], ...
-    'boneMeshRef', []), size(boneCorrespondences));
+    'T_CT_ref_est', [], ...
+    'T_bone_ref_est', [], ...
+    'boneMeshRef_est', []), size(boneCorrespondences));
 
 % Use a separate figure so the registration result is not hidden by the
 % original CT meshes, ultrasound images, and correspondence lines in ax1.
@@ -501,6 +511,70 @@ axis(ax2, 'equal');
 hold(ax2, 'on');
 view(ax2, 35, 40);
 
+
+%% 3.1) DISPLAY THE GROUND-TRUTH BONE POSES
+% Use the poses and meshes saved by Snapshot spatial processing. These are the
+% same ground-truth meshes that were used to calculate the intersections.
+groundTruthRegistrations = repmat(struct( ...
+    'name', "", ...
+    'bone', "", ...
+    'T_CT_ref_gt', [], ...
+    'T_bone_ref_gt', [], ...
+    'boneMeshRef_gt', []), size(boneCorrespondences));
+validBoneCodes = upper(string({validBonePoses.bonePoses.bone}));
+
+% Use one fixed length in millimetres so every ground-truth bone ACS is
+% visible at the same scale without changing the transform itself.
+boneAcsAxisScale_mm = 30;
+
+for boneIndex = 1:numel(boneCorrespondences)
+    currentBoneCode = upper(string(boneCorrespondences(boneIndex).bone));
+
+    % Match the saved ground truth to the coarse-registration bone by code.
+    validBoneIndex           = find(validBoneCodes == currentBoneCode, 1);
+    currentValidBonePoseData = validBonePoses.bonePoses(validBoneIndex).data;
+    if ~isfield(currentValidBonePoseData, 'T_bone_ref')
+        error('bonePreRegistration:MissingGroundTruthBoneAcsPose', ...
+            ['The saved pose for bone "%s" does not contain T_bone_ref. ' ...
+             'Rerun build_ultrasoundBone_intersectionData.m with the updated output schema.'], ...
+            currentBoneCode);
+    end
+    T_CT_ref_gt     = currentValidBonePoseData.T_CT_ref;
+    T_bone_ref_gt   = currentValidBonePoseData.T_bone_ref;
+    boneMeshRef_gt  = currentValidBonePoseData.mesh;
+
+    groundTruthRegistrations(boneIndex).name           = boneCorrespondences(boneIndex).name;
+    groundTruthRegistrations(boneIndex).bone           = currentBoneCode;
+    groundTruthRegistrations(boneIndex).T_CT_ref_gt    = T_CT_ref_gt;
+    groundTruthRegistrations(boneIndex).T_bone_ref_gt  = T_bone_ref_gt;
+    groundTruthRegistrations(boneIndex).boneMeshRef_gt = boneMeshRef_gt;
+
+    % Gray distinguishes ground truth from the colored coarse registration.
+    % Transparency keeps both overlaid surfaces and measured points visible.
+    patch(ax2, ...
+        'Faces', boneMeshRef_gt.ConnectivityList, ...
+        'Vertices', boneMeshRef_gt.Points, ...
+        'FaceColor', [0.55, 0.55, 0.55], ...
+        'FaceAlpha', 0.25, ...
+        'EdgeColor', 'none', ...
+        'DisplayName', sprintf('%s mesh (ground truth)', boneCorrespondences(boneIndex).name), ...
+        'Tag', 'ground_truth_bone_mesh');
+
+    % Draw the saved anatomical frame at its ground-truth pose in ref. The
+    % transform columns give the ACS directions and its last column gives the
+    % ACS origin, all already expressed in the plot's ref coordinate frame.
+    groundTruthAcsName = sprintf('%s ACS (ground truth)', ...
+        boneCorrespondences(boneIndex).name);
+    display_axis_v2(ax2, ...
+        T_bone_ref_gt(1:3, 4), ...
+        T_bone_ref_gt(1:3, 1:3), ...
+        boneAcsAxisScale_mm, ...
+        groundTruthAcsName, ...
+        'Tag', 'ground_truth_bone_acs', ...
+        'Mode', 'default');
+end
+
+%% 3.2) DISPLAY THE MEASURED 3D BONE SURFACE (AGAIN IN NEW FIGURE)
 % Draw the measured surface points first. These points are already in ref,
 % which is also the target frame of each transformed CT mesh below.
 for boneIndex = 1:numel(regionalSurfacePoints)
@@ -530,47 +604,12 @@ for boneIndex = 1:numel(regionalSurfacePoints)
         'Tag', 'coarse_registration_surface');
 end
 
-%% DISPLAY THE GROUND-TRUTH BONE POSES
-
-% Use the poses and meshes saved by Snapshot spatial processing. These are the
-% same ground-truth meshes that were used to calculate the intersections.
-groundTruthRegistrations = repmat(struct( ...
-    'name', "", ...
-    'bone', "", ...
-    'T_CT_ref', [], ...
-    'boneMeshRef', []), size(boneCorrespondences));
-validBoneCodes = upper(string({validBonePoses.bonePoses.bone}));
-
-for boneIndex = 1:numel(boneCorrespondences)
-    currentBoneCode = upper(string(boneCorrespondences(boneIndex).bone));
-
-    % Match the saved ground truth to the coarse-registration bone by code.
-    validBoneIndex           = find(validBoneCodes == currentBoneCode, 1);
-    currentValidBonePoseData = validBonePoses.bonePoses(validBoneIndex).data;
-    T_CT_ref_groundTruth     = currentValidBonePoseData.T_CT_ref;
-    boneMeshRefGroundTruth   = currentValidBonePoseData.mesh;
-
-    groundTruthRegistrations(boneIndex).name        = boneCorrespondences(boneIndex).name;
-    groundTruthRegistrations(boneIndex).bone        = currentBoneCode;
-    groundTruthRegistrations(boneIndex).T_CT_ref    = T_CT_ref_groundTruth;
-    groundTruthRegistrations(boneIndex).boneMeshRef = boneMeshRefGroundTruth;
-
-    % Gray distinguishes ground truth from the colored coarse registration.
-    % Transparency keeps both overlaid surfaces and measured points visible.
-    patch(ax2, ...
-        'Faces', boneMeshRefGroundTruth.ConnectivityList, ...
-        'Vertices', boneMeshRefGroundTruth.Points, ...
-        'FaceColor', [0.55, 0.55, 0.55], ...
-        'FaceAlpha', 0.25, ...
-        'EdgeColor', 'none', ...
-        'DisplayName', sprintf('%s mesh (ground truth)', boneCorrespondences(boneIndex).name), ...
-        'Tag', 'ground_truth_bone_mesh');
-end
+%% 3.3) PERFORM THE COARSE REGISTRATION
 
 % Estimate and apply one independent rigid transformation for each bone.
 for boneIndex = 1:numel(boneCorrespondences)
-    coarseRegistrations(boneIndex).name = boneCorrespondences(boneIndex).name;
-    coarseRegistrations(boneIndex).bone = boneCorrespondences(boneIndex).bone;
+    coarseRegistration(boneIndex).name = boneCorrespondences(boneIndex).name;
+    coarseRegistration(boneIndex).bone = boneCorrespondences(boneIndex).bone;
 
     % matchedPoints1 and matchedPoints2 intentionally follow the requested
     % stable order: measured surface in ref first, CT landmarks second.
@@ -586,7 +625,7 @@ for boneIndex = 1:numel(boneCorrespondences)
                             rank(uniqueMatchedPoints1 - mean(uniqueMatchedPoints1, 1)) >= 2 && ...
                             rank(uniqueMatchedPoints2 - mean(uniqueMatchedPoints2, 1)) >= 2;
     if ~hasNoncollinearPoints
-        coarseRegistrations(boneIndex).status = "skipped: fewer than three non-collinear correspondence points";
+        coarseRegistration(boneIndex).status = "skipped: fewer than three non-collinear correspondence points";
         warning('bonePreRegistration_onlyImage:InsufficientRegistrationPoints', ...
                 'Skipping coarse registration for bone "%s" because it does not have three non-collinear correspondence points.', ...
                 boneCorrespondences(boneIndex).bone);
@@ -595,12 +634,12 @@ for boneIndex = 1:numel(boneCorrespondences)
 
     % Let MATLAB estimate the ref-to-CT transform, then immediately extract
     % its premultiply matrix so the rest of the workflow uses raw 4x4 transforms.
-    tform_ref_CT = estgeotform3d(matchedPoints1, matchedPoints2, 'rigid', 'MaxDistance', 100);
-    T_ref_CT     = tform_ref_CT.A;
+    tform_ref_CT_est = estgeotform3d(matchedPoints1, matchedPoints2, 'rigid', 'MaxDistance', 100);
+    T_ref_CT_est     = tform_ref_CT_est.A;
 
-    % The CT mesh must be moved into ref, so derive the opposite direction
-    % explicitly from the estimated ref-to-CT matrix.
-    T_CT_ref = inv(T_ref_CT);
+    % The CT mesh must be moved into ref, so derive the opposite direction.
+    % Solving against identity avoids forming the inverse with inv explicitly.
+    T_CT_ref_est = T_ref_CT_est \ eye(4);
 
     % Find this bone's CT triangulation by its code, then transform every
     % vertex while keeping the triangle connectivity unchanged.
@@ -611,32 +650,72 @@ for boneIndex = 1:numel(boneCorrespondences)
               'Expected one CT mesh for bone code "%s", but found %d.', ...
               currentBoneCode, numel(meshBoneIndex));
     end
-    currentBoneMesh = bones(meshBoneIndex).mesh;
+    currentBone     = bones(meshBoneIndex);
+    currentBoneMesh = currentBone.mesh;
+
+    % Propagate this bone's CT-defined anatomical frame through the estimated
+    % CT-to-ref registration so it can be compared directly with the saved
+    % ground-truth anatomical frame in the same ref coordinate system.
+    T_bone_ref_est = T_CT_ref_est * currentBone.T_bone_CT;
 
     % Transform only the CT-frame vertices and reuse the original triangle
     % connectivity to build a mesh whose points are expressed in ref.
-    bonePointsRef = applyRigidTransform(currentBoneMesh.Points, T_CT_ref);
-    boneMeshRef   = triangulation(currentBoneMesh.ConnectivityList, bonePointsRef);
+    bonePointsRef_est = applyRigidTransform(currentBoneMesh.Points, T_CT_ref_est);
+    boneMeshRef_est   = triangulation(currentBoneMesh.ConnectivityList, bonePointsRef_est);
 
     % Store frame-named matrices and the ref-frame mesh for later use.
-    coarseRegistrations(boneIndex).status      = "registered";
-    coarseRegistrations(boneIndex).T_CT_ref    = T_CT_ref;
-    coarseRegistrations(boneIndex).boneMeshRef = boneMeshRef;
+    coarseRegistration(boneIndex).status            = "registered";
+    coarseRegistration(boneIndex).T_CT_ref_est      = T_CT_ref_est;
+    coarseRegistration(boneIndex).T_bone_ref_est    = T_bone_ref_est;
+    coarseRegistration(boneIndex).boneMeshRef_est   = boneMeshRef_est;
 
     % Display the transformed CT mesh in the same ref frame as the measured
     % points. Transparency keeps surface points visible through the mesh.
     patch(ax2, ...
-        'Faces', boneMeshRef.ConnectivityList, ...
-        'Vertices', boneMeshRef.Points, ...
+        'Faces', boneMeshRef_est.ConnectivityList, ...
+        'Vertices', boneMeshRef_est.Points, ...
         'FaceColor', boneDisplayColors(boneIndex, :), ...
         'FaceAlpha', 0.30, ...
         'EdgeColor', 'none', ...
         'DisplayName', sprintf('%s mesh (registered)', boneCorrespondences(boneIndex).name), ...
         'Tag', 'coarsely_registered_bone_mesh');
+
+    % Use dashed shadow axes for the estimated ACS so it remains visually
+    % distinct from the solid ground-truth ACS drawn earlier in the same plot.
+    estimatedAcsName = sprintf('%s ACS (estimated)', boneCorrespondences(boneIndex).name);
+    display_axis_v2(ax2, ...
+        T_bone_ref_est(1:3, 4), ...
+        T_bone_ref_est(1:3, 1:3), ...
+        boneAcsAxisScale_mm, ...
+        estimatedAcsName, ...
+        'Tag', 'estimated_bone_acs', ...
+        'Mode', 'shadow');
 end
 
 % Fit the final view after all successful registrations have been drawn.
-legend(ax2, 'show', 'Location', 'best', 'Interpreter', 'none');
+% legend(ax2, 'show', 'Location', 'best', 'Interpreter', 'none');
 axis(ax2, 'tight');
 axis(ax2, 'equal');
 drawnow;
+
+%% SAVE THE COARSE REGISTRATION
+
+% Give each run a timestamped MAT filename so results from different input
+% configurations remain separate inside the configured output directory.
+outputTimestamp = char(datetime('now', 'Format', 'yyyyMMdd_HHmmss'));
+coarseRegistrationOutputFilePath = fullfile( coarseRegistrationOutputPath, ['coarseRegistration_', outputTimestamp, '.mat']);
+
+% Avoid silently replacing a result if the workflow is run twice within the
+% same second and therefore produces the same timestamped filename.
+if isfile(coarseRegistrationOutputFilePath)
+    error('bonePreRegistration:OutputFileAlreadyExists', ...
+          'Coarse-registration output already exists: %s', coarseRegistrationOutputFilePath);
+end
+
+% Save the complete struct array, including skipped-bone status entries and
+% registered transforms and meshes. Version 7.3 supports large mesh data.
+save(coarseRegistrationOutputFilePath, 'coarseRegistration', '-v7.3');
+
+% Print the resolved path so the generated artifact is easy to locate after
+% the figures and processing steps have completed.
+fprintf('Saved coarse-registration output to:\n%s\n', coarseRegistrationOutputFilePath);

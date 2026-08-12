@@ -550,11 +550,12 @@ boneUnits = coupleBonesAndPins(bones, bonepins, pinSelection);
 % can later be intersected only with their corresponding anatomy.
 boneMeshesRefByCode = struct();
 
-% Save the same Snapshot bone poses and meshes used for the intersections so
-% later workflows do not need to read and average the Qualisys CSV files again.
+% Save the CT placement, anatomical bone pose, and transformed mesh used for
+% the intersections so later workflows can evaluate the same Snapshot result.
 bonePoseDataTemplate = struct( ...
     'sourceIndex', [], ...
     'T_CT_ref', [], ...
+    'T_bone_ref', [], ...
     'mesh', []);
 bonePoseTemplate = struct( ...
     'bone', '', ...
@@ -603,11 +604,14 @@ for boneIndex = 1:numel(boneUnits)
     bonePointsRef = applyRigidTransform(currentBone.mesh.Points, T_CT_ref);
     boneMeshRef   = triangulation(currentBone.mesh.ConnectivityList, bonePointsRef);
 
-    % Snapshot mode stores one aggregate record per bone. Its sourceIndex is
-    % empty because the averaged pose does not belong to one raw frame.
+    % Snapshot mode stores one aggregate record per bone. Keep both the
+    % CT-to-ref map and the bone ACS pose because they describe different
+    % coordinate frames. The sourceIndex stays empty because the averaged
+    % pose does not belong to one raw frame.
     validBonePoses.bonePoses(boneIndex).bone = char(currentUnit.bone);
     validBonePoses.bonePoses(boneIndex).data.sourceIndex = [];
     validBonePoses.bonePoses(boneIndex).data.T_CT_ref = T_CT_ref;
+    validBonePoses.bonePoses(boneIndex).data.T_bone_ref = T_bone_ref;
     validBonePoses.bonePoses(boneIndex).data.mesh = boneMeshRef;
 
     % Store only V and F because meshPlaneIntersectionPixels intentionally

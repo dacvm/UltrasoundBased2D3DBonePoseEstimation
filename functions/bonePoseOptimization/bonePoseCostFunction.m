@@ -1,6 +1,8 @@
 function [cost, details] = bonePoseCostFunction(poseVector, data, config)
-%BONEPOSECOSTFUNCTION Intensity-and-coverage cost function for bone-pose optimization.
-% This function declaration defines the cost-function entry point that an optimizer can call.
+%BONEPOSECOSTFUNCTION Score one candidate CT-to-reference bone pose.
+% This function recomputes candidate mesh/image intersections, samples the
+% ultrasound intensity at probe-facing pixels, and combines brightness with
+% intersection coverage. Saved ground-truth intersections are not inputs.
 %
 % What this function does:
 %   This function evaluates one candidate bone pose.
@@ -23,11 +25,11 @@ function [cost, details] = bonePoseCostFunction(poseVector, data, config)
 %
 % Inputs:
 %   poseVector:
-%       Candidate pose parameters from the future optimizer.
+%       Six-value perturbation around data.T_CT_ref_initial.
 %
 %   data:
 %       Prepared data from prepareBonePoseOptimizationInputs. This includes
-%       the mesh, image planes, initial transform, and fixed initial-pose
+%       the CT mesh, reference-frame image planes, initial transform, and fixed initial-pose
 %       per-plane intersection pixel counts.
 %
 %   config:
@@ -40,8 +42,8 @@ function [cost, details] = bonePoseCostFunction(poseVector, data, config)
 %       The value is finite even when the current pose has no intersections.
 %
 %   details:
-%       Debug information containing the candidate transform, transformed
-%       mesh, per-plane probe-facing pixels, per-plane scores, and the two
+%       Debug information containing frame-explicit candidate transforms,
+%       the reference-frame mesh, per-plane pixels, scores, and the two
 %       cost terms.
 %
 %
@@ -63,33 +65,35 @@ costSettings = getCostSettings(config, data);
 
 %% CONVERT POSE VECTOR TO MESH TRANSFORM
 
-% Convert the optimizer candidate state into a 4x4 transform around the initial pose.
-T_candidate_init = stateVectorToTMatrix(poseVector, data.T_init_originct);
+% Convert the optimizer state into the candidate transform applied to CT mesh points.
+T_CT_ref_candidate = stateVectorToTMatrix( ...
+    poseVector, data.T_CT_ref_initial);
+% Propagate the anatomical coordinate system through the same candidate CT pose.
+T_bone_ref_candidate = T_CT_ref_candidate * data.T_bone_CT;
 
 %% COMPUTE PROBE-FACING PIXELS
 
-% Evaluate the geometry for this candidate pose so the cost function can sample image intensities later.
-[poseEvaluation, transformedMesh] = computeProbeFacingPixelsForPose( ...
-                                        data.meshVerticesLocal, ...
-                                        data.meshFaces, ...
-                                        data.planes, ...
-                                        T_candidate_init, ...
-                                        config);
+% Evaluate fresh candidate intersections before sampling ultrasound intensities.
+[poseEvaluation, boneMeshRefCandidate] = computeProbeFacingPixelsForPose( ...
+    data.boneMeshCT, ...
+    data.imagePlanesRef, ...
+    T_CT_ref_candidate, ...
+    config);
 
 % Leave plotting to scripts or display helpers so repeated optimizer calls stay focused on cost computation.
 % Plot...
 
 %% COMPUTE INTENSITY-COVERAGE-AWARE COST
 
-% Count planes once so every per-plane diagnostic vector stays aligned with data.planes.
+% Count planes once so every diagnostic vector stays aligned with data.imagePlanesRef.
 n_planes = numel(poseEvaluation);
 
 % Read the fixed initial-pose pixel counts prepared before optimization.
-n_initialIntersectionPixel      = getInitialIntersectionPixelCounts(data, n_planes);
+nInitialIntersectionPixels      = getInitialIntersectionPixelCounts(data, n_planes);
 % Mark only planes with enough initial-pose pixels as active observations for the final average.
-activePlaneMask                 = n_initialIntersectionPixel >= costSettings.minReferencePixels;
+activePlaneMask                 = nInitialIntersectionPixels >= costSettings.minReferencePixels;
 % Use a safe denominator so coverage never divides by zero or by a tiny inactive initial count.
-safeReferenceCounts             = max(n_initialIntersectionPixel, costSettings.minReferencePixels);
+safeReferenceCounts             = max(nInitialIntersectionPixels, costSettings.minReferencePixels);
 
 totalIntensity                  = 0;    % Start the running intensity sum at zero so debugging can still inspect all sampled candidate pixels.
 totalIntersectionPixels         = 0;    % Start the sampled-pixel count at zero so the diagnostic mean only uses valid selected pixels.
@@ -125,7 +129,7 @@ for idx_plane = 1:n_planes
     selected_cols = probeFacingPixels(:, 2);
 
     % Read the raw image for this plane; project images are stored as [column, row] in this pipeline.
-    current_image = data.planes(idx_plane).image;
+    current_image = data.imagePlanesRef(idx_plane).image;
 
     % Convert [row, col] pixel coordinates to stored-image indexing, where column is the first dimension.
     selected_linear_indices = sub2ind(size(current_image), selected_cols, selected_rows);
@@ -222,13 +226,14 @@ end
 
 %% PACKAGE DETAILS FOR DEBUGGING
 
-% Store values related to candidate properties
-details.T_candidate_init                = T_candidate_init;                 % Candidate transform so future debugging can compare optimizer poses.
-details.transformedMesh                 = transformedMesh;                  % Transformed mesh so users can visualize the exact geometry used for this candidate pose.
-details.poseEvaluation                  = poseEvaluation;                   % Store per-plane selected pixels because this is the essential geometry output needed by the cost.
+% Store frame-explicit candidate geometry for later inspection.
+details.T_CT_ref_candidate              = T_CT_ref_candidate;
+details.T_bone_ref_candidate            = T_bone_ref_candidate;
+details.boneMeshRefCandidate            = boneMeshRefCandidate;
+details.poseEvaluation                  = poseEvaluation;
 
 % Store values related to global values of the pixel intensities
-details.n_initialIntersectionPixel      = n_initialIntersectionPixel;       % Store fixed initial-pose per-image counts so users can verify the coverage references.
+details.nInitialIntersectionPixels      = nInitialIntersectionPixels;       % Store fixed initial-pose per-image counts so users can verify the coverage references.
 details.activePlaneMask                 = activePlaneMask;                  % Store the active-plane mask so users can see which planes were included in the final average.
 details.totalIntensity                  = totalIntensity;                   % Diagnostic sum of all sampled intensities so users can verify the raw numerator.
 details.totalIntersectionPixels         = totalIntersectionPixels;          % Diagnostic count of all sampled pixels so users can verify the raw denominator.
@@ -352,7 +357,7 @@ if isnumeric(configuredIntensityMax) && isscalar(configuredIntensityMax) && isfi
 end
 
 % Infer a denominator from the prepared image planes when the config leaves intensityMax empty or invalid.
-intensityMax = inferIntensityMaxFromPlanes(data.planes);
+intensityMax = inferIntensityMaxFromPlanes(data.imagePlanesRef);
 end
 
 
@@ -409,32 +414,13 @@ function initialCounts = getInitialIntersectionPixelCounts(data, n_planes)
 %GETINITIALINTERSECTIONPIXELCOUNTS Read fixed initial-pose intersection counts from data.
 % This helper avoids recomputing the initial-pose counts inside repeated cost-function calls.
 
-% Start empty so the helper can detect whether any supported field was present.
-initialCounts = [];
+% Convert the prepared counts to a row so they align with per-plane vectors.
+initialCounts = double(data.nInitialIntersectionPixels(:).');
 
-% Use the preferred prepared-data field when it exists.
-if isfield(data, 'n_initialIntersectionPixel') && ~isempty(data.n_initialIntersectionPixel)
-    initialCounts = data.n_initialIntersectionPixel;
+% Preparation creates exactly one reference count for every fixed image plane.
+if numel(initialCounts) ~= n_planes
+    error('bonePoseCostFunction:InitialCountSizeMismatch', ...
+        'Expected %d initial intersection counts, but received %d.', ...
+        n_planes, numel(initialCounts));
 end
-
-% Fall back to zeros when no initial counts were prepared; the main cost will return a large finite penalty.
-if isempty(initialCounts)
-    initialCounts = zeros(1, n_planes);
-else
-    % Convert the counts to a row vector so logical masks line up with per-plane diagnostic vectors.
-    initialCounts = double(initialCounts(:).');
-end
-
-% Pad missing trailing counts with zeros so malformed data cannot shorten the per-plane vectors.
-if numel(initialCounts) < n_planes
-    initialCounts(end + 1:n_planes) = 0;
-end
-
-% Trim extra counts so malformed data cannot make masks longer than the current plane evaluation.
-if numel(initialCounts) > n_planes
-    initialCounts = initialCounts(1:n_planes);
-end
-
-% Replace invalid or negative counts with zero so active-plane selection remains finite and conservative.
-initialCounts(~isfinite(initialCounts) | initialCounts < 0) = 0;
 end

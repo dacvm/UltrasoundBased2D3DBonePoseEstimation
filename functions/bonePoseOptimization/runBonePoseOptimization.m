@@ -4,7 +4,7 @@ function optimizationResult = runBonePoseOptimization(initialPoseVector, data, c
 %
 % What this function does:
 %   This function receives the starting SE(3) perturbation vector, prepares a
-%   small bounded CMA-ES search around the manual pose, runs cmaes_parfor on
+%   small bounded CMA-ES search around the coarse-registration pose, runs cmaes_parfor on
 %   bonePoseCostFunction, and packages the best result for visualization.
 %
 % Why this function exists:
@@ -86,8 +86,10 @@ else
     bestCost       = fmin;
 end
 
-% Convert the optimized state vector back into the 4-by-4 mesh transform used by display helpers.
-bestTransform = stateVectorToTMatrix(bestPoseVector, data.T_init_originct);
+% Convert the best state into both frame-explicit transforms used downstream.
+T_CT_ref_best = stateVectorToTMatrix( ...
+    bestPoseVector, data.T_CT_ref_initial);
+T_bone_ref_best = T_CT_ref_best * data.T_bone_CT;
 
 %% PACKAGE RESULT
 
@@ -96,7 +98,10 @@ optimizationResult.initialPoseVector    = initialPoseVector;                % In
 optimizationResult.initialCost          = initialCost;                      % Initial cost so users can quickly check whether the optimizer improved the objective.
 optimizationResult.bestPoseVector       = bestPoseVector;                   % Best bounded perturbation returned by CMA-ES.
 optimizationResult.bestCost             = bestCost;                         % Best scalar objective value returned by CMA-ES.
-optimizationResult.bestTransform        = bestTransform;                    % Best transform so downstream code does not need to recompute it for inspection.
+optimizationResult.T_CT_ref_initial     = data.T_CT_ref_initial;             % Coarse CT pose around which the optimizer searched.
+optimizationResult.T_bone_ref_initial   = data.T_bone_ref_initial;           % Matching initial anatomical-frame pose.
+optimizationResult.T_CT_ref_best        = T_CT_ref_best;                     % Best transform applied to CT mesh points.
+optimizationResult.T_bone_ref_best      = T_bone_ref_best;                   % Best anatomical-frame pose derived from the CT result.
 optimizationResult.bounds.lower         = lowerBounds;                      % Lower bounds exactly as CMA-ES received them.
 optimizationResult.bounds.upper         = upperBounds;                      % Upper bounds exactly as CMA-ES received them.
 optimizationResult.bounds.translationMm = cmaesSettings.translationBoundMm; % Translation bound in millimeters for readable result inspection.
