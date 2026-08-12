@@ -1,0 +1,13 @@
+{
+  "input": {
+    "ultrasoundImageFilePath": "../../ultrasoundSpatialProcessing/outputs",
+    "ultrasoundImageFileName": "validSnapshots_20260812_160247.mat",
+    "boneSurfaceFilePath": "../../boneSegmentationProcess/outputs",
+    "boneSurfaceFileName": "boneSurface_20260811_211029.mat",
+    "boneLandmarksFilePath": "../outputs",
+    "boneLandmarksFileName": "boneLandmarks_20260810_174351.mat"
+  },
+  "output": {
+    "coarseRegistrationOutputPath": "../outputs"
+  }
+}

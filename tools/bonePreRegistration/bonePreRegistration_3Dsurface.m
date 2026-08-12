@@ -1,26 +1,41 @@
 clear; clc; close all;
 
-%% PATH DEFINITION
-
-filepath_ultrasoundimage = 'D:\Documents\BELANDA\SonoSkin\codes\matlab\bmodeimage_3dspace\tools\ultrasoundSpatialProcessing\outputs';
-filename_ultrasoundimage = 'validSnapshots_20260812_160247.mat';
-
-filepath_bonesurface = 'D:\Documents\BELANDA\SonoSkin\codes\matlab\bmodeimage_3dspace\tools\boneSegmentationProcess\outputs';
-filename_bonesurface = 'boneSurface_20260811_211029.mat';
-
-filepath_bonelandmarks = 'D:\Documents\BELANDA\SonoSkin\codes\matlab\bmodeimage_3dspace\tools\bonePreRegistration\outputs\';
-filename_bonelandmarks = 'boneLandmarks_20260810_174351.mat';
-
-%% REQUIRED PATH
+%% LOAD AND VALIDATE THE CONFIGURATION
 
 % Locate this script first so the configuration file can be found even when
 % MATLAB was started from a different current folder.
 scriptFullPath = mfilename('fullpath');
 if isempty(scriptFullPath)
     error('bonePreRegistration:ScriptPathUnavailable', ...
-          'Run boneSegmentation_recover3Dsurface.m as a complete script so its configuration file can be located.');
+          'Run bonePreRegistration_3Dsurface.m as a complete script so its configuration file can be located.');
 end
 scriptDirectory = fileparts(scriptFullPath);
+
+% Add this tool's helper folder before reading the configuration because the
+% dedicated JSON reader is kept outside the main processing script.
+helperDirectory = fullfile(scriptDirectory, 'helpers');
+if ~isfolder(helperDirectory)
+    error('bonePreRegistration:HelperDirectoryNotFound', ...
+          'Required bone pre-registration helper directory was not found: %s', helperDirectory);
+end
+addpath(helperDirectory, '-begin');
+
+% Keep run-specific input files and the output location in JSON. Selecting a
+% different dataset then changes only the configuration file tracked for it.
+configurationFilePath = fullfile(scriptDirectory, 'configs', 'bonePreRegistration_3Dsurface.json');
+configuration = readBonePreRegistration3DSurfaceConfiguration(configurationFilePath);
+
+% Use the established workflow variable names below while sourcing every
+% dataset-specific value from the validated configuration structure.
+filepath_ultrasoundimage     = configuration.input.ultrasoundImageFilePath;
+filename_ultrasoundimage     = configuration.input.ultrasoundImageFileName;
+filepath_bonesurface         = configuration.input.boneSurfaceFilePath;
+filename_bonesurface         = configuration.input.boneSurfaceFileName;
+filepath_bonelandmarks       = configuration.input.boneLandmarksFilePath;
+filename_bonelandmarks       = configuration.input.boneLandmarksFileName;
+coarseRegistrationOutputPath = configuration.output.coarseRegistrationOutputPath;
+
+%% REQUIRED PATH
 
 % The script uses one geometry helper to transform points and one display
 % helper to draw ultrasound images in 3D. Find these folders relative to this
@@ -475,7 +490,7 @@ drawnow;
 
 % Keep both transformation directions as raw 4x4 matrices so their source
 % and target frames remain explicit throughout later processing.
-coarseRegistrations = repmat(struct( ...
+coarseRegistration = repmat(struct( ...
     'name', "", ...
     'bone', '', ...
     'status', "not processed", ...
@@ -593,8 +608,8 @@ end
 
 % Estimate and apply one independent rigid transformation for each bone.
 for boneIndex = 1:numel(boneCorrespondences)
-    coarseRegistrations(boneIndex).name = boneCorrespondences(boneIndex).name;
-    coarseRegistrations(boneIndex).bone = boneCorrespondences(boneIndex).bone;
+    coarseRegistration(boneIndex).name = boneCorrespondences(boneIndex).name;
+    coarseRegistration(boneIndex).bone = boneCorrespondences(boneIndex).bone;
 
     % matchedPoints1 and matchedPoints2 intentionally follow the requested
     % stable order: measured surface in ref first, CT landmarks second.
@@ -610,7 +625,7 @@ for boneIndex = 1:numel(boneCorrespondences)
                             rank(uniqueMatchedPoints1 - mean(uniqueMatchedPoints1, 1)) >= 2 && ...
                             rank(uniqueMatchedPoints2 - mean(uniqueMatchedPoints2, 1)) >= 2;
     if ~hasNoncollinearPoints
-        coarseRegistrations(boneIndex).status = "skipped: fewer than three non-collinear correspondence points";
+        coarseRegistration(boneIndex).status = "skipped: fewer than three non-collinear correspondence points";
         warning('bonePreRegistration_onlyImage:InsufficientRegistrationPoints', ...
                 'Skipping coarse registration for bone "%s" because it does not have three non-collinear correspondence points.', ...
                 boneCorrespondences(boneIndex).bone);
@@ -649,10 +664,10 @@ for boneIndex = 1:numel(boneCorrespondences)
     boneMeshRef_est   = triangulation(currentBoneMesh.ConnectivityList, bonePointsRef_est);
 
     % Store frame-named matrices and the ref-frame mesh for later use.
-    coarseRegistrations(boneIndex).status            = "registered";
-    coarseRegistrations(boneIndex).T_CT_ref_est      = T_CT_ref_est;
-    coarseRegistrations(boneIndex).T_bone_ref_est    = T_bone_ref_est;
-    coarseRegistrations(boneIndex).boneMeshRef_est   = boneMeshRef_est;
+    coarseRegistration(boneIndex).status            = "registered";
+    coarseRegistration(boneIndex).T_CT_ref_est      = T_CT_ref_est;
+    coarseRegistration(boneIndex).T_bone_ref_est    = T_bone_ref_est;
+    coarseRegistration(boneIndex).boneMeshRef_est   = boneMeshRef_est;
 
     % Display the transformed CT mesh in the same ref frame as the measured
     % points. Transparency keeps surface points visible through the mesh.
@@ -667,8 +682,7 @@ for boneIndex = 1:numel(boneCorrespondences)
 
     % Use dashed shadow axes for the estimated ACS so it remains visually
     % distinct from the solid ground-truth ACS drawn earlier in the same plot.
-    estimatedAcsName = sprintf('%s ACS (estimated)', ...
-        boneCorrespondences(boneIndex).name);
+    estimatedAcsName = sprintf('%s ACS (estimated)', boneCorrespondences(boneIndex).name);
     display_axis_v2(ax2, ...
         T_bone_ref_est(1:3, 4), ...
         T_bone_ref_est(1:3, 1:3), ...
@@ -683,3 +697,25 @@ end
 axis(ax2, 'tight');
 axis(ax2, 'equal');
 drawnow;
+
+%% SAVE THE COARSE REGISTRATION
+
+% Give each run a timestamped MAT filename so results from different input
+% configurations remain separate inside the configured output directory.
+outputTimestamp = char(datetime('now', 'Format', 'yyyyMMdd_HHmmss'));
+coarseRegistrationOutputFilePath = fullfile( coarseRegistrationOutputPath, ['coarseRegistration_', outputTimestamp, '.mat']);
+
+% Avoid silently replacing a result if the workflow is run twice within the
+% same second and therefore produces the same timestamped filename.
+if isfile(coarseRegistrationOutputFilePath)
+    error('bonePreRegistration:OutputFileAlreadyExists', ...
+          'Coarse-registration output already exists: %s', coarseRegistrationOutputFilePath);
+end
+
+% Save the complete struct array, including skipped-bone status entries and
+% registered transforms and meshes. Version 7.3 supports large mesh data.
+save(coarseRegistrationOutputFilePath, 'coarseRegistration', '-v7.3');
+
+% Print the resolved path so the generated artifact is easy to locate after
+% the figures and processing steps have completed.
+fprintf('Saved coarse-registration output to:\n%s\n', coarseRegistrationOutputFilePath);
