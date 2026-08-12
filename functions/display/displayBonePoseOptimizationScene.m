@@ -32,15 +32,18 @@ figureName = char(figureName);
 
 %% CONVERT THE CURRENT POSE TO DISPLAY GEOMETRY
 
-% Convert the current state vector into the 4-by-4 mesh transform used by the geometry pipeline.
-T_mesh_ref            = stateVectorToTMatrix(poseVector, data.T_init_originct);
-% Move the local mesh vertices into the same reference frame as the ultrasound image planes.
-meshVerticesReference = applyRigidTransform(data.meshVerticesLocal, T_mesh_ref);
+% Convert the current state into the transform applied to CT mesh points.
+T_CT_ref_candidate = stateVectorToTMatrix( ...
+    poseVector, data.T_CT_ref_initial);
+% Derive the anatomical bone-frame pose for the coordinate-axis display.
+T_bone_ref_candidate = T_CT_ref_candidate * data.T_bone_CT;
+% Move CT vertices into the same reference frame as the ultrasound planes.
+bonePointsRefCandidate = applyRigidTransform( ...
+    data.boneMeshCT.Points, T_CT_ref_candidate);
 
-% Store mesh vertices and faces in local variables so the patch call stays easy to read.
-meshFaces = data.meshFaces;
-% Read the image planes once because every plane will be drawn in the same axes.
-planes    = data.planes;
+% Read fixed topology and observations once for the drawing loops below.
+meshFaces = data.boneMeshCT.ConnectivityList;
+planes = data.imagePlanesRef;
 
 %% CREATE THE 3D FIGURE
 
@@ -57,17 +60,17 @@ view(ax, 35, 40);
 
 %% DRAW THE CURRENT BONE MESH POSE
 
-% Draw the transformed femur mesh as one patch so the current bone pose is visible.
+% Draw the transformed target bone as one patch so the current pose is visible.
 patch(ax, ...
     'Faces', meshFaces, ...
-    'Vertices', meshVerticesReference, ...
+    'Vertices', bonePointsRefCandidate, ...
     'FaceColor', [0.92 0.83 0.74], ...
     'EdgeColor', 'none', ...
     'FaceAlpha', 0.55, ...
     'Tag', 'plot_bone_pose_optimization_mesh');
 
 % Compute a display scale from the mesh size so coordinate axes stay readable across data sets.
-meshExtent = max(meshVerticesReference, [], 1) - min(meshVerticesReference, [], 1);
+meshExtent = max(bonePointsRefCandidate, [], 1) - min(bonePointsRefCandidate, [], 1);
 
 % Use a conservative fraction of mesh size for triad arrows.
 quiverScale = max(meshExtent) * 0.08;
@@ -77,12 +80,12 @@ if isempty(quiverScale) || ~isfinite(quiverScale) || quiverScale <= 0
     quiverScale = 20;
 end
 
-% Draw the mesh coordinate frame so the current bone transform can be inspected.
+% Draw the anatomical bone frame, not the CT image frame, at the candidate pose.
 display_axis_v2(ax, ...
-                T_mesh_ref(1:3, 4), ...
-                T_mesh_ref(1:3, 1:3), ...
+                T_bone_ref_candidate(1:3, 4), ...
+                T_bone_ref_candidate(1:3, 1:3), ...
                 quiverScale, ...
-                'Bone', ...
+                sprintf('%s bone ACS', data.boneName), ...
                 'Tag', 'plot_bone_pose_optimization_axis', ...
                 'Mode', 'default');
 

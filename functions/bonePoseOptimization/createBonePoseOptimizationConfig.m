@@ -1,348 +1,202 @@
 function config = createBonePoseOptimizationConfig(configFilePath)
-%CREATEBONEPOSEOPTIMIZATIONCONFIG Create settings for the bone-pose optimization pipeline.
-% This function declaration loads user-editable settings from a hierarchical JSON file.
-%
-% What this function does:
-%   This function reads the external JSON configuration file and converts it
-%   into a MATLAB struct named config. The JSON file is meant to be edited
-%   by the user, so experiment settings can change without editing MATLAB
-%   source code.
-%
-% Why this function exists:
-%   The bone-pose optimization pipeline needs many settings: where the
-%   project lives, which ultrasound recordings to load, which STL mesh to
-%   use, how densely to sample image planes, and which intersection options
-%   to apply. Keeping those settings in one JSON file makes experiments
-%   easier to repeat and easier to debug.
+%CREATEBONEPOSEOPTIMIZATIONCONFIG Load standardized bone-pose optimization settings.
+% This function reads the v02 JSON configuration and resolves every input
+% and output path against the project root. Keeping path handling here lets
+% the main script focus on the registration workflow.
 %
 % Input:
-%   configFilePath:
-%       Optional path to a JSON configuration file. If this is empty or not
-%       provided, the function uses config/bonePoseOptimizationConfig.json
-%       inside the current project folder.
+%   configFilePath - Optional path to the JSON configuration file. When it
+%                    is omitted, the v02 configuration under config/ is used.
 %
 % Output:
-%   config:
-%       A nested MATLAB struct that follows the same category layout as the
-%       JSON file. For example:
-%           config.project.root
-%           config.input.sequenceFolder
-%           config.input.sequenceFilenames           % Present only for continuous sequence configs.
-%           config.imagePlaneSampling.packetStep     % Present only for continuous sequence configs.
-%           config.smoothing.method                  % Present only for continuous sequence configs.
-%           config.intersection.normalFacingToleranceDeg
-%           config.logging.printPreparationProgress
-%
-% Important details:
-%   - JSON null becomes [] in MATLAB. This is useful for packetEndIndex,
-%     where [] means "use the last packet from each sequence".
-%   - Relative paths are resolved from the JSON file location, not from a
-%     random current folder. This makes the config file more portable.
-%   - sequenceFilenames is optional because discrete-frame configs discover
-%     .mha files from input.sequenceFolder instead of listing every file.
+%   config         - Nested struct containing project paths, standardized
+%                    input files, and optimization settings.
 
-%% SELECT CONFIGURATION FILE
+%% SELECT AND READ THE CONFIGURATION FILE
 
-% Use the default project configuration file when the caller does not provide a custom file.
+% Use the standardized v02 configuration when the caller does not provide one.
 if nargin < 1 || isempty(configFilePath)
-    configFilePath = fullfile(pwd, 'config', 'bonePoseOptimizationConfig.json');
+    configFilePath = fullfile(pwd, 'config', 'bonePoseOptimizationConfig_v02.json');
 end
 
-% Normalize char and string inputs so callers can pass either MATLAB text type.
+% Normalize MATLAB string and character inputs before using file functions.
 configFilePath = ensureScalarText(configFilePath, 'configFilePath');
-
-% Convert the configuration file path to an absolute path so later relative paths have a stable base.
+% Convert the path to an absolute path so later bookkeeping is unambiguous.
 configFilePath = makeAbsolutePath(configFilePath, pwd);
 
-% Stop early with a clear message when the configuration file cannot be found.
+% Report a direct error when the selected JSON file does not exist.
 if ~isfile(configFilePath)
     error('createBonePoseOptimizationConfig:MissingConfigFile', ...
         'Configuration file was not found: %s', configFilePath);
 end
 
-%% PARSE JSON CONFIGURATION
+% Decode the complete JSON document into the same nested MATLAB structure.
+rawConfig = jsondecode(fileread(configFilePath));
+% Resolve the project root relative to the folder containing this JSON file.
+configFolder = fileparts(configFilePath);
 
-% Read the entire JSON file as text because jsondecode expects one character vector.
-configText      = fileread(configFilePath);
-% Decode the JSON text into a nested MATLAB struct that mirrors the file hierarchy.
-rawConfig       = jsondecode(configText);
-% Store the folder containing the JSON file so relative paths can be resolved from the file location.
-configFolder    = fileparts(configFilePath);
+%% RESOLVE PROJECT AND INPUT PATHS
 
+% Resolve the project root first because every standardized input path uses it.
+projectRoot = getRequiredField(rawConfig.project, 'root', 'project.root');
+config.project.root = makeAbsolutePath(projectRoot, configFolder);
 
+% Store the absolute functions folder for the optimizer, which temporarily changes folders.
+functionsFolderName = getRequiredField( ...
+    rawConfig.project, 'functionsFolderName', 'project.functionsFolderName');
+config.project.functionsFolder = makeAbsolutePath( ...
+    functionsFolderName, config.project.root);
 
-%% PROJECT PATHS
-
-% Read the project root from the JSON file so users can move the config without editing MATLAB code.
-projectRootRaw = getRequiredField(rawConfig.project, 'root', 'project.root');
-
-% Resolve the project root relative to the configuration file folder when it is not already absolute.
-config.project.root                         = makeAbsolutePath(projectRootRaw, configFolder);
-
-% Read the helper folder name from JSON so projects can rename the helper folder if needed.
-functionsFolderName                         = getRequiredField(rawConfig.project, 'functionsFolderName', 'project.functionsFolderName');
-
-% Store the helper folder as an absolute path so callers can add paths consistently.
-config.project.functionsFolder              = makeAbsolutePath(functionsFolderName, config.project.root);
-
-
-
-%% INPUT FILENAMES
-
-% Store the fCal XML filename used to load the Image-to-Probe calibration transform.
-config.input.fcalFilename = getRequiredField(rawConfig.input, 'fcalFilename', 'input.fcalFilename');
-
-% Store the folder that contains the ultrasound sequence recordings used by the current validation script.
-config.input.sequenceFolder                 = makeAbsolutePath(getRequiredField(rawConfig.input, 'sequenceFolder', 'input.sequenceFolder'), config.project.root);
-
-% Store explicit sequence filenames only when the config uses the old continuous-sequence workflow.
-if isfield(rawConfig.input, 'sequenceFilenames')
-    % Convert the sequence filenames to a cell array so existing continuous-sequence code keeps curly-brace indexing.
-    config.input.sequenceFilenames          = ensureCellString(rawConfig.input.sequenceFilenames);
+% Normalize the short bone code so matching is independent of text case.
+targetBone = upper(ensureScalarText( ...
+    getRequiredField(rawConfig.input, 'bone', 'input.bone'), 'input.bone'));
+if numel(targetBone) ~= 1
+    error('createBonePoseOptimizationConfig:InvalidBoneCode', ...
+        'input.bone must be one bone code, such as F or T.');
 end
+config.input.bone = targetBone;
 
-% Store the ACS MAT filename used to build the original femur coordinate transform.
-config.input.acsFilename                    = getRequiredField(rawConfig.input, 'acsFilename', 'input.acsFilename');
+% Resolve each standardized MAT-file path from the project root.
+config.input.validSnapshotsMatFile = makeAbsolutePath( ...
+    getRequiredField(rawConfig.input, 'validSnapshotsMatFile', ...
+    'input.validSnapshotsMatFile'), config.project.root);
+config.input.ctPostProcessedMatFile = makeAbsolutePath( ...
+    getRequiredField(rawConfig.input, 'ctPostProcessedMatFile', ...
+    'input.ctPostProcessedMatFile'), config.project.root);
+config.input.coarseRegistrationMatFile = makeAbsolutePath( ...
+    getRequiredField(rawConfig.input, 'coarseRegistrationMatFile', ...
+    'input.coarseRegistrationMatFile'), config.project.root);
 
-% Store the manual adjustment MAT filename used as the initial mesh pose for optimization.
-config.input.manualAdjustmentFilename       = getRequiredField(rawConfig.input, 'manualAdjustmentFilename', 'input.manualAdjustmentFilename');
+%% COPY GEOMETRY AND COST SETTINGS
 
-% Store the STL filename used as the femur mesh geometry.
-config.input.stlFilename                    = getRequiredField(rawConfig.input, 'stlFilename', 'input.stlFilename');
+% Keep the probe-facing tolerance explicit because it affects every candidate intersection.
+config.intersection.normalFacingToleranceDeg = getRequiredField( ...
+    rawConfig.intersection, 'normalFacingToleranceDeg', ...
+    'intersection.normalFacingToleranceDeg');
 
-
-
-%% IMAGE-PLANE SAMPLING OPTIONS
-
-% Parse image-plane sampling only when the config uses the old continuous-sequence workflow.
-if isfield(rawConfig, 'imagePlaneSampling')
-    % Store the first sampled packet index used to collect image planes.
-    config.imagePlaneSampling.packetStartIndex  = getRequiredField(rawConfig.imagePlaneSampling, 'packetStartIndex', 'imagePlaneSampling.packetStartIndex');
-
-    % Store the packet step size used to thin the image-plane collection.
-    config.imagePlaneSampling.packetStep        = getRequiredField(rawConfig.imagePlaneSampling, 'packetStep', 'imagePlaneSampling.packetStep');
-
-    % Store the optional final packet index, where JSON null becomes [] for "use sequence end".
-    config.imagePlaneSampling.packetEndIndex    = getRequiredField(rawConfig.imagePlaneSampling, 'packetEndIndex', 'imagePlaneSampling.packetEndIndex');
-end
-
-
-
-%% SMOOTHING OPTIONS
-
-% Parse smoothing only when the config uses the old continuous-sequence workflow.
-if isfield(rawConfig, 'smoothing')
-    % Store the transform smoothing method used before image-plane construction.
-    config.smoothing.method                 = getRequiredField(rawConfig.smoothing, 'method', 'smoothing.method');
-
-    % Store the smoothing window used before image-plane construction.
-    config.smoothing.window                 = getRequiredField(rawConfig.smoothing, 'window', 'smoothing.window');
-end
-
-
-
-%% INTERSECTION OPTIONS
-
-% Store the maximum angle for keeping probe-facing mesh intersections.
-config.intersection.normalFacingToleranceDeg = getRequiredField(rawConfig.intersection, 'normalFacingToleranceDeg', 'intersection.normalFacingToleranceDeg');
-
-
-
-%% COST OPTIONS
-
-% Read the optional cost group so older JSON files can still use the default objective settings.
+% Read cost settings with the same defaults used by the cost function.
 costConfig = getOptionalField(rawConfig, 'cost', struct());
+config.cost.intensityMax       = getOptionalField(costConfig, 'intensityMax', []);
+config.cost.minReferencePixels = getOptionalField(costConfig, 'minReferencePixels', 10);
+config.cost.nMinPixels         = getOptionalField(costConfig, 'nMinPixels', 10);
+config.cost.lambdaMissing      = getOptionalField(costConfig, 'lambdaMissing', 1.0);
 
-% Store the intensity normalization value; [] means the cost function should infer it from the image data.
-config.cost.intensityMax                    = getOptionalField(costConfig, 'intensityMax', []);
+% Copy the two progress switches used during preparation and repeated evaluations.
+config.logging.printPreparationProgress = getRequiredField( ...
+    rawConfig.logging, 'printPreparationProgress', ...
+    'logging.printPreparationProgress');
+config.logging.printEvaluationProgress = getRequiredField( ...
+    rawConfig.logging, 'printEvaluationProgress', ...
+    'logging.printEvaluationProgress');
 
-% Store the minimum initial-pose pixel count that makes an image plane active in the cost average.
-config.cost.minReferencePixels              = getOptionalField(costConfig, 'minReferencePixels', 10);
+%% COPY OPTIMIZER SETTINGS
 
-% Store the current-pose pixel count below which an active image plane is treated as missing.
-config.cost.nMinPixels                      = getOptionalField(costConfig, 'nMinPixels', 10);
-
-% Store the penalty weight for active image planes that have too few current intersection pixels.
-config.cost.lambdaMissing                   = getOptionalField(costConfig, 'lambdaMissing', 1.0);
-
-
-
-%% LOGGING OPTIONS
-
-% Store whether slow preparation steps should print progress messages.
-config.logging.printPreparationProgress     = getRequiredField(rawConfig.logging, 'printPreparationProgress', 'logging.printPreparationProgress');
-
-% Store whether repeated per-plane geometry evaluation should print progress messages.
-config.logging.printEvaluationProgress      = getRequiredField(rawConfig.logging, 'printEvaluationProgress', 'logging.printEvaluationProgress');
-
-
-
-%% OPTIMIZER OPTIONS
-
-% Read the optional optimizer group so older JSON files can still use the default CMA-ES settings.
+% Read optional CMA-ES settings here so the wrapper receives one complete config.
 optimizerConfig = getOptionalField(rawConfig, 'optimizer', struct());
+config.optimizer.translationBoundMm = getOptionalField( ...
+    optimizerConfig, 'translationBoundMm', 10);
+config.optimizer.rotationBoundDeg = getOptionalField( ...
+    optimizerConfig, 'rotationBoundDeg', 10);
+config.optimizer.translationSigmaMm = getOptionalField( ...
+    optimizerConfig, 'translationSigmaMm', 5);
+config.optimizer.rotationSigmaDeg = getOptionalField( ...
+    optimizerConfig, 'rotationSigmaDeg', 5);
+config.optimizer.populationSize = getOptionalField( ...
+    optimizerConfig, 'populationSize', 12);
+config.optimizer.maxFunctionEvaluations = getOptionalField( ...
+    optimizerConfig, 'maxFunctionEvaluations', 400);
+config.optimizer.useParfor = getOptionalField( ...
+    optimizerConfig, 'useParfor', true);
+config.optimizer.parforWorkers = getOptionalField( ...
+    optimizerConfig, 'parforWorkers', 4);
 
-% Store the local translation search radius in millimeters.
-config.optimizer.translationBoundMm         = getOptionalField(optimizerConfig, 'translationBoundMm', 10);
+% Resolve optimizer output once so later folder changes cannot affect it.
+defaultOutputFolder = fullfile('output', 'bonePoseOptimization', 'cmaes');
+outputFolder = getOptionalField(optimizerConfig, 'outputFolder', defaultOutputFolder);
+config.optimizer.outputFolder = makeAbsolutePath(outputFolder, config.project.root);
 
-% Store the local rotation search radius in degrees because this is easier to edit than radians.
-config.optimizer.rotationBoundDeg           = getOptionalField(optimizerConfig, 'rotationBoundDeg', 10);
-
-% Store the initial CMA-ES translation sigma in millimeters.
-config.optimizer.translationSigmaMm         = getOptionalField(optimizerConfig, 'translationSigmaMm', 5);
-
-% Store the initial CMA-ES rotation sigma in degrees because the wrapper converts it to radians.
-config.optimizer.rotationSigmaDeg           = getOptionalField(optimizerConfig, 'rotationSigmaDeg', 5);
-
-% Store the moderate CMA-ES population size for the 6D pose search.
-config.optimizer.populationSize             = getOptionalField(optimizerConfig, 'populationSize', 12);
-
-% Store the moderate first-run function evaluation budget.
-config.optimizer.maxFunctionEvaluations     = getOptionalField(optimizerConfig, 'maxFunctionEvaluations', 400);
-
-% Store whether CMA-ES should use parfor when the Parallel Computing Toolbox is available.
-config.optimizer.useParfor                  = getOptionalField(optimizerConfig, 'useParfor', true);
-
-% Store the worker cap used by the external cmaes_parfor implementation.
-config.optimizer.parforWorkers              = getOptionalField(optimizerConfig, 'parforWorkers', 4);
-
-% Store the base output folder where each CMA-ES run creates a timestamped subfolder.
-config.optimizer.outputFolder               = makeAbsolutePath(getOptionalField(optimizerConfig, 'outputFolder', fullfile('output', 'bonePoseOptimization', 'cmaes')), config.project.root);
-
-
-
-%% BOOKKEEPING
-
-% Store the loaded JSON file path so results can be traced back to the configuration source.
+% Keep the source JSON path with the parsed settings for reproducibility.
 config.source.configFilePath = configFilePath;
 end
 
 
-%% HELPER: GET REQUIRED FIELD
 function value = getRequiredField(sourceStruct, fieldName, displayName)
-%GETREQUIREDFIELD Read a required field and report a clear config path when it is missing.
-% This local function keeps the parser messages helpful for users editing the JSON file.
+%GETREQUIREDFIELD Read one required configuration field.
+% Inputs are the source struct, MATLAB field name, and user-facing field
+% name. The output is the stored value.
 
-% Stop early if a required configuration group or field is missing.
+% Stop at the missing field so the JSON path is easy to identify and fix.
 if ~isstruct(sourceStruct) || ~isfield(sourceStruct, fieldName)
     error('createBonePoseOptimizationConfig:MissingField', ...
         'Missing required configuration field: %s', displayName);
 end
 
-% Return the requested value so the caller can assign it into the flat config struct.
+% Return the configured value without changing its type.
 value = sourceStruct.(fieldName);
 end
 
 
-%% HELPER: ENSURE SCALAR TEXT
+function value = getOptionalField(sourceStruct, fieldName, defaultValue)
+%GETOPTIONALFIELD Read one optional field or use its documented default.
+% Inputs are the source struct, field name, and default value. The output is
+% the configured nonempty value or the supplied default.
+
+% Use the JSON value only when the optional field is present and nonempty.
+if isstruct(sourceStruct) && isfield(sourceStruct, fieldName) && ...
+        ~isempty(sourceStruct.(fieldName))
+    value = sourceStruct.(fieldName);
+else
+    value = defaultValue;
+end
+end
+
 
 function value = ensureScalarText(rawValue, displayName)
-%ENSURESCALARTEXT Convert a char vector or string scalar into a char vector.
-% This local function keeps path arguments simple and prevents accidental string arrays.
+%ENSURESCALARTEXT Convert one string scalar or character vector to char.
+% rawValue is the text to normalize, displayName identifies it in errors,
+% and value is the resulting character row vector.
 
-% Accept string scalars because modern MATLAB code often passes paths as strings.
-if isstring(rawValue)
-    % Stop early when the caller passed several strings because one config path is expected.
-    if ~isscalar(rawValue)
-        error('createBonePoseOptimizationConfig:InvalidText', ...
-            '%s must be a character vector or string scalar.', displayName);
-    end
-
-    % Convert the string scalar to a char vector so the path helpers can use classic MATLAB I/O.
+% Accept one MATLAB string and convert it to the text type used by file functions.
+if isstring(rawValue) && isscalar(rawValue)
     value = char(rawValue);
     return;
 end
 
-% Accept character vectors because the rest of this project mostly uses char paths.
-if ischar(rawValue) && (isrow(rawValue) || isempty(rawValue))
-    % Return the path unchanged after confirming it is one row of text.
+% Accept an ordinary character row vector without changing it.
+if ischar(rawValue) && isrow(rawValue)
     value = rawValue;
     return;
 end
 
-% Stop early when the caller passed a non-text value such as a cell array or numeric value.
+% Reject arrays because each configuration field represents one value.
 error('createBonePoseOptimizationConfig:InvalidText', ...
     '%s must be a character vector or string scalar.', displayName);
 end
 
 
-%% HELPER: GET OPTIONAL FIELD
-
-function value = getOptionalField(sourceStruct, fieldName, defaultValue)
-%GETOPTIONALFIELD Read an optional field or return a default value.
-% This local function lets new config fields be added without breaking older JSON files.
-
-% Use the configured value only when the source is a struct and the field is present.
-if isstruct(sourceStruct) && isfield(sourceStruct, fieldName) && ~isempty(sourceStruct.(fieldName))
-    value = sourceStruct.(fieldName);
-else
-    % Return the default value when the optional field is not available.
-    value = defaultValue;
-end
-end
-
-%% HELPER: MAKE ABSOLUTE PATH
-
 function absolutePath = makeAbsolutePath(inputPath, baseFolder)
-%MAKEABSOLUTEPATH Resolve a path against a base folder when it is relative.
-% This local function lets the JSON file use short relative paths without depending on the current folder.
+%MAKEABSOLUTEPATH Resolve a relative path against a known base folder.
+% inputPath is the configured path, baseFolder anchors relative paths, and
+% absolutePath is the normalized absolute result.
 
-% Convert MATLAB string values to character vectors for file path functions.
+% Normalize the configured path before checking whether it is already absolute.
 inputPath = char(inputPath);
-
-% Leave Windows absolute paths and UNC paths unchanged.
 if isAbsolutePath(inputPath)
     absolutePath = char(java.io.File(inputPath).getCanonicalPath());
 else
-    % Resolve relative paths against the provided base folder and normalize any ".." pieces.
     absolutePath = char(java.io.File(fullfile(baseFolder, inputPath)).getCanonicalPath());
 end
 end
 
-%% HELPER: IS ABSOLUTE?
 
 function isAbsolute = isAbsolutePath(inputPath)
-%ISABSOLUTEPATH Detect whether a path is already absolute on Windows or Unix-like systems.
-% This local function avoids assuming that every project will run from the same drive or operating system.
+%ISABSOLUTEPATH Check whether a path is absolute on Windows or Unix.
+% inputPath is one character path and isAbsolute reports the result.
 
-% Match Windows drive paths like C:\folder and Unix paths like /home/user.
-isDrivePath = numel(inputPath) >= 3 && isstrprop(inputPath(1), 'alpha') && inputPath(2) == ':' && any(inputPath(3) == ['\' '/']);
-
-% Match UNC network paths like \\server\share.
+% Recognize drive paths, UNC paths, and Unix root paths used by MATLAB.
+isDrivePath = numel(inputPath) >= 3 && isstrprop(inputPath(1), 'alpha') && ...
+    inputPath(2) == ':' && any(inputPath(3) == ['\' '/']);
 isUncPath = startsWith(inputPath, '\\');
-
-% Match Unix-like absolute paths.
 isUnixPath = startsWith(inputPath, '/');
-
-% Combine all supported absolute path forms into one logical flag.
 isAbsolute = isDrivePath || isUncPath || isUnixPath;
-end
-
-%% HELPER: ENSURE CELL STRING
-
-function values = ensureCellString(rawValues)
-%ENSURECELLSTRING Convert JSON string arrays into a MATLAB cell array of character vectors.
-% This local function keeps sequenceFilenames compatible with existing curly-brace indexing.
-
-% Convert an already decoded cell array into a row cell array of character vectors.
-if iscell(rawValues)
-    values = cellfun(@char, rawValues(:).', 'UniformOutput', false);
-    return;
-end
-
-% Convert MATLAB string arrays into a row cell array of character vectors.
-if isstring(rawValues)
-    values = cellstr(rawValues(:).');
-    return;
-end
-
-% Convert a single character vector into a one-element cell array.
-if ischar(rawValues)
-    values = {rawValues};
-    return;
-end
-
-% Stop early because the sequence file list must be text-based.
-error('createBonePoseOptimizationConfig:InvalidStringList', ...
-    'input.sequenceFilenames must be a string array or cell array of strings.');
 end

@@ -50,21 +50,22 @@ end
 
 %% CONVERT POSE VECTOR TO MESH TRANSFORM
 
-% Convert the optimizer candidate state into a 4x4 transform around the initial pose.
-T_candidate_init = stateVectorToTMatrix(poseVector, data.T_init_originct);
+% Convert the optimizer state into a candidate CT-to-reference transform.
+T_CT_ref_candidate = stateVectorToTMatrix(poseVector, data.T_CT_ref_initial);
+% Move the anatomical bone frame with the same CT pose for clear diagnostics.
+T_bone_ref_candidate = T_CT_ref_candidate * data.T_bone_CT;
 
 %% COMPUTE PROBE-FACING PIXELS
 
 % Evaluate the geometry for this candidate pose so the cost function can sample image intensities later.
-[poseEvaluation, transformedMesh] = computeProbeFacingPixelsForPose( ...
-                                        data.meshVerticesLocal, ...
-                                        data.meshFaces, ...
-                                        data.planes, ...
-                                        T_candidate_init, ...
-                                        config);
+[poseEvaluation, boneMeshRefCandidate] = computeProbeFacingPixelsForPose( ...
+    data.boneMeshCT, ...
+    data.imagePlanesRef, ...
+    T_CT_ref_candidate, ...
+    config);
 
 % % Show the precomputed image intersections for sanity checking; comment this line before real optimization runs.
-% planeImages = {data.planes.image};
+% planeImages = {data.imagePlanesRef.image};
 % displayImageIntersections(planeImages, poseEvaluation, 'Cost Placeholder Probe-Facing Intersections');
 
 %% FUTURE COST-FUNCTION PLACEHOLDER
@@ -96,7 +97,7 @@ for idx_plane = 1:numel(poseEvaluation)
     selected_cols = probeFacingPixels(:, 2);
 
     % Read the raw image for this plane; project images are stored as [column, row] in this pipeline.
-    current_image = data.planes(idx_plane).image;
+    current_image = data.imagePlanesRef(idx_plane).image;
 
     % Convert [row, col] pixel coordinates to stored-image indexing, where column is the first dimension.
     selected_linear_indices = sub2ind(size(current_image), selected_cols, selected_rows);
@@ -131,8 +132,9 @@ end
 %% PACKAGE DETAILS FOR DEBUGGING
 
 % Store some of the details from the cost function
-details.T_candidate_init                = T_candidate_init;                % Candidate transform so future debugging can compare optimizer poses.
-details.transformedMesh                 = transformedMesh;                 % Transformed mesh so users can visualize the exact geometry used for this candidate pose.
+details.T_CT_ref_candidate              = T_CT_ref_candidate;              % Candidate CT pose so debugging can compare optimizer states.
+details.T_bone_ref_candidate            = T_bone_ref_candidate;            % Candidate anatomical frame for frame-aware inspection.
+details.boneMeshRefCandidate            = boneMeshRefCandidate;            % Transformed mesh so users can visualize the evaluated geometry.
 details.poseEvaluation                  = poseEvaluation;                  % Per-plane selected pixels because this is the essential output needed for the future cost.
 details.totalIntensity                  = totalIntensity;                  % Sum of all sampled intensities so users can verify the cost numerator.
 details.totalIntersectionPixels         = totalIntersectionPixels;         % Count of all sampled pixels so users can verify the cost denominator.

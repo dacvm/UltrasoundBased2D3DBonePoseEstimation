@@ -1,0 +1,36 @@
+{
+  "project": {
+    "root": "..",
+    "functionsFolderName": "functions"
+  },
+  "input": {
+    "bone": "T",
+    "validSnapshotsMatFile": "tools/ultrasoundSpatialProcessing/outputs/validSnapshots_20260812_160247.mat",
+    "ctPostProcessedMatFile": "tools/ctkneePostProcess/outputs/kneephantom/kneephantom_bones_and_bonepins.mat",
+    "coarseRegistrationMatFile": "tools/bonePreRegistration/outputs/coarseRegistration_20260812_200530.mat"
+  },
+  "intersection": {
+    "normalFacingToleranceDeg": 25
+  },
+  "cost": {
+    "intensityMax": 255,
+    "minReferencePixels": 10,
+    "nMinPixels": 10,
+    "lambdaMissing": 1.0
+  },
+  "logging": {
+    "printPreparationProgress": false,
+    "printEvaluationProgress": false
+  },
+  "optimizer": {
+    "translationBoundMm": 10.0,
+    "rotationBoundDeg": 10.0,
+    "translationSigmaMm": 3.0,
+    "rotationSigmaDeg": 3.0,
+    "populationSize": 256,
+    "maxFunctionEvaluations": 1000,
+    "useParfor": true,
+    "parforWorkers": 6,
+    "outputFolder": "output/bonePoseOptimization/cmaes"
+  }
+}

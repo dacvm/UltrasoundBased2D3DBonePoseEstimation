@@ -1,291 +1,307 @@
-function data = prepareBonePoseOptimizationInputs(config)
-%PREPAREBONEPOSEOPTIMIZATIONINPUTS Load reusable data for future bone-pose optimization.
-% This function declaration separates slow data preparation from the repeated cost-function evaluation.
+function [data, validationData] = prepareBonePoseOptimizationInputs(config)
+%PREPAREBONEPOSEOPTIMIZATIONINPUTS Prepare standardized optimization inputs.
+% This function loads the reviewed ultrasound snapshots, CT bone model, and
+% coarse registration produced by tools/. It prepares fixed estimation data
+% once so the cost function only needs to evaluate candidate poses.
 %
-% What this function does:
-%   This function prepares all fixed data needed before running a future
-%   optimizer. It loads calibration, ultrasound image sequences, tracking
-%   transforms, image planes, ACS data, manual initialization, and the femur
-%   mesh. The result is one struct named data.
+% Input:
+%   config         - Configuration returned by
+%                    createBonePoseOptimizationConfig.
 %
-% Why this function exists:
-%   Optimization will evaluate many candidate bone poses. We do not want to
-%   reload files, smooth tracking transforms, or rebuild image planes every
-%   time the cost function is called. This function does that slow setup
-%   once, then stores the reusable result in data.
-%
-% Main output fields:
-%   data.meshVerticesLocal:
-%       Femur mesh vertices in the original local CT/STL coordinate system.
-%       These vertices are kept local so every candidate pose can transform
-%       the same unchanged source mesh.
-%
-%   data.meshFaces:
-%       Triangle connectivity for the femur mesh. This does not change
-%       during rigid-pose optimization.
-%
-%   data.planes:
-%       Collection of 2D ultrasound image planes expressed in the reference
-%       coordinate frame. Each plane also stores the raw image, dimensions,
-%       physical axes, and timestamp.
-%
-%   data.T_init_originct:
-%       Initial 4-by-4 transform built from ACS data and manual adjustment.
-%       This is the starting pose used by the placeholder optimization code.
-%
-%   data.n_initialIntersectionPixel:
-%       Number of probe-facing intersection pixels produced by the initial
-%       pose for each image plane. The cost function uses these fixed
-%       counts as the coverage baseline and does not update them during
-%       optimization.
-%
-%   data.T_image_probecalib and data.S_image_probecalib:
-%       Calibration transform and pixel scale information from the fCal XML
-%       file. They are stored for debugging and future extensions.
-%
-% Coordinate-frame context:
-%   The ultrasound image planes are expressed in the reference frame. The
-%   mesh starts in its local CT coordinate frame, then data.T_init_originct
-%   places it near those image planes. Later, optimization will adjust this
-%   initial transform to better align the mesh with image features.
-%
-% Important details:
-%   - This function prepares data only. It should not contain the optimizer.
-%   - This function also avoids visualization, so it can be used by scripts
-%     and cost functions without opening figures.
-%   - If a setting should change between experiments, prefer editing the
-%     JSON config file instead of editing this function.
+% Outputs:
+%   data           - Estimation-only data containing the CT mesh, ultrasound
+%                    planes, initial transforms, and initial pixel counts.
+%   validationData - Saved ground-truth intersections and source metadata.
+%                    This output must not be passed to the optimizer.
 
 %% HANDLE OPTIONAL CONFIGURATION
 
-% Create default settings when the caller does not provide a configuration struct.
+% Load the v02 configuration when this function is called directly.
 if nargin < 1 || isempty(config)
     config = createBonePoseOptimizationConfig();
 end
 
-%% LOAD ULTRASOUND CALIBRATION
+% Use one uppercase code to match the same bone across all standardized files.
+targetBone = upper(char(config.input.bone));
 
-% Build the absolute path to the fCal XML file that stores the Image-to-Probe transform.
-fcalConfigPath  = fullfile(config.project.root, 'data', config.input.fcalFilename);
-% Read all calibration transforms from the XML file using the existing project helper.
-transformations = read_fcal_transforms(fcalConfigPath);
+%% LOAD STANDARDIZED TOOL OUTPUTS
 
-% Use the first transform because the validation script treats it as Image-to-Probe calibration.
-T_image_probecalib = transformations(1).Matrix;
-% Extract the raw rotation-scale block so we can split rotation from pixel scaling.
-R_image_probe_raw  = T_image_probecalib(1:3, 1:3);
-% Use SVD to find the closest pure rotation to the raw calibration block.
-[U_image_probe, ~, V_image_probe] = svd(R_image_probe_raw);
-% Build the orthogonal rotation that preserves the calibration direction as closely as possible.
-R_image_probe_orth = U_image_probe * V_image_probe';
+% Load only the variables owned by each tool so their roles stay clear.
+validSnapshots = loadRequiredVariable( ...
+    config.input.validSnapshotsMatFile, 'validSnapshots');
+bones = loadRequiredVariable( ...
+    config.input.ctPostProcessedMatFile, 'bones');
+coarseRegistration = loadRequiredVariable( ...
+    config.input.coarseRegistrationMatFile, 'coarseRegistration');
 
-% Flip the last axis only when needed so the rotation stays right-handed.
-if det(R_image_probe_orth) < 0
-    U_image_probe(:, 3) = -U_image_probe(:, 3);
-    R_image_probe_orth = U_image_probe * V_image_probe';
+% Find one CT model and one coarse registration using the shared bone code.
+boneIndex = findUniqueBoneIndex(bones, targetBone, 'CT bone model');
+coarseIndex = findUniqueBoneIndex( ...
+    coarseRegistration, targetBone, 'coarse-registration result');
+currentBone = bones(boneIndex);
+currentCoarseRegistration = coarseRegistration(coarseIndex);
+
+% A skipped coarse-registration record cannot provide an optimization start pose.
+if ~strcmpi(string(currentCoarseRegistration.status), "registered")
+    error('prepareBonePoseOptimizationInputs:BoneNotRegistered', ...
+        'The coarse-registration result for bone %s is not registered: %s', ...
+        targetBone, string(currentCoarseRegistration.status));
 end
 
-% Replace the scaled block with the pure rotation so downstream transforms are rigid.
-T_image_probecalib(1:3, 1:3) = R_image_probe_orth;
-% Store the original column norms as pixel spacing values used to size image planes.
-S_image_probecalib = vecnorm(R_image_probe_raw, 2, 1);
+%% COLLECT ESTIMATION AND VALIDATION RECORDS
 
-%% LOAD AND SMOOTH SEQUENCES
+% Copy planes and ground truth into separate arrays while preserving source order.
+[imagePlanesRef, groundTruthIntersections, snapshotSources] = ...
+    collectBoneSnapshots(validSnapshots, targetBone);
 
-% Count sequence files once so the loop and storage are easy to read.
-n_filename = numel(config.input.sequenceFilenames);
+% Check the fixed plane geometry before it is used in repeated evaluations.
+validateImagePlanes(imagePlanesRef);
 
-% Preallocate a cell array because each sequence can contain a different number of packets.
-sequences = cell(1, n_filename);
+%% PREPARE THE CT MESH AND INITIAL POSE
 
-% Print a progress message when requested because sequence parsing and smoothing may take time.
+% Keep the source mesh in CT coordinates throughout optimization preparation.
+boneMeshCT = currentBone.mesh;
+if ~isa(boneMeshCT, 'triangulation')
+    error('prepareBonePoseOptimizationInputs:InvalidBoneMesh', ...
+        'bones(%d).mesh must be a triangulation.', boneIndex);
+end
+
+% Read the frame-explicit transforms produced by the CT and coarse-registration tools.
+T_bone_CT = currentBone.T_bone_CT;
+T_CT_ref_initial = currentCoarseRegistration.T_CT_ref_est;
+validateRigidTransform(T_bone_CT, 'bones.T_bone_CT');
+validateRigidTransform(T_CT_ref_initial, 'coarseRegistration.T_CT_ref_est');
+
+% Derive the anatomical-frame pose from the CT pose so both always stay synchronized.
+T_bone_ref_initial = T_CT_ref_initial * T_bone_CT;
+if norm(T_bone_ref_initial - currentCoarseRegistration.T_bone_ref_est, 'fro') > 1e-8
+    error('prepareBonePoseOptimizationInputs:InconsistentBoneTransform', ...
+        'T_bone_ref_est does not equal T_CT_ref_est * T_bone_CT.');
+end
+
+% Confirm that the coarse mesh belongs to this CT mesh and transform.
+validateCoarseMesh(boneMeshCT, currentCoarseRegistration.boneMeshRef_est, ...
+    T_CT_ref_initial);
+
+%% COMPUTE THE INITIAL COVERAGE REFERENCE
+
+% Recompute intersections at the coarse pose; saved intersections are validation data only.
+[initialPoseEvaluation, ~] = computeProbeFacingPixelsForPose( ...
+    boneMeshCT, imagePlanesRef, T_CT_ref_initial, config);
+
+% Store one fixed reference count per plane for active-plane and coverage scoring.
+nInitialIntersectionPixels = arrayfun( ...
+    @(evaluation) size(evaluation.probeFacingPixels, 1), ...
+    initialPoseEvaluation);
+
+%% PACKAGE ESTIMATION DATA
+
+% Keep estimation fields together and name geometry by its coordinate frame.
+data.bone                       = targetBone;
+data.boneName                   = char(string(currentBone.name));
+data.boneMeshCT                 = boneMeshCT;
+data.imagePlanesRef             = imagePlanesRef;
+data.T_bone_CT                  = T_bone_CT;
+data.T_CT_ref_initial           = T_CT_ref_initial;
+data.T_bone_ref_initial         = T_bone_ref_initial;
+data.nInitialIntersectionPixels = nInitialIntersectionPixels;
+data.config                     = config;
+
+% Keep ground truth outside data so estimation code cannot use it accidentally.
+validationData.bone                     = targetBone;
+validationData.groundTruthIntersections = groundTruthIntersections;
+validationData.snapshotSources          = snapshotSources;
+
+% Print a compact summary only when preparation logging is enabled.
 if config.logging.printPreparationProgress
-    fprintf('Preparing sequence data for optimization...\n');
+    fprintf('Prepared %d image planes for bone %s.\n', ...
+        numel(imagePlanesRef), targetBone);
+end
 end
 
-% Loop through every configured sequence recording.
-for index_filename = 1:n_filename
-    % Build the full sequence path from the shared folder and the current filename.
-    sequencePath = fullfile(config.input.sequenceFolder, config.input.sequenceFilenames{index_filename});
-    % Parse the ultrasound sequence and tracking data with the existing project helper.
-    sequence = read_sequence_image(sequencePath);
 
-    % Collect all raw Probe-to-Tracker transforms into one 3D array for smoothing.
-    ProbeToTrackerDeviceTransform_all = cat(3, sequence.packets.ProbeToTrackerDeviceTransform);
-    % Collect all raw Reference-to-Tracker transforms into one 3D array for smoothing.
-    ReferenceToTrackerDeviceTransform_all = cat(3, sequence.packets.ReferenceToTrackerDeviceTransform);
+function value = loadRequiredVariable(filePath, variableName)
+%LOADREQUIREDVARIABLE Load one named variable from a MAT-file.
+% filePath identifies the MAT-file, variableName identifies the expected
+% variable, and value is the loaded MATLAB value.
 
-    % Smooth the probe transforms using the same options as the validated script.
-    ProbeToTrackerDeviceTransform_all_smooth = smoothTransformations( ...
-        ProbeToTrackerDeviceTransform_all, ...
-        'method', config.smoothing.method, ...
-        'window', config.smoothing.window);
-    % Smooth the reference transforms using the same options as the validated script.
-    ReferenceToTrackerDeviceTransform_all_smooth = smoothTransformations( ...
-        ReferenceToTrackerDeviceTransform_all, ...
-        'method', config.smoothing.method, ...
-        'window', config.smoothing.window);
+% Give the user the missing path directly instead of letting load fail later.
+if ~isfile(filePath)
+    error('prepareBonePoseOptimizationInputs:MissingInputFile', ...
+        'Input MAT-file was not found: %s', filePath);
+end
 
-    % Convert the smoothed probe transform stack into a cell list for assigning into packet structs.
-    probeTransformCells = reshape(num2cell(cat(3, ProbeToTrackerDeviceTransform_all_smooth), [1 2]), 1, []);
-    % Store the smoothed probe transform beside each packet so plane construction can use filtered poses.
-    [sequence.packets.ProbeToTrackerDeviceTransform_Filtered] = deal(probeTransformCells{:});
+% Load only the requested variable because the tool files may contain other data.
+loadedData = load(filePath, variableName);
+if ~isfield(loadedData, variableName)
+    error('prepareBonePoseOptimizationInputs:MissingVariable', ...
+        'MAT-file %s does not contain variable %s.', filePath, variableName);
+end
 
-    % Convert the smoothed reference transform stack into a cell list for assigning into packet structs.
-    referenceTransformCells = reshape(num2cell(cat(3, ReferenceToTrackerDeviceTransform_all_smooth), [1 2]), 1, []);
-    % Store the smoothed reference transform beside each packet so plane construction can use filtered poses.
-    [sequence.packets.ReferenceToTrackerDeviceTransform_Filtered] = deal(referenceTransformCells{:});
+% Return the variable itself so callers do not need an extra wrapper struct.
+value = loadedData.(variableName);
+end
 
-    % Save the prepared sequence for the image-plane collection step.
-    sequences{index_filename} = sequence;
 
-    % Print the filename when requested so long preparations are easier to follow.
-    if config.logging.printPreparationProgress
-        fprintf('%s prepared.\n', config.input.sequenceFilenames{index_filename});
+function boneIndex = findUniqueBoneIndex(records, targetBone, sourceName)
+%FINDUNIQUEBONEINDEX Match exactly one struct record by bone code.
+% records is a struct array with a bone field, targetBone is the requested
+% code, sourceName labels errors, and boneIndex is the unique matching index.
+
+% Bone codes are the stable identity shared by the standardized tool outputs.
+recordBoneCodes = upper(string({records.bone}));
+boneIndex = find(recordBoneCodes == string(targetBone));
+
+% Array order is not an identity, so continue only with one code match.
+if numel(boneIndex) ~= 1
+    error('prepareBonePoseOptimizationInputs:NonuniqueBoneMatch', ...
+        'Expected one %s for bone %s, but found %d.', ...
+        sourceName, targetBone, numel(boneIndex));
+end
+end
+
+
+function [imagePlanesRef, groundTruthIntersections, snapshotSources] = ...
+        collectBoneSnapshots(validSnapshots, targetBone)
+%COLLECTBONESNAPSHOTS Flatten selected records for one bone in stable order.
+% validSnapshots is the grouped review output and targetBone is the selected
+% code. The outputs are aligned plane, ground-truth intersection, and source
+% arrays that preserve group order followed by record order.
+
+% Select every source group belonging to the requested bone.
+groupBoneCodes = upper(string({validSnapshots.bone}));
+targetGroupIndices = find(groupBoneCodes == string(targetBone));
+
+% Count selected records first so the output arrays can be allocated once.
+nRecords = 0;
+for groupIndex = targetGroupIndices
+    nRecords = nRecords + numel(validSnapshots(groupIndex).data);
+end
+
+% Optimization needs at least one fixed ultrasound observation.
+if nRecords == 0
+    error('prepareBonePoseOptimizationInputs:NoSelectedSnapshots', ...
+        'No selected ultrasound snapshots were found for bone %s.', targetBone);
+end
+
+% Find the first selected record to preserve the exact saved struct layouts.
+firstGroupIndex = targetGroupIndices( ...
+    find(arrayfun(@(index) ~isempty(validSnapshots(index).data), ...
+    targetGroupIndices), 1));
+firstRecord = validSnapshots(firstGroupIndex).data(1);
+
+% Preallocate aligned estimation and validation arrays from their saved templates.
+imagePlanesRef = repmat(firstRecord.plane, 1, nRecords);
+groundTruthIntersections = repmat(firstRecord.intersection, 1, nRecords);
+sourceTemplate = struct('groupName', '', 'groupPath', '', ...
+    'groupIndex', 0, 'recordIndex', 0, 'sourceIndex', 0);
+snapshotSources = repmat(sourceTemplate, 1, nRecords);
+
+% Flatten groups without sorting again so review order remains reproducible.
+outputIndex = 1;
+for groupIndex = targetGroupIndices
+    currentGroup = validSnapshots(groupIndex);
+    for recordIndex = 1:numel(currentGroup.data)
+        currentRecord = currentGroup.data(recordIndex);
+        imagePlanesRef(outputIndex) = currentRecord.plane;
+        groundTruthIntersections(outputIndex) = currentRecord.intersection;
+        snapshotSources(outputIndex).groupName = char(string(currentGroup.name));
+        snapshotSources(outputIndex).groupPath = char(string(currentGroup.path));
+        snapshotSources(outputIndex).groupIndex = groupIndex;
+        snapshotSources(outputIndex).recordIndex = recordIndex;
+        snapshotSources(outputIndex).sourceIndex = currentRecord.sourceIndex;
+        outputIndex = outputIndex + 1;
     end
 end
+end
 
-%% COLLECT 2D IMAGE PLANES
 
-% Create an empty plane struct array with all fields needed by the intersection helpers.
-planes = repmat(struct('p0', [], 'ex', [], 'ey', [], 'n', [], ...
-                       'W', 0, 'H', 0, 'nRows', 0, 'nCols', 0, ...
-                       'image', [], 'timestamp', 0), 1, 0);
+function validateImagePlanes(imagePlanesRef)
+%VALIDATEIMAGEPLANES Check the fields used by geometry and intensity scoring.
+% imagePlanesRef is the plane struct array. This helper has no output and
+% stops when a plane cannot be used consistently in the reference frame.
 
-% Start the output index at one because MATLAB arrays use one-based indexing.
-plane_index = 1;
+% These fields are the complete interface consumed by the optimization pipeline.
+requiredFields = {'T_image_ref', 'p0', 'ex', 'ey', 'n', 'W', 'H', ...
+    'nRows', 'nCols', 'image', 'timestamp'};
 
-% Loop over each prepared sequence to collect all sampled image planes.
-for index_filename = 1:n_filename
-    % Read the current prepared sequence once so the inner loop stays focused on packets.
-    sequence = sequences{index_filename};
+for planeIndex = 1:numel(imagePlanesRef)
+    plane = imagePlanesRef(planeIndex);
 
-    % Read the number of packets from the header because the sequence length can vary per recording.
-    n_packet = sequence.header.DimSize(3);
-
-    % Use the sequence end when the caller did not provide a custom packet end index.
-    if isempty(config.imagePlaneSampling.packetEndIndex)
-        packetEndIndex = n_packet;
-    else
-        packetEndIndex = min(config.imagePlaneSampling.packetEndIndex, n_packet);
+    % Report a schema problem before individual geometry expressions become unclear.
+    if ~all(isfield(plane, requiredFields))
+        error('prepareBonePoseOptimizationInputs:InvalidPlaneSchema', ...
+            'Image plane %d is missing a required field.', planeIndex);
     end
 
-    % Loop over the same sampled packet indices used by the validated script.
-    for idx_packet = config.imagePlaneSampling.packetStartIndex:config.imagePlaneSampling.packetStep:packetEndIndex
+    % The basis vectors and origin must form the same image pose saved by the tool.
+    if ~isequal(size(plane.p0), [3 1]) || ~isequal(size(plane.ex), [3 1]) || ...
+            ~isequal(size(plane.ey), [3 1]) || ~isequal(size(plane.n), [3 1])
+        error('prepareBonePoseOptimizationInputs:InvalidPlaneGeometry', ...
+            'Image plane %d must store p0, ex, ey, and n as 3-by-1 vectors.', ...
+            planeIndex);
+    end
 
-        % Read the current packet once so every field access refers to the same frame.
-        current_packet = sequence.packets(idx_packet);
-        % Skip packets whose probe tracking was invalid because their image plane pose is not trustworthy.
-        if ~current_packet.ProbeToTrackerDeviceTransformStatus
-            continue;
-        end
+    validateRigidTransform(plane.T_image_ref, ...
+        sprintf('imagePlanesRef(%d).T_image_ref', planeIndex));
+    T_image_ref_from_fields = [plane.ex, plane.ey, plane.n, plane.p0; 0 0 0 1];
+    if norm(T_image_ref_from_fields - plane.T_image_ref, 'fro') > 1e-8
+        error('prepareBonePoseOptimizationInputs:InconsistentPlaneTransform', ...
+            'Image plane %d geometry does not match T_image_ref.', planeIndex);
+    end
 
-        % Read the smoothed probe pose in the tracker frame.
-        T_global_probe = current_packet.ProbeToTrackerDeviceTransform_Filtered;
-        % Read the smoothed reference pose in the tracker frame.
-        T_global_ref   = current_packet.ReferenceToTrackerDeviceTransform_Filtered;
-
-        % Express the probe pose in the reference frame without forming an explicit matrix inverse.
-        T_probe_ref = T_global_ref \ T_global_probe;
-        % Build the image plane pose in the reference frame using the calibration transform.
-        T_image_ref = T_probe_ref * T_image_probecalib;
-
-        % Read the image origin in the reference frame.
-        origin    = T_image_ref(1:3, 4);
-        % Read the image basis axes in the reference frame.
-        base_axes = T_image_ref(1:3, 1:3);
-
-        % Store the neccesary values 
-        plane.p0        = origin;                                                       % Top-left point of the finite image plane.
-        plane.ex        = base_axes(:, 1);                                              % Physical direction of increasing image column.
-        plane.ey        = base_axes(:, 2);                                              % Physical direction of increasing image row.
-        plane.n         = base_axes(:, 3);                                              % Physical normal direction of the image plane.
-        plane.W         = (size(current_packet.Image, 1) - 1) * S_image_probecalib(1);  % Physical image width 
-        plane.H         = (size(current_packet.Image, 2) - 1) * S_image_probecalib(2);  % Physical image height
-        plane.nRows     = size(current_packet.Image, 2);                                % Number of image rows
-        plane.nCols     = size(current_packet.Image, 1);                                % Number of image columns 
-        plane.image     = current_packet.Image;                                         % Raw image so the future cost function can sample intensity values.
-        plane.timestamp = current_packet.Timestamp;                                     % Timestamp so outputs can be traced back to the source packet.
-
-        % Append the current plane to the output array.
-        planes(plane_index) = plane;
-
-        % Move to the next output slot.
-        plane_index = plane_index + 1;
+    % Images are stored as [column, row] in the standardized snapshot output.
+    if ~ismatrix(plane.image) || size(plane.image, 1) ~= plane.nCols || ...
+            size(plane.image, 2) ~= plane.nRows || plane.W <= 0 || plane.H <= 0
+        error('prepareBonePoseOptimizationInputs:InvalidPlaneImage', ...
+            'Image plane %d has inconsistent dimensions or physical size.', ...
+            planeIndex);
     end
 end
-
-%% LOAD ACS DATA
-
-% Build the full path to the femur ACS MAT file.
-acs_path = fullfile(config.project.root, 'data', 'bones', config.input.acsFilename);
-% Load the ACS file into a struct so variable names can be checked safely.
-acs_loaded = load(acs_path);
-
-% Use the expected acs variable when it exists.
-if isfield(acs_loaded, 'acs')
-    acs = acs_loaded.acs;
-else
-    % Fall back to the first saved variable so the helper is robust to minor MAT-file name changes.
-    acs_fields = fieldnames(acs_loaded);
-    acs = acs_loaded.(acs_fields{1});
 end
 
-% Build the femur transform from the ACS convention used by the RadboudUMC function.
-T_femurct_originct = [acs.f.R', acs.f.origin'; 0 0 0 1];
 
-%% LOAD MANUAL INITIAL POSE
+function validateRigidTransform(T_source_target, transformName)
+%VALIDATERIGIDTRANSFORM Check one project-format 4-by-4 rigid transform.
+% T_source_target is the matrix to check and transformName identifies it in
+% errors. This helper has no output.
 
-% Build the full path to the manual adjustment file used as the current initial alignment.
-manualadjustment_path = fullfile(config.project.root, 'output', 'manual_transformation_adjustments', config.input.manualAdjustmentFilename);
-
-% Load the manual transform file into a struct so the needed variable can be extracted explicitly.
-manualadjustment_loaded = load(manualadjustment_path);
-% Read the manual transform that moves the CT bone mesh close to the ultrasound image planes.
-T_femurlabmanual_bonect = manualadjustment_loaded.T_femurlabmanual_bonect;
-
-% Combine the original ACS transform and manual adjustment into the initial origin-CT pose.
-T_init_originct         = T_femurlabmanual_bonect * T_femurct_originct;
-
-%% LOAD MESH FILE
-
-% Build the full path to the femur STL file.
-stl_path = fullfile(config.project.root, 'data', 'bones', config.input.stlFilename);
-% Read the femur mesh in its local CT coordinate frame.
-[meshFaces, meshVerticesLocal] = readStlMesh(stl_path);
-
-%% COMPUTE INITIAL-POSE INTERSECTION COUNTS
-
-% Evaluate the initial manual pose once so the optimizer can compare later candidates against a fixed coverage baseline.
-[referencePoseEvaluation, ~] = computeProbeFacingPixelsForPose( ...
-                                meshVerticesLocal, ...
-                                meshFaces, ...
-                                planes, ...
-                                T_init_originct, ...
-                                config);
-
-% Preallocate one initial-count slot per plane so the count vector stays aligned with data.planes.
-n_initialIntersectionPixel = zeros(1, numel(referencePoseEvaluation));
-
-% Loop through the initial-pose evaluation and count only the probe-facing pixels used by the cost function.
-for idx_plane = 1:numel(referencePoseEvaluation)
-    % Store the initial-pose selected-pixel count so the cost function can penalize tiny bright intersections.
-    n_initialIntersectionPixel(idx_plane) = size(referencePoseEvaluation(idx_plane).probeFacingPixels, 1);
+% Check the matrix shape and finite values before testing rotation properties.
+if ~isnumeric(T_source_target) || ~isequal(size(T_source_target), [4 4]) || ...
+        ~all(isfinite(T_source_target(:)))
+    error('prepareBonePoseOptimizationInputs:InvalidRigidTransform', ...
+        '%s must be a finite numeric 4-by-4 matrix.', transformName);
 end
 
-%% PACKAGE OUTPUT DATA
+% A project rigid transform has an orthonormal right-handed rotation and fixed last row.
+rotation = T_source_target(1:3, 1:3);
+if norm(rotation' * rotation - eye(3), 'fro') > 1e-6 || ...
+        abs(det(rotation) - 1) > 1e-6 || ...
+        norm(T_source_target(4, :) - [0 0 0 1]) > 1e-8
+    error('prepareBonePoseOptimizationInputs:InvalidRigidTransform', ...
+        '%s is not a proper rigid transform.', transformName);
+end
+end
 
-data.meshVerticesLocal          = meshVerticesLocal;            % Local vertices so optimization can re-transform the same source geometry for every candidate pose.
-data.meshFaces                  = meshFaces;                    % Mesh faces because the topology does not change during rigid-pose optimization.
-data.planes                     = planes;                       % Image planes because they are fixed observations during mesh-pose optimization.
-data.T_init_originct            = T_init_originct;              % Current manual alignment as the starting pose for future optimization.
-data.T_image_probecalib         = T_image_probecalib;           % Calibration transform for inspection and future extensions.
-data.S_image_probecalib         = S_image_probecalib;           % Calibration spacing for inspection and future extensions.
-data.n_initialIntersectionPixel = n_initialIntersectionPixel;   % Initial-pose per-plane counts used as the fixed coverage baseline by the cost function.
-data.config                     = config;                       % Raw configuration with the data so future scripts can reproduce how it was prepared.
 
-% Print the number of collected planes when requested so setup can be verified quickly.
-if config.logging.printPreparationProgress
-    fprintf('Collected %d image planes for optimization.\n', numel(planes));
+function validateCoarseMesh(boneMeshCT, boneMeshRefEstimate, T_CT_ref_initial)
+%VALIDATECOARSEMESH Confirm that coarse registration used the selected CT mesh.
+% boneMeshCT is the source triangulation, boneMeshRefEstimate is the saved
+% transformed triangulation, and T_CT_ref_initial is the saved coarse pose.
+% This helper has no output.
+
+% The transformed mesh should keep the CT mesh connectivity unchanged.
+if ~isa(boneMeshRefEstimate, 'triangulation') || ...
+        ~isequal(boneMeshCT.ConnectivityList, boneMeshRefEstimate.ConnectivityList)
+    error('prepareBonePoseOptimizationInputs:CoarseMeshMismatch', ...
+        'The coarse-registration mesh does not match the selected CT mesh.');
+end
+
+% Applying the saved transform should reproduce the saved reference-frame points.
+expectedPointsRef = applyRigidTransform(boneMeshCT.Points, T_CT_ref_initial);
+if ~isequal(size(expectedPointsRef), size(boneMeshRefEstimate.Points)) || ...
+        max(abs(expectedPointsRef - boneMeshRefEstimate.Points), [], 'all') > 1e-8
+    error('prepareBonePoseOptimizationInputs:CoarseMeshMismatch', ...
+        'The coarse-registration mesh points do not match T_CT_ref_est.');
 end
 end
