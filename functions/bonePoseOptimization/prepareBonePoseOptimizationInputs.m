@@ -11,8 +11,8 @@ function [data, validationData] = prepareBonePoseOptimizationInputs(config)
 % Outputs:
 %   data           - Estimation-only data containing the CT mesh, ultrasound
 %                    planes, initial transforms, and initial pixel counts.
-%   validationData - Saved ground-truth intersections and source metadata.
-%                    This output must not be passed to the optimizer.
+%   validationData - Saved ground-truth intersections, bone pose, and source
+%                    metadata. This output must not be passed to the optimizer.
 
 %% HANDLE OPTIONAL CONFIGURATION
 
@@ -26,13 +26,19 @@ targetBone = upper(char(config.input.bone));
 
 %% LOAD STANDARDIZED TOOL OUTPUTS
 
-% Load only the variables owned by each tool so their roles stay clear.
-validSnapshots = loadRequiredVariable( ...
-    config.input.validSnapshotsMatFile, 'validSnapshots');
-bones = loadRequiredVariable( ...
-    config.input.ctPostProcessedMatFile, 'bones');
-coarseRegistration = loadRequiredVariable( ...
-    config.input.coarseRegistrationMatFile, 'coarseRegistration');
+% Load reviewed snapshots and their matching ground-truth bone poses together.
+snapshotOutput = loadRequiredVariables( ...
+    config.input.validSnapshotsMatFile, {'validSnapshots', 'validBonePoses'});
+validSnapshots = snapshotOutput.validSnapshots;
+validBonePoses = snapshotOutput.validBonePoses;
+
+% Load the CT model and coarse registration from their owning tool outputs.
+ctOutput = loadRequiredVariables( ...
+    config.input.ctPostProcessedMatFile, {'bones'});
+coarseOutput = loadRequiredVariables( ...
+    config.input.coarseRegistrationMatFile, {'coarseRegistration'});
+bones = ctOutput.bones;
+coarseRegistration = coarseOutput.coarseRegistration;
 
 % Find one CT model and one coarse registration using the shared bone code.
 boneIndex = findUniqueBoneIndex(bones, targetBone, 'CT bone model');
@@ -40,6 +46,11 @@ coarseIndex = findUniqueBoneIndex( ...
     coarseRegistration, targetBone, 'coarse-registration result');
 currentBone = bones(boneIndex);
 currentCoarseRegistration = coarseRegistration(coarseIndex);
+
+% Match the validation pose independently so array ordering cannot select another bone.
+groundTruthIndex = findUniqueBoneIndex( ...
+    validBonePoses.bonePoses, targetBone, 'ground-truth bone pose');
+currentGroundTruthPose = validBonePoses.bonePoses(groundTruthIndex).data;
 
 % A skipped coarse-registration record cannot provide an optimization start pose.
 if ~strcmpi(string(currentCoarseRegistration.status), "registered")
@@ -71,6 +82,26 @@ T_bone_CT = currentBone.T_bone_CT;
 T_CT_ref_initial = currentCoarseRegistration.T_CT_ref_est;
 validateRigidTransform(T_bone_CT, 'bones.T_bone_CT');
 validateRigidTransform(T_CT_ref_initial, 'coarseRegistration.T_CT_ref_est');
+
+% Read and validate the ground-truth transforms saved by spatial processing.
+T_CT_ref_groundTruth = currentGroundTruthPose.T_CT_ref;
+T_bone_ref_groundTruth = currentGroundTruthPose.T_bone_ref;
+boneMeshRefGroundTruth = currentGroundTruthPose.mesh;
+validateRigidTransform(T_CT_ref_groundTruth, ...
+    'validBonePoses.bonePoses.data.T_CT_ref');
+validateRigidTransform(T_bone_ref_groundTruth, ...
+    'validBonePoses.bonePoses.data.T_bone_ref');
+if ~isa(boneMeshRefGroundTruth, 'triangulation')
+    error('prepareBonePoseOptimizationInputs:InvalidGroundTruthMesh', ...
+        'The ground-truth bone mesh must be a triangulation.');
+end
+
+% The saved anatomical frame must come from the same CT pose and CT bone model.
+if norm(T_bone_ref_groundTruth - ...
+        T_CT_ref_groundTruth * T_bone_CT, 'fro') > 1e-8
+    error('prepareBonePoseOptimizationInputs:InconsistentGroundTruthTransform', ...
+        'Ground-truth T_bone_ref does not equal T_CT_ref * T_bone_CT.');
+end
 
 % Derive the anatomical-frame pose from the CT pose so both always stay synchronized.
 T_bone_ref_initial = T_CT_ref_initial * T_bone_CT;
@@ -111,6 +142,10 @@ data.config                     = config;
 validationData.bone                     = targetBone;
 validationData.groundTruthIntersections = groundTruthIntersections;
 validationData.snapshotSources          = snapshotSources;
+validationData.groundTruthBonePose.bone        = targetBone;
+validationData.groundTruthBonePose.T_CT_ref    = T_CT_ref_groundTruth;
+validationData.groundTruthBonePose.T_bone_ref  = T_bone_ref_groundTruth;
+validationData.groundTruthBonePose.boneMeshRef = boneMeshRefGroundTruth;
 
 % Print a compact summary only when preparation logging is enabled.
 if config.logging.printPreparationProgress
@@ -120,26 +155,26 @@ end
 end
 
 
-function value = loadRequiredVariable(filePath, variableName)
-%LOADREQUIREDVARIABLE Load one named variable from a MAT-file.
-% filePath identifies the MAT-file, variableName identifies the expected
-% variable, and value is the loaded MATLAB value.
+function loadedData = loadRequiredVariables(filePath, variableNames)
+%LOADREQUIREDVARIABLES Load several related variables from one MAT-file.
+% filePath identifies the MAT-file, variableNames lists the required saved
+% variables, and loadedData is the struct returned by MATLAB load.
 
-% Give the user the missing path directly instead of letting load fail later.
+% Report the shared input path before trying to read its related variables.
 if ~isfile(filePath)
     error('prepareBonePoseOptimizationInputs:MissingInputFile', ...
         'Input MAT-file was not found: %s', filePath);
 end
 
-% Load only the requested variable because the tool files may contain other data.
-loadedData = load(filePath, variableName);
-if ~isfield(loadedData, variableName)
-    error('prepareBonePoseOptimizationInputs:MissingVariable', ...
-        'MAT-file %s does not contain variable %s.', filePath, variableName);
+% Read related snapshot outputs together so they always come from one file.
+loadedData = load(filePath, variableNames{:});
+for variableIndex = 1:numel(variableNames)
+    variableName = variableNames{variableIndex};
+    if ~isfield(loadedData, variableName)
+        error('prepareBonePoseOptimizationInputs:MissingVariable', ...
+            'MAT-file %s does not contain variable %s.', filePath, variableName);
+    end
 end
-
-% Return the variable itself so callers do not need an extra wrapper struct.
-value = loadedData.(variableName);
 end
 
 

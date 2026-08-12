@@ -1,11 +1,19 @@
-function displayBonePoseOptimizationScene(data, poseVector, config, figureName)
-%DISPLAYBONEPOSEOPTIMIZATIONSCENE Display the current mesh pose and image-plane poses.
-% This function declaration gives the optimization script one display-only helper.
+function displayBonePoseOptimizationScene( ...
+        data, poseVector, config, figureName, validationData)
+%DISPLAYBONEPOSEOPTIMIZATIONSCENE Display estimated and optional ground-truth poses.
+% This function draws the current estimated bone pose and ultrasound image
+% planes. When validationData is provided, it also overlays the saved
+% ground-truth bone mesh and anatomical coordinate system.
 %
-% What this function does:
-%   This function draws the current 3D bone mesh pose and the sampled 2D
-%   ultrasound image planes in one 3D figure. It is meant for checking the
-%   setup before optimization and the result after optimization.
+% Inputs:
+%   data           - Prepared estimation data containing the CT mesh, image
+%                    planes, initial pose, and anatomical CT transform.
+%   poseVector     - Six-value candidate perturbation around the initial pose.
+%   config         - Optional optimization configuration. data.config is
+%                    used when this input is empty.
+%   figureName     - Optional figure title.
+%   validationData - Optional validation struct containing
+%                    groundTruthBonePose. When omitted, only the estimate is shown.
 %
 % Important details:
 %   - This function only displays geometry.
@@ -29,6 +37,12 @@ end
 
 % Convert MATLAB string input to a character vector because older graphics functions handle char names most consistently.
 figureName = char(figureName);
+
+% Show ground truth only when the caller explicitly provides validation data.
+showGroundTruth = nargin >= 5 && ~isempty(validationData);
+if showGroundTruth
+    groundTruthBonePose = validationData.groundTruthBonePose;
+end
 
 %% CONVERT THE CURRENT POSE TO DISPLAY GEOMETRY
 
@@ -60,14 +74,27 @@ view(ax, 35, 40);
 
 %% DRAW THE CURRENT BONE MESH POSE
 
-% Draw the transformed target bone as one patch so the current pose is visible.
-patch(ax, ...
+% Draw the transformed target bone as one patch so the estimated pose is visible.
+estimatedMeshHandle = patch(ax, ...
     'Faces', meshFaces, ...
     'Vertices', bonePointsRefCandidate, ...
     'FaceColor', [0.92 0.83 0.74], ...
     'EdgeColor', 'none', ...
     'FaceAlpha', 0.55, ...
-    'Tag', 'plot_bone_pose_optimization_mesh');
+    'DisplayName', 'Estimated bone mesh', ...
+    'Tag', 'plot_bone_pose_estimated_mesh');
+
+% Overlay the saved reference-frame ground-truth surface when requested.
+if showGroundTruth
+    groundTruthMeshHandle = patch(ax, ...
+        'Faces', groundTruthBonePose.boneMeshRef.ConnectivityList, ...
+        'Vertices', groundTruthBonePose.boneMeshRef.Points, ...
+        'FaceColor', [0.55 0.55 0.55], ...
+        'EdgeColor', 'none', ...
+        'FaceAlpha', 0.25, ...
+        'DisplayName', 'Ground-truth bone mesh', ...
+        'Tag', 'plot_bone_pose_ground_truth_mesh');
+end
 
 % Compute a display scale from the mesh size so coordinate axes stay readable across data sets.
 meshExtent = max(bonePointsRefCandidate, [], 1) - min(bonePointsRefCandidate, [], 1);
@@ -85,9 +112,20 @@ display_axis_v2(ax, ...
                 T_bone_ref_candidate(1:3, 4), ...
                 T_bone_ref_candidate(1:3, 1:3), ...
                 quiverScale, ...
-                sprintf('%s bone ACS', data.boneName), ...
-                'Tag', 'plot_bone_pose_optimization_axis', ...
+                sprintf('%s estimated ACS', data.boneName), ...
+                'Tag', 'plot_bone_pose_estimated_acs', ...
                 'Mode', 'default');
+
+% Draw dashed anatomical axes so the ground-truth orientation is easy to compare.
+if showGroundTruth
+    display_axis_v2(ax, ...
+                    groundTruthBonePose.T_bone_ref(1:3, 4), ...
+                    groundTruthBonePose.T_bone_ref(1:3, 1:3), ...
+                    quiverScale, ...
+                    sprintf('%s ground-truth ACS', data.boneName), ...
+                    'Tag', 'plot_bone_pose_ground_truth_acs', ...
+                    'Mode', 'shadow');
+end
 
 %% DRAW THE CURRENT ULTRASOUND IMAGE-PLANE POSES
 
@@ -124,6 +162,12 @@ for idx_plane = 1:numel(planes)
 end
 
 %% FINISH THE DISPLAY STYLE
+
+% Keep the legend focused on the two surfaces instead of listing every image plane.
+if showGroundTruth
+    legend(ax, [estimatedMeshHandle, groundTruthMeshHandle], ...
+        'Location', 'best', 'Interpreter', 'none');
+end
 
 % Add headlight-style lighting so the 3D mesh surface is easier to read.
 camlight(ax, 'headlight');

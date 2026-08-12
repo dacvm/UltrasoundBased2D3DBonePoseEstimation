@@ -69,6 +69,7 @@ verifyEqual(testCase, numel(validationData.snapshotSources), 15);
 
 % Ground truth must not be reachable through the struct passed to the optimizer.
 verifyFalse(testCase, isfield(data, 'groundTruthIntersections'));
+verifyFalse(testCase, isfield(data, 'groundTruthBonePose'));
 verifyFalse(testCase, isfield(data, 'validationData'));
 
 % Source names show that grouped review order was preserved while flattening.
@@ -77,6 +78,25 @@ expectedNames = [repmat("tibia_lateral", 1, 5), ...
                  repmat("tibia_medial", 1, 5), ...
                  repmat("tibia_shaft", 1, 5)];
 verifyEqual(testCase, sourceNames, expectedNames);
+end
+
+
+function testGroundTruthBonePoseIsPreparedForValidation(testCase)
+%TESTGROUNDTRUTHBONEPOSEISPREPAREDFORVALIDATION Check the selected saved pose.
+% testCase supplies the CT model and validation-only pose. This function has
+% no output.
+
+% The validation pose must describe the same tibia selected for estimation.
+data = testCase.TestData.data;
+groundTruthBonePose = testCase.TestData.validationData.groundTruthBonePose;
+verifyEqual(testCase, groundTruthBonePose.bone, 'T');
+verifyTrue(testCase, isa(groundTruthBonePose.boneMeshRef, 'triangulation'));
+
+% Both saved transforms use the project 4-by-4 column-vector convention.
+verifySize(testCase, groundTruthBonePose.T_CT_ref, [4 4]);
+verifySize(testCase, groundTruthBonePose.T_bone_ref, [4 4]);
+verifyEqual(testCase, groundTruthBonePose.T_bone_ref, ...
+    groundTruthBonePose.T_CT_ref * data.T_bone_CT, 'AbsTol', 1e-8);
 end
 
 
@@ -94,9 +114,11 @@ verifyEqual(testCase, numel(data.nInitialIntersectionPixels), ...
 verifyTrue(testCase, all(isfinite(data.nInitialIntersectionPixels)));
 verifyTrue(testCase, all(data.nInitialIntersectionPixels >= 0));
 
-% All planes in the current reviewed tibia set are usable at the coarse pose.
-verifyTrue(testCase, all(data.nInitialIntersectionPixels >= minimumPixels));
-verifyTrue(testCase, all(details.activePlaneMask));
+% The cost must activate exactly the planes that meet its configured threshold.
+expectedActivePlaneMask = ...
+    data.nInitialIntersectionPixels >= minimumPixels;
+verifyEqual(testCase, details.activePlaneMask, expectedActivePlaneMask);
+verifyTrue(testCase, any(details.activePlaneMask));
 verifyTrue(testCase, isfinite(testCase.TestData.initialCost));
 verifyEqual(testCase, details.status, 'intensity_coverage_cost_computed');
 end
@@ -122,6 +144,71 @@ verifyEqual(testCase, recoveredStateVector, stateVector, 'AbsTol', 1e-10);
 % The stored initial anatomical frame must use the project composition rule.
 verifyEqual(testCase, data.T_bone_ref_initial, ...
     data.T_CT_ref_initial * data.T_bone_CT, 'AbsTol', 1e-12);
+end
+
+
+function testSceneWithoutValidationShowsOnlyEstimate(testCase)
+%TESTSCENEWITHOUTVALIDATIONSHOWSONLYESTIMATE Check the optional display path.
+% testCase supplies prepared estimation data. This function has no output.
+
+% Hide the smoke-test figure and restore the user's graphics default afterward.
+previousFigureVisibility = get(groot, 'defaultFigureVisible');
+visibilityCleanup = onCleanup(@() set( ...
+    groot, 'defaultFigureVisible', previousFigureVisibility));
+set(groot, 'defaultFigureVisible', 'off');
+
+% Use the initial pose because this test checks graphics structure, not optimization.
+displayBonePoseOptimizationScene( ...
+    testCase.TestData.data, zeros(6, 1), testCase.TestData.config, ...
+    'Estimated Pose Test');
+fig = gcf;
+figureCleanup = onCleanup(@() close(fig));
+
+% The four-argument interface should keep the original estimate-only behavior.
+verifyEqual(testCase, numel(findobj( ...
+    fig, 'Tag', 'plot_bone_pose_estimated_mesh')), 1);
+verifyEqual(testCase, numel(findobj( ...
+    fig, 'Tag', 'plot_bone_pose_estimated_acs')), 4);
+verifyEmpty(testCase, findobj( ...
+    fig, 'Tag', 'plot_bone_pose_ground_truth_mesh'));
+verifyEmpty(testCase, findobj( ...
+    fig, 'Tag', 'plot_bone_pose_ground_truth_acs'));
+
+% Trigger both cleanup objects before the next display test starts.
+clear figureCleanup visibilityCleanup;
+end
+
+
+function testSceneWithValidationOverlaysGroundTruth(testCase)
+%TESTSCENEWITHVALIDATIONOVERLAYSGROUNDTRUTH Check the comparison display path.
+% testCase supplies aligned estimation and validation data. This function
+% has no output.
+
+% Hide the smoke-test figure and restore the user's graphics default afterward.
+previousFigureVisibility = get(groot, 'defaultFigureVisible');
+visibilityCleanup = onCleanup(@() set( ...
+    groot, 'defaultFigureVisible', previousFigureVisibility));
+set(groot, 'defaultFigureVisible', 'off');
+
+% Pass validation data through the new fifth input to request the overlay.
+displayBonePoseOptimizationScene( ...
+    testCase.TestData.data, zeros(6, 1), testCase.TestData.config, ...
+    'Ground-Truth Overlay Test', testCase.TestData.validationData);
+fig = gcf;
+figureCleanup = onCleanup(@() close(fig));
+
+% The comparison scene should contain one mesh and one ACS group for each pose.
+verifyEqual(testCase, numel(findobj( ...
+    fig, 'Tag', 'plot_bone_pose_estimated_mesh')), 1);
+verifyEqual(testCase, numel(findobj( ...
+    fig, 'Tag', 'plot_bone_pose_ground_truth_mesh')), 1);
+verifyEqual(testCase, numel(findobj( ...
+    fig, 'Tag', 'plot_bone_pose_estimated_acs')), 4);
+verifyEqual(testCase, numel(findobj( ...
+    fig, 'Tag', 'plot_bone_pose_ground_truth_acs')), 4);
+
+% Trigger both cleanup objects before returning from the test.
+clear figureCleanup visibilityCleanup;
 end
 
 

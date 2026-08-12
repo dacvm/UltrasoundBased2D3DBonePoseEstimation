@@ -10,12 +10,12 @@
     "coarseRegistrationMatFile": "tools/bonePreRegistration/outputs/coarseRegistration_20260812_200530.mat"
   },
   "intersection": {
-    "normalFacingToleranceDeg": 25
+    "normalFacingToleranceDeg": 30
   },
   "cost": {
     "intensityMax": 255,
-    "minReferencePixels": 10,
-    "nMinPixels": 10,
+    "minReferencePixels": 50,
+    "nMinPixels": 100,
     "lambdaMissing": 1.0
   },
   "logging": {

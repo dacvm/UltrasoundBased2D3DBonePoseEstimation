@@ -46,7 +46,7 @@ disp(optimizationResult);
 
 % Display the best estimated pose in the same reference frame as the input planes.
 displayBonePoseOptimizationScene(data, optimizationResult.bestPoseVector, config, ...
-    'Final Bone Pose Optimization Result');
+    'Final Bone Pose Optimization Result', validationData);
 % Recompute final intersections for visual inspection of the optimized estimate.
 displayBonePoseOptimizationIntersections(data, optimizationResult.bestPoseVector, config, ...
     'Final Bone Pose Optimization Intersections');
