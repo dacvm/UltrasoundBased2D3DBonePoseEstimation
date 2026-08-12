@@ -3,7 +3,7 @@ clear; clc; close all;
 %% PATH DEFINITION
 
 filepath_ultrasoundimage = 'D:\Documents\BELANDA\SonoSkin\codes\matlab\bmodeimage_3dspace\tools\ultrasoundSpatialProcessing\outputs';
-filename_ultrasoundimage = 'validSnapshots_20260812_154625.mat';
+filename_ultrasoundimage = 'validSnapshots_20260812_160247.mat';
 
 filepath_bonesurface = 'D:\Documents\BELANDA\SonoSkin\codes\matlab\bmodeimage_3dspace\tools\boneSegmentationProcess\outputs';
 filename_bonesurface = 'boneSurface_20260811_211029.mat';
