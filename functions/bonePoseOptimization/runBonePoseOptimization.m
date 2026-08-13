@@ -19,7 +19,7 @@ function optimizationResult = runBonePoseOptimization(initialPoseVector, data, c
 %       transforms - Initial and best frame-explicit rigid transforms.
 %       search     - Search bounds, initial sigma, and CMA-ES options.
 %       cmaes      - Raw outputs returned by the CMA-ES implementation.
-%       run        - Completion status and paths to the saved run files.
+%       run        - Completion status, optional seed, and saved run paths.
 
 %% HANDLE OPTIONAL INPUTS
 
@@ -129,6 +129,7 @@ optimizationResult.cmaes.cmaesOptions         = opts;                           
 optimizationResult.run.runFolder              = runFolder;         % Point to the unique folder containing this run's logs and saved variables.
 optimizationResult.run.progressFilePath       = progressFilePath;  % Point to the progress MAT file required by the external CMA-ES script.
 optimizationResult.run.status                 = 'cmaes_completed'; % Confirm that the wrapper reached the end after CMA-ES returned.
+optimizationResult.run.seed                   = cmaesSettings.seed; % Preserve the requested repeat seed; v02 stores empty because it uses the CMA-ES default.
 end
 
 %% HELPER: READ CMA-ES SETTINGS FROM CONFIGURATION
@@ -171,9 +172,16 @@ cmaesSettings.populationSize         = getOptionalSetting(optimizerConfig, 'popu
 cmaesSettings.maxFunctionEvaluations = getOptionalSetting(optimizerConfig, 'maxFunctionEvaluations', 400);          % Moderate first-run function-evaluation budget.
 cmaesSettings.useParfor              = logical(getOptionalSetting(optimizerConfig, 'useParfor', true));             % Whether the wrapper should use parfor when the Parallel Computing Toolbox is available.
 cmaesSettings.parforWorkers          = getOptionalSetting(optimizerConfig, 'parforWorkers', 4);                     % Requested parfor worker cap used by the external CMA-ES implementation.
+cmaesSettings.seed                   = getOptionalSetting(optimizerConfig, 'seed', []);                              % Optional fixed seed used by reproducible experiment runs.
 
 defaultOutputFolder                  = fullfile(config.project.root, 'output', 'bonePoseOptimization', 'cmaes');        % Build a default output folder under the project root when the config does not provide one.
 cmaesSettings.outputFolder           = char(getOptionalSetting(optimizerConfig, 'outputFolder', defaultOutputFolder));  % Base folder where unique per-run CMA-ES output folders will be created.
+
+% Validate a supplied seed here because v02 intentionally leaves this setting empty.
+if ~isempty(cmaesSettings.seed)
+    validateattributes(cmaesSettings.seed, {'numeric'}, ...
+        {'scalar', 'positive', 'finite', 'integer'}, mfilename, 'seed');
+end
 
 end
 
@@ -431,6 +439,11 @@ opts.LogFilenamePrefix  = 'outcmaes';                               % Store CMA-
 opts.LogModulo          = 1;                                        % Keep CMA-ES file logging enabled so the run can be inspected afterward.
 opts.LogPlot            = 'off';                                    % Disable live plotting because optimization scripts should not create extra figures during long runs.
 opts.DispModulo         = 1;                                        % Print regular CMA-ES progress so users can see that the optimizer is still running.
+
+% Override the CMA-ES clock-based default only when an experiment supplied a seed.
+if ~isempty(cmaesSettings.seed)
+    opts.Seed = cmaesSettings.seed;
+end
 
 % Tell the user when parfor was requested but cannot be used in this MATLAB session.
 if cmaesSettings.useParfor && opts.ParforRun == 0
