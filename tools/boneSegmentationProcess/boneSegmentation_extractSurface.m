@@ -14,7 +14,8 @@ extractionToolDirectory = fileparts(scriptFullPath);
 projectDirectory = fileparts(fileparts(extractionToolDirectory));
 
 % Add the shared helpers and this script's specific helpers before reading
-% configuration because the reader now lives outside the main script.
+% configuration. The public surface extractor is also stored in the
+% script-specific folder, while MATLAB finds its private helpers automatically.
 sharedHelperDirectory = fullfile(extractionToolDirectory, 'helpers');
 scriptHelperDirectory = fullfile( ...
     sharedHelperDirectory, 'boneSegmentation_extractSurface');
@@ -41,17 +42,15 @@ ultrasoundFilePath          = fullfile(workflowConfiguration.input.ultrasoundSeq
 configurationFilePath       = fullfile(workflowConfiguration.input.configurationFilePath, workflowConfiguration.input.configurationFileName);
 boneSurfaceOutputDirectory  = workflowConfiguration.output.boneSurfaceOutputPath;
 
-% Add the public extractor and its separated helpers explicitly so this tool
-% also works when MATLAB starts outside the project directory.
-surfaceExtractionDirectory       = fullfile(projectDirectory, 'functions', 'boneSurfaceExtraction');
-surfaceExtractionHelperDirectory = fullfile(surfaceExtractionDirectory, 'helpers');
-displayFunctionDirectory         = fullfile(projectDirectory, 'functions', 'display');
-if ~isfolder(surfaceExtractionDirectory) || ~isfolder(surfaceExtractionHelperDirectory) || ~isfolder(displayFunctionDirectory)
-    error('boneSegmentation_extractSurface:MissingExtractionFunctions', ...
-          'Bone-surface extraction or display functions were not found under the project functions directory: %s', ...
-          fullfile(projectDirectory, 'functions'));
+% Add only the shared display functions here. The extraction functions were
+% already added with this script's helper folder above.
+displayFunctionDirectory = fullfile(projectDirectory, 'functions', 'display');
+if ~isfolder(displayFunctionDirectory)
+    error('boneSegmentation_extractSurface:MissingDisplayFunctions', ...
+          'Display functions were not found under the project functions directory: %s', ...
+          displayFunctionDirectory);
 end
-addpath(surfaceExtractionDirectory, surfaceExtractionHelperDirectory, displayFunctionDirectory);
+addpath(displayFunctionDirectory);
 
 %% LOAD THE SEGMENTATION AND MATCHING B-MODE DATA
 
