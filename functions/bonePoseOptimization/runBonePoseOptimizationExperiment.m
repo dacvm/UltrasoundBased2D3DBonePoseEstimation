@@ -68,7 +68,8 @@ for combinationIndex = 1:experimentPlan.numberOfCombinations
     combinationRunIndexes = find( ...
         experimentPlan.runs.combinationNumber == combinationRow.combinationNumber);
     % Copy the candidate values into the scalar configuration used by existing functions.
-    combinationConfig = createRunConfig(experimentSpec, combinationRow);
+    combinationConfig = createBonePoseOptimizationRunConfig( ...
+        experimentSpec, combinationRow);
 
     fprintf('\nPreparing %s (%d of %d).\n', ...
         char(combinationRow.combinationId), combinationIndex, ...
@@ -93,8 +94,10 @@ for combinationIndex = 1:experimentPlan.numberOfCombinations
         % Record every affected seed as failed because no optimizer can use this combination.
         for runIndex = combinationRunIndexes(:).'
             runRow = experimentPlan.runs(runIndex, :);
-            seedConfig = addSeedAndOutputFolder( ...
-                combinationConfig, runRow, experimentFolder);
+            seedConfig = createBonePoseOptimizationRunConfig( ...
+                experimentSpec, combinationRow, runRow.seed);
+            seedConfig = addRunOutputFolder( ...
+                seedConfig, runRow, experimentFolder);
             [runResult, summaryRecord] = createFailedRunResult( ...
                 runRow, seedConfig, preparationError, 'preparation', NaN, struct());
             saveRunResult(runResult);
@@ -110,8 +113,10 @@ for combinationIndex = 1:experimentPlan.numberOfCombinations
     validationReference = createValidationReference(validationData);
     for runIndex = combinationRunIndexes(:).'
         runRow = experimentPlan.runs(runIndex, :);
-        seedConfig = addSeedAndOutputFolder( ...
-            combinationConfig, runRow, experimentFolder);
+        seedConfig = createBonePoseOptimizationRunConfig( ...
+            experimentSpec, combinationRow, runRow.seed);
+        seedConfig = addRunOutputFolder( ...
+            seedConfig, runRow, experimentFolder);
         % Keep the prepared struct consistent with the exact seed-specific runtime config.
         seedData = combinationData;
         seedData.config = seedConfig;
@@ -143,26 +148,11 @@ experimentResult.summaryTable = summaryTable;
 end
 
 
-function runConfig = createRunConfig(experimentSpec, combinationRow)
-%CREATERUNCONFIG Materialize one scalar configuration from a combination row.
-% experimentSpec supplies fixed settings, combinationRow supplies the four
-% selected candidates, and runConfig is safe to pass to existing functions.
-
-% Copy fixed configuration fields, then replace candidate arrays with scalars.
-runConfig = experimentSpec;
-runConfig.intersection.normalFacingToleranceDeg = ...
-    combinationRow.normalFacingToleranceDeg;
-runConfig.cost.minReferencePixels = combinationRow.minReferencePixels;
-runConfig.cost.nMinPixels = combinationRow.nMinPixels;
-runConfig.cost.lambdaMissing = combinationRow.lambdaMissing;
-end
-
-
-function runConfig = addSeedAndOutputFolder(runConfig, runRow, experimentFolder)
-%ADDSEEDANDOUTPUTFOLDER Add one seed and its deterministic run output folder.
+function runConfig = addRunOutputFolder(runConfig, runRow, experimentFolder)
+%ADDRUNOUTPUTFOLDER Add the deterministic output folder for one experiment run.
 % runConfig is the scalar combination configuration, runRow identifies one
-% repetition, experimentFolder owns all outputs, and the returned config
-% contains the seed and CMA-ES base output folder for this run.
+% repetition, experimentFolder owns all outputs, and the returned config has
+% the CMA-ES base output folder for this run.
 
 % Build a readable folder hierarchy from the stable combination and seed values.
 seedFolder = fullfile(experimentFolder, 'runs', ...
@@ -171,8 +161,6 @@ if ~isfolder(seedFolder)
     mkdir(seedFolder);
 end
 
-% Pass the repeat seed directly to the optimizer wrapper.
-runConfig.optimizer.seed = runRow.seed;
 % Keep raw CMA-ES logs below the folder that will also contain runResult.mat.
 runConfig.optimizer.outputFolder = fullfile(seedFolder, 'cmaes');
 end
@@ -383,7 +371,7 @@ function saveRunResult(runResult)
 % runResult contains the output and its destination path. This function has
 % no output and uses v7.3 because detailed intersection data can be large.
 
-% The seed folder already exists because addSeedAndOutputFolder created it.
+% The seed folder already exists because addRunOutputFolder created it.
 resultFilePath = runResult.run.resultFilePath;
 save(resultFilePath, 'runResult', '-v7.3');
 end

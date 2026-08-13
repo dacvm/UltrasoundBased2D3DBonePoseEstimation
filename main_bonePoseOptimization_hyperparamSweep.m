@@ -5,8 +5,9 @@ addpath(genpath('functions'));
 
 %% LOAD THE EXPERIMENT SPECIFICATION
 
-% Use the v03 configuration because it defines candidate values and repeat seeds.
-configFilePath = fullfile(pwd, 'config', 'bonePoseOptimizationConfig_v03.json');
+% Use the sweep configuration because it defines candidate values and repeat seeds.
+configFilePath = fullfile(pwd, 'config', ...
+    'bonePoseOptimizationHyperparamSweepConfig.json');
 % Read and validate the complete experiment description before any run starts.
 experimentSpec = createBonePoseOptimizationExperimentConfig(configFilePath);
 

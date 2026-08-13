@@ -25,13 +25,18 @@ addpath(genpath(fullfile(projectRoot, 'functions')));
 v02ConfigPath = fullfile(projectRoot, 'config', ...
     'bonePoseOptimizationConfig_v02.json');
 v03ConfigPath = fullfile(projectRoot, 'config', ...
-    'bonePoseOptimizationConfig_v03.json');
+    'bonePoseOptimizationHyperparamSweepConfig.json');
+sanityConfigPath = fullfile(projectRoot, 'config', ...
+    'bonePoseOptimizationSanityCheckConfig.json');
 testCase.TestData.projectRoot = projectRoot;
 testCase.TestData.v02ConfigPath = v02ConfigPath;
 testCase.TestData.v03ConfigPath = v03ConfigPath;
+testCase.TestData.sanityConfigPath = sanityConfigPath;
 testCase.TestData.v02Config = createBonePoseOptimizationConfig(v02ConfigPath);
 testCase.TestData.v03Spec = ...
     createBonePoseOptimizationExperimentConfig(v03ConfigPath);
+testCase.TestData.sanitySpec = ...
+    createBonePoseOptimizationExperimentConfig(sanityConfigPath);
 end
 
 
@@ -39,13 +44,15 @@ function testV03ConfigurationKeepsCandidatesAndSeeds(testCase)
 %TESTV03CONFIGURATIONKEEPSCANDIDATESANDSEEDS Check the checked-in v03 defaults.
 % testCase supplies the parsed v03 specification. This function has no output.
 
-% The initial checked-in configuration is intentionally a small one-combination sweep.
+% Validate the experiment schema without depending on the user's current sweep values.
 spec = testCase.TestData.v03Spec;
-verifyEqual(testCase, spec.intersection.normalFacingToleranceDeg, 30);
-verifyEqual(testCase, spec.cost.minReferencePixels, 50);
-verifyEqual(testCase, spec.cost.nMinPixels, 100);
-verifyEqual(testCase, spec.cost.lambdaMissing, 1);
-verifyEqual(testCase, spec.experiment.seeds, 1001:1005);
+verifyTrue(testCase, all(spec.intersection.normalFacingToleranceDeg > 0));
+verifyTrue(testCase, all(spec.cost.minReferencePixels > 0));
+verifyTrue(testCase, all(spec.cost.nMinPixels > 0));
+verifyTrue(testCase, all(spec.cost.lambdaMissing >= 0));
+verifyTrue(testCase, all(spec.experiment.seeds > 0));
+verifyEqual(testCase, numel(unique(spec.experiment.seeds)), ...
+    numel(spec.experiment.seeds));
 verifyTrue(testCase, isfolder(fileparts(spec.experiment.outputFolder)));
 end
 
@@ -80,6 +87,29 @@ verifyTrue(testCase, all(cellfun(@isscalar, ...
     num2cell(plan.runs.normalFacingToleranceDeg))));
 verifyTrue(testCase, all(cellfun(@isscalar, ...
     num2cell(plan.runs.lambdaMissing))));
+end
+
+
+function testSanityConfigurationCreatesOneSeededRun(testCase)
+%TESTSANITYCONFIGURATIONCREATESONESEEDEDRUN Check the interactive workflow contract.
+% testCase supplies the parsed sanity-check specification. This function has
+% no output.
+
+% The sanity-check script requires one combination and one repeat seed.
+spec = testCase.TestData.sanitySpec;
+plan = createBonePoseOptimizationExperimentPlan(spec);
+verifyEqual(testCase, plan.numberOfCombinations, 1);
+verifyEqual(testCase, plan.numberOfSeeds, 1);
+verifyEqual(testCase, plan.numberOfRuns, 1);
+
+% Both workflows use this helper to turn a plan row into one executable config.
+runConfig = createBonePoseOptimizationRunConfig( ...
+    spec, plan.combinations(1, :), plan.runs.seed(1));
+verifyTrue(testCase, isscalar(runConfig.intersection.normalFacingToleranceDeg));
+verifyTrue(testCase, isscalar(runConfig.cost.minReferencePixels));
+verifyTrue(testCase, isscalar(runConfig.cost.nMinPixels));
+verifyTrue(testCase, isscalar(runConfig.cost.lambdaMissing));
+verifyEqual(testCase, runConfig.optimizer.seed, spec.experiment.seeds(1));
 end
 
 
@@ -143,6 +173,11 @@ temporaryOutputCleanup = onCleanup(@() removeTemporaryFolder(temporaryOutputRoot
 spec.experiment.name = 'v03_failure_test';
 spec.experiment.outputFolder = temporaryOutputRoot;
 spec.experiment.seeds = [31 32];
+spec.intersection.normalFacingToleranceDeg = ...
+    spec.intersection.normalFacingToleranceDeg(1);
+spec.cost.minReferencePixels = spec.cost.minReferencePixels(1);
+spec.cost.nMinPixels = spec.cost.nMinPixels(1);
+spec.cost.lambdaMissing = spec.cost.lambdaMissing(1);
 spec.input.validSnapshotsMatFile = fullfile(temporaryOutputRoot, 'missing.mat');
 
 % One preparation failure should create one failed result for each planned seed.
