@@ -27,8 +27,8 @@
     "rotationBoundDeg": 10.0,
     "translationSigmaMm": 3.0,
     "rotationSigmaDeg": 3.0,
-    "populationSize": 256,
-    "maxFunctionEvaluations": 1000,
+    "populationSize": 4,
+    "maxFunctionEvaluations": 10,
     "useParfor": true,
     "parforWorkers": 6,
     "outputFolder": "output/bonePoseOptimization/cmaes"

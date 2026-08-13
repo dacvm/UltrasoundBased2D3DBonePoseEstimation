@@ -44,6 +44,6 @@ disp(optimizationResult);
 
 % DISPLAY THE FINAL RESULT
 % Show the best pose returned by the optimizer wrapper so future optimizer output can be inspected visually.
-displayBonePoseOptimizationScene(data, optimizationResult.bestPoseVector, config, 'Final Bone Pose Optimization Result');
+displayBonePoseOptimizationScene(data, optimizationResult.result.bestPoseVector, config, 'Final Bone Pose Optimization Result');
 % Show the final best-pose intersection overlays inside each 2D image for closer inspection.
-displayBonePoseOptimizationIntersections(data, optimizationResult.bestPoseVector, config, 'Final Bone Pose Optimization Intersections');
+displayBonePoseOptimizationIntersections(data, optimizationResult.result.bestPoseVector, config, 'Final Bone Pose Optimization Intersections');

@@ -139,9 +139,9 @@ data.nInitialIntersectionPixels = nInitialIntersectionPixels;
 data.config                     = config;
 
 % Keep ground truth outside data so estimation code cannot use it accidentally.
-validationData.bone                     = targetBone;
-validationData.groundTruthIntersections = groundTruthIntersections;
-validationData.snapshotSources          = snapshotSources;
+validationData.bone                            = targetBone;
+validationData.groundTruthIntersections        = groundTruthIntersections;
+validationData.snapshotSources                 = snapshotSources;
 validationData.groundTruthBonePose.bone        = targetBone;
 validationData.groundTruthBonePose.T_CT_ref    = T_CT_ref_groundTruth;
 validationData.groundTruthBonePose.T_bone_ref  = T_bone_ref_groundTruth;
