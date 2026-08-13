@@ -15,69 +15,53 @@ function experimentSpec = createBonePoseOptimizationExperimentConfig(configFileP
 %% LOAD THE SHARED CONFIGURATION FIELDS
 
 % Reuse the established path and input parsing used by the v02 workflow.
-experimentSpec = createBonePoseOptimizationConfig(configFilePath);
+experimentSpec  = createBonePoseOptimizationConfig(configFilePath);
 % Read the raw JSON once more because the v02 reader does not know the experiment section.
-rawConfig = jsondecode(fileread(configFilePath));
+rawConfig       = jsondecode(fileread(configFilePath));
 
 %% NORMALIZE THE HYPERPARAMETER CANDIDATES
 
 % Treat a scalar as a one-value candidate list and a vector as several candidates.
-experimentSpec.intersection.normalFacingToleranceDeg = normalizeCandidates( ...
-    experimentSpec.intersection.normalFacingToleranceDeg, ...
-    'intersection.normalFacingToleranceDeg', true);
-experimentSpec.cost.minReferencePixels = normalizeCandidates( ...
-    experimentSpec.cost.minReferencePixels, ...
-    'cost.minReferencePixels', true);
-experimentSpec.cost.nMinPixels = normalizeCandidates( ...
-    experimentSpec.cost.nMinPixels, ...
-    'cost.nMinPixels', true);
-experimentSpec.cost.lambdaMissing = normalizeCandidates( ...
-    experimentSpec.cost.lambdaMissing, ...
-    'cost.lambdaMissing', false);
+experimentSpec.intersection.normalFacingToleranceDeg = normalizeCandidates(experimentSpec.intersection.normalFacingToleranceDeg, 'intersection.normalFacingToleranceDeg', true);
+experimentSpec.cost.minReferencePixels               = normalizeCandidates(experimentSpec.cost.minReferencePixels, 'cost.minReferencePixels', true);
+experimentSpec.cost.nMinPixels                       = normalizeCandidates(experimentSpec.cost.nMinPixels, 'cost.nMinPixels', true);
+experimentSpec.cost.lambdaMissing                    = normalizeCandidates(experimentSpec.cost.lambdaMissing, 'cost.lambdaMissing', false);
 
 % Keep intensity normalization fixed because it is not part of this sweep.
-validateattributes(experimentSpec.cost.intensityMax, {'numeric'}, ...
-    {'scalar', 'positive', 'finite'}, mfilename, 'cost.intensityMax');
+validateattributes(experimentSpec.cost.intensityMax, {'numeric'}, {'scalar', 'positive', 'finite'}, mfilename, 'cost.intensityMax');
 
 %% READ THE EXPERIMENT SETTINGS
 
 % Require one experiment section because it identifies and repeats the complete sweep.
-experimentConfig = getRequiredField(rawConfig, 'experiment', 'experiment');
+experimentConfig                = getRequiredField(rawConfig, 'experiment', 'experiment');
+
 % Use a readable name in folder names and saved metadata.
-experimentSpec.experiment.name = ensureSafeExperimentName( ...
-    getRequiredField(experimentConfig, 'name', 'experiment.name'));
+experimentSpec.experiment.name  = ensureSafeExperimentName(getRequiredField(experimentConfig, 'name', 'experiment.name'));
 % Normalize the explicit seed list so every combination receives the same repetitions.
-experimentSpec.experiment.seeds = normalizeSeeds( ...
-    getRequiredField(experimentConfig, 'seeds', 'experiment.seeds'));
+experimentSpec.experiment.seeds = normalizeSeeds(getRequiredField(experimentConfig, 'seeds', 'experiment.seeds'));
 
 % Resolve the experiment output against the project root, matching other project paths.
-configuredOutputFolder = ensureScalarText( ...
-    getRequiredField(experimentConfig, 'outputFolder', ...
-    'experiment.outputFolder'), 'experiment.outputFolder');
-experimentSpec.experiment.outputFolder = makeAbsolutePath( ...
-    configuredOutputFolder, experimentSpec.project.root);
+configuredOutputFolder = ensureScalarText(getRequiredField(experimentConfig, 'outputFolder', 'experiment.outputFolder'), 'experiment.outputFolder');
+experimentSpec.experiment.outputFolder = makeAbsolutePath(configuredOutputFolder, experimentSpec.project.root);
 
 %% CHECK FIXED OPTIMIZER SETTINGS
 
 % These settings stay scalar because optimizer tuning is outside the v03 sweep.
-validatePositiveScalar(experimentSpec.optimizer.translationBoundMm, ...
-    'optimizer.translationBoundMm', false);
-validatePositiveScalar(experimentSpec.optimizer.rotationBoundDeg, ...
-    'optimizer.rotationBoundDeg', false);
-validatePositiveScalar(experimentSpec.optimizer.translationSigmaMm, ...
-    'optimizer.translationSigmaMm', false);
-validatePositiveScalar(experimentSpec.optimizer.rotationSigmaDeg, ...
-    'optimizer.rotationSigmaDeg', false);
-validatePositiveScalar(experimentSpec.optimizer.populationSize, ...
-    'optimizer.populationSize', true);
-validatePositiveScalar(experimentSpec.optimizer.maxFunctionEvaluations, ...
-    'optimizer.maxFunctionEvaluations', true);
-validatePositiveScalar(experimentSpec.optimizer.parforWorkers, ...
-    'optimizer.parforWorkers', true);
-validateattributes(experimentSpec.optimizer.useParfor, {'logical', 'numeric'}, ...
-    {'scalar'}, mfilename, 'optimizer.useParfor');
+validatePositiveScalar(experimentSpec.optimizer.translationBoundMm,     'optimizer.translationBoundMm',     false);
+validatePositiveScalar(experimentSpec.optimizer.rotationBoundDeg,       'optimizer.rotationBoundDeg',       false);
+validatePositiveScalar(experimentSpec.optimizer.translationSigmaMm,     'optimizer.translationSigmaMm',     false);
+validatePositiveScalar(experimentSpec.optimizer.rotationSigmaDeg,       'optimizer.rotationSigmaDeg',       false);
+validatePositiveScalar(experimentSpec.optimizer.populationSize,         'optimizer.populationSize',         true);
+validatePositiveScalar(experimentSpec.optimizer.maxFunctionEvaluations, 'optimizer.maxFunctionEvaluations', true);
+validatePositiveScalar(experimentSpec.optimizer.parforWorkers,          'optimizer.parforWorkers',          true);
+validateattributes(experimentSpec.optimizer.useParfor, {'logical', 'numeric'}, {'scalar'}, mfilename, 'optimizer.useParfor');
+
 experimentSpec.optimizer.useParfor = logical(experimentSpec.optimizer.useParfor);
 end
+
+
+
+
 
 
 function candidates = normalizeCandidates(rawCandidates, displayName, requirePositive)
@@ -87,22 +71,21 @@ function candidates = normalizeCandidates(rawCandidates, displayName, requirePos
 % and candidates is the resulting row vector.
 
 % Candidate collections must be simple numeric vectors so their Cartesian product is clear.
-validateattributes(rawCandidates, {'numeric'}, ...
-    {'vector', 'nonempty', 'real', 'finite'}, mfilename, displayName);
+validateattributes(rawCandidates, {'numeric'}, {'vector', 'nonempty', 'real', 'finite'}, mfilename, displayName);
 
 % Positive thresholds cannot use zero, while a missing-penalty weight may be zero.
 if requirePositive && any(rawCandidates <= 0)
     error('createBonePoseOptimizationExperimentConfig:NonpositiveCandidate', ...
-        '%s values must be positive.', displayName);
+          '%s values must be positive.', displayName);
 elseif ~requirePositive && any(rawCandidates < 0)
     error('createBonePoseOptimizationExperimentConfig:NegativeCandidate', ...
-        '%s values must be nonnegative.', displayName);
+          '%s values must be nonnegative.', displayName);
 end
 
 % Duplicate values would create duplicate optimization runs without adding information.
 if numel(unique(rawCandidates)) ~= numel(rawCandidates)
     error('createBonePoseOptimizationExperimentConfig:DuplicateCandidate', ...
-        '%s must not contain duplicate values.', displayName);
+          '%s must not contain duplicate values.', displayName);
 end
 
 % Store every candidate list in the same row-vector shape for plan generation.
@@ -154,11 +137,9 @@ function validatePositiveScalar(value, displayName, requireInteger)
 
 % Counts require integers, while physical bounds and sigmas may be fractional.
 if requireInteger
-    validateattributes(value, {'numeric'}, ...
-        {'scalar', 'positive', 'finite', 'integer'}, mfilename, displayName);
+    validateattributes(value, {'numeric'}, {'scalar', 'positive', 'finite', 'integer'}, mfilename, displayName);
 else
-    validateattributes(value, {'numeric'}, ...
-        {'scalar', 'positive', 'finite'}, mfilename, displayName);
+    validateattributes(value, {'numeric'}, {'scalar', 'positive', 'finite'}, mfilename, displayName);
 end
 end
 
@@ -171,7 +152,7 @@ function value = getRequiredField(sourceStruct, fieldName, displayName)
 % Stop at the missing field so the user can correct the v03 JSON directly.
 if ~isstruct(sourceStruct) || ~isfield(sourceStruct, fieldName)
     error('createBonePoseOptimizationExperimentConfig:MissingField', ...
-        'Missing required configuration field: %s', displayName);
+          'Missing required configuration field: %s', displayName);
 end
 value = sourceStruct.(fieldName);
 end
@@ -189,7 +170,7 @@ elseif ischar(rawValue) && isrow(rawValue)
     value = rawValue;
 else
     error('createBonePoseOptimizationExperimentConfig:InvalidText', ...
-        '%s must be a character vector or string scalar.', displayName);
+          '%s must be a character vector or string scalar.', displayName);
 end
 end
 

@@ -95,8 +95,7 @@ else
 end
 
 % Convert the best state into both frame-explicit transforms used downstream.
-T_CT_ref_best = stateVectorToTMatrix( ...
-    bestPoseVector, data.T_CT_ref_initial);
+T_CT_ref_best   = stateVectorToTMatrix(bestPoseVector, data.T_CT_ref_initial);
 T_bone_ref_best = T_CT_ref_best * data.T_bone_CT;
 
 %% PACKAGE RESULT

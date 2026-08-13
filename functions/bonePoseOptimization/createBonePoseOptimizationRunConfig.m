@@ -1,5 +1,4 @@
-function runConfig = createBonePoseOptimizationRunConfig( ...
-        experimentSpec, combinationRow, seed)
+function runConfig = createBonePoseOptimizationRunConfig(experimentSpec, combinationRow, seed)
 %CREATEBONEPOSEOPTIMIZATIONRUNCONFIG Create one scalar optimization config.
 % This function copies the fixed v03 experiment settings, selects the four
 % scalar hyperparameter values stored in one combination row, and optionally
@@ -21,16 +20,14 @@ function runConfig = createBonePoseOptimizationRunConfig( ...
 
 % Copy fixed configuration fields, then replace candidate arrays with scalars.
 runConfig = experimentSpec;
-runConfig.intersection.normalFacingToleranceDeg = ...
-    combinationRow.normalFacingToleranceDeg;
-runConfig.cost.minReferencePixels = combinationRow.minReferencePixels;
-runConfig.cost.nMinPixels = combinationRow.nMinPixels;
-runConfig.cost.lambdaMissing = combinationRow.lambdaMissing;
+runConfig.intersection.normalFacingToleranceDeg = combinationRow.normalFacingToleranceDeg;
+runConfig.cost.minReferencePixels               = combinationRow.minReferencePixels;
+runConfig.cost.nMinPixels                       = combinationRow.nMinPixels;
+runConfig.cost.lambdaMissing                    = combinationRow.lambdaMissing;
 
 % Add the seed only for a specific repeat run; preparation itself does not need one.
 if nargin >= 3 && ~isempty(seed)
-    validateattributes(seed, {'numeric'}, ...
-        {'scalar', 'positive', 'finite', 'integer'}, mfilename, 'seed');
+    validateattributes(seed, {'numeric'}, {'scalar', 'positive', 'finite', 'integer'}, mfilename, 'seed');
     runConfig.optimizer.seed = seed;
 elseif isfield(runConfig.optimizer, 'seed')
     % Remove a copied seed so a combination-level config cannot accidentally reuse it.
