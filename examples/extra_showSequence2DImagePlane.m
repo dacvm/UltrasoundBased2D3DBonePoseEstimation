@@ -7,10 +7,13 @@ is_record = false;
 
 %% PREPARATION
 
+% Set the project root
+projectRoot = 'D:\Documents\BELANDA\SonoSkin\codes\matlab\bmodeimage_3dspace\';
+
 % Get the Sequence Recording file
-sequencePath = fullfile(pwd, 'data', 'data_11-03-2026', 'SequenceRecording_2026-03-11_20-51-14.mha');
-% sequencePath = fullfile(pwd, 'data', 'data_11-03-2026', 'SequenceRecording_2026-03-11_20-51-53.mha');
-% sequencePath = fullfile(pwd, 'data', 'data_11-03-2026', 'SequenceRecording_2026-03-11_20-53-07.mha');
+sequencePath = fullfile(projectRoot, 'data', 'data_11-03-2026', 'SequenceRecording_2026-03-11_20-51-14.mha');
+% sequencePath = fullfile(projectRoot, 'data', 'data_11-03-2026', 'SequenceRecording_2026-03-11_20-51-53.mha');
+% sequencePath = fullfile(projectRoot, 'data', 'data_11-03-2026', 'SequenceRecording_2026-03-11_20-53-07.mha');
 % Parse the sequence file into a MATLAB struct.
 sequence = read_sequence_image(sequencePath);
 
@@ -19,7 +22,7 @@ sequence = read_sequence_image(sequencePath);
 % str_filename = 'PlusDeviceSet_fCal_Epiphan_NDIPolaris_UTNML__20260309_152217.xml';
 str_filename = 'PlusDeviceSet_fCal_Epiphan_NDIPolaris_UTNML__20260312_120634.xml';
 % str_filename = 'PlusDeviceSet_fCal_Epiphan_NDIPolaris_RadboudUMC_20241217_112205.xml';
-fcalConfigPath = fullfile(pwd, 'data', str_filename);
+fcalConfigPath = fullfile(projectRoot, 'data', str_filename);
 
 % Parse all <Transform> entries under <CoordinateDefinitions>.
 transformations = read_fcal_transforms(fcalConfigPath);

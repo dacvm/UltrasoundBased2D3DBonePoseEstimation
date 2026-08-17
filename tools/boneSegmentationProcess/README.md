@@ -158,6 +158,8 @@ The algorithm JSON groups its settings into `imageEvidence`, `surfaceTracing`, `
 
 Records left unprocessed during Bone Segmentation (from Part 1) are preserved with status `skippedUnprocessed`. A processed record with no candidate coordinates is preserved with status `noSurface`.
 
+The extraction implementation belongs to this tool. Its public helper is `helpers/boneSegmentation_extractSurface/extractBoneSurfacesFromSegmentation.m`, and its internal algorithm helpers are kept in that folder's MATLAB `private` directory so they are available to the extractor without becoming project-wide functions.
+
 ## Running the Project
 
 1. Export the results from Bone Segmentation (from Part 1).

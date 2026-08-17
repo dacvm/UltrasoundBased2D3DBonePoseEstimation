@@ -12,6 +12,14 @@ function optimizationResult = runBonePoseOptimization(initialPoseVector, data, c
 %   file-output details, bounds, sigma values, or result fields. Keeping the
 %   optimizer orchestration here also keeps bonePoseCostFunction focused on
 %   scoring one candidate pose.
+%
+% Output:
+%   optimizationResult - Nested result struct organized into five groups:
+%       result     - Initial and best pose vectors and costs.
+%       transforms - Initial and best frame-explicit rigid transforms.
+%       search     - Search bounds, initial sigma, and CMA-ES options.
+%       cmaes      - Raw outputs returned by the CMA-ES implementation.
+%       run        - Completion status, optional seed, and saved run paths.
 
 %% HANDLE OPTIONAL INPUTS
 
@@ -87,36 +95,40 @@ else
 end
 
 % Convert the best state into both frame-explicit transforms used downstream.
-T_CT_ref_best = stateVectorToTMatrix( ...
-    bestPoseVector, data.T_CT_ref_initial);
+T_CT_ref_best   = stateVectorToTMatrix(bestPoseVector, data.T_CT_ref_initial);
 T_bone_ref_best = T_CT_ref_best * data.T_bone_CT;
 
 %% PACKAGE RESULT
 
-% Store some necessry values
-optimizationResult.initialPoseVector    = initialPoseVector;                % Initial vector so users can compare the optimized perturbation against the start.
-optimizationResult.initialCost          = initialCost;                      % Initial cost so users can quickly check whether the optimizer improved the objective.
-optimizationResult.bestPoseVector       = bestPoseVector;                   % Best bounded perturbation returned by CMA-ES.
-optimizationResult.bestCost             = bestCost;                         % Best scalar objective value returned by CMA-ES.
-optimizationResult.T_CT_ref_initial     = data.T_CT_ref_initial;             % Coarse CT pose around which the optimizer searched.
-optimizationResult.T_bone_ref_initial   = data.T_bone_ref_initial;           % Matching initial anatomical-frame pose.
-optimizationResult.T_CT_ref_best        = T_CT_ref_best;                     % Best transform applied to CT mesh points.
-optimizationResult.T_bone_ref_best      = T_bone_ref_best;                   % Best anatomical-frame pose derived from the CT result.
-optimizationResult.bounds.lower         = lowerBounds;                      % Lower bounds exactly as CMA-ES received them.
-optimizationResult.bounds.upper         = upperBounds;                      % Upper bounds exactly as CMA-ES received them.
-optimizationResult.bounds.translationMm = cmaesSettings.translationBoundMm; % Translation bound in millimeters for readable result inspection.
-optimizationResult.bounds.rotationDeg   = cmaesSettings.rotationBoundDeg;   % Rotation bound in degrees for readable result inspection.
-optimizationResult.sigma                = sigma;                            % Initial coordinate-wise standard deviations used by CMA-ES.
-optimizationResult.cmaesOptions         = opts;                             % Full CMA-ES options struct so runs can be reproduced later.
-optimizationResult.xmin                 = xmin;                             % CMA-ES raw outputs because they contain useful convergence and history information.
-optimizationResult.fmin                 = fmin;                             % CMA-ES raw fmin output for comparison with the best-ever result.
-optimizationResult.counteval            = counteval;                        % Number of objective evaluations reported by CMA-ES.
-optimizationResult.stopflag             = stopflag;                         % CMA-ES stop reason so users know why the run ended.
-optimizationResult.out                  = out;                              % Full CMA-ES output struct for detailed debugging.
-optimizationResult.bestever             = bestever;                         % CMA-ES best-ever struct for direct inspection.
-optimizationResult.runFolder            = runFolder;                        % Run folder so users can find variablescmaes.mat and log files.
-optimizationResult.progressFilePath     = progressFilePath;                 % Hard-coded progress file path created for the external CMA-ES script.
-optimizationResult.status               = 'cmaes_completed';                % Status string for scripts that check whether the real optimizer ran.
+% Group the values most users inspect when comparing the starting and optimized poses.
+optimizationResult.result.initialPoseVector   = initialPoseVector; % Keep the starting correction so improvement can be measured from the same baseline.
+optimizationResult.result.initialCost         = initialCost;       % Keep the starting objective value so it can be compared directly with bestCost.
+optimizationResult.result.bestPoseVector      = bestPoseVector;    % Store the best bounded pose correction found anywhere in the run.
+optimizationResult.result.bestCost            = bestCost;          % Store the objective value belonging to bestPoseVector; lower is better.
+optimizationResult.result.T_CT_ref_initial    = data.T_CT_ref_initial;   % Store the coarse CT-to-reference pose around which CMA-ES searched.
+optimizationResult.result.T_bone_ref_initial  = data.T_bone_ref_initial; % Store the matching initial anatomical bone pose in the reference frame.
+optimizationResult.result.T_CT_ref_best       = T_CT_ref_best;           % Store the optimized transform used to move CT points into the reference frame.
+optimizationResult.result.T_bone_ref_best     = T_bone_ref_best;         % Store the optimized anatomical bone pose derived from the CT result.
+
+% Group settings that define where and how widely CMA-ES was allowed to search.
+optimizationResult.cmaes.bounds.lower         = lowerBounds;                      % Preserve the lower 6D limits exactly as CMA-ES received them.
+optimizationResult.cmaes.bounds.upper         = upperBounds;                      % Preserve the upper 6D limits exactly as CMA-ES received them.
+optimizationResult.cmaes.bounds.translationMm = cmaesSettings.translationBoundMm; % Store the translation limit in millimeters for readable inspection.
+optimizationResult.cmaes.bounds.rotationDeg   = cmaesSettings.rotationBoundDeg;   % Store the rotation-component limit in degrees for readable inspection.
+optimizationResult.cmaes.sigma                = sigma;                            % Store the initial coordinate-wise search spread in pose-vector units.
+optimizationResult.cmaes.xmin                 = xmin;                             % Store the best point associated with the final CMA-ES generation.
+optimizationResult.cmaes.fmin                 = fmin;                             % Store the objective value associated with xmin.
+optimizationResult.cmaes.counteval            = counteval;                        % Store the number of objective-function evaluations reported by CMA-ES.
+optimizationResult.cmaes.stopflag             = stopflag;                         % Store the reason or reasons CMA-ES ended the search.
+optimizationResult.cmaes.out                  = out;                              % Preserve the full CMA-ES history and internal diagnostic output.
+optimizationResult.cmaes.bestever             = bestever;                         % Preserve the raw best-ever solution struct for direct inspection.
+optimizationResult.cmaes.cmaesOptions         = opts;                             % Preserve all CMA-ES options so the run settings can be reproduced.
+
+% Group run bookkeeping so saved artifacts can be found without mixing paths into numeric results.
+optimizationResult.run.runFolder              = runFolder;         % Point to the unique folder containing this run's logs and saved variables.
+optimizationResult.run.progressFilePath       = progressFilePath;  % Point to the progress MAT file required by the external CMA-ES script.
+optimizationResult.run.status                 = 'cmaes_completed'; % Confirm that the wrapper reached the end after CMA-ES returned.
+optimizationResult.run.seed                   = cmaesSettings.seed; % Preserve the requested repeat seed; v02 stores empty because it uses the CMA-ES default.
 end
 
 %% HELPER: READ CMA-ES SETTINGS FROM CONFIGURATION
@@ -159,9 +171,16 @@ cmaesSettings.populationSize         = getOptionalSetting(optimizerConfig, 'popu
 cmaesSettings.maxFunctionEvaluations = getOptionalSetting(optimizerConfig, 'maxFunctionEvaluations', 400);          % Moderate first-run function-evaluation budget.
 cmaesSettings.useParfor              = logical(getOptionalSetting(optimizerConfig, 'useParfor', true));             % Whether the wrapper should use parfor when the Parallel Computing Toolbox is available.
 cmaesSettings.parforWorkers          = getOptionalSetting(optimizerConfig, 'parforWorkers', 4);                     % Requested parfor worker cap used by the external CMA-ES implementation.
+cmaesSettings.seed                   = getOptionalSetting(optimizerConfig, 'seed', []);                              % Optional fixed seed used by reproducible experiment runs.
 
 defaultOutputFolder                  = fullfile(config.project.root, 'output', 'bonePoseOptimization', 'cmaes');        % Build a default output folder under the project root when the config does not provide one.
 cmaesSettings.outputFolder           = char(getOptionalSetting(optimizerConfig, 'outputFolder', defaultOutputFolder));  % Base folder where unique per-run CMA-ES output folders will be created.
+
+% Validate a supplied seed here because v02 intentionally leaves this setting empty.
+if ~isempty(cmaesSettings.seed)
+    validateattributes(cmaesSettings.seed, {'numeric'}, ...
+        {'scalar', 'positive', 'finite', 'integer'}, mfilename, 'seed');
+end
 
 end
 
@@ -419,6 +438,11 @@ opts.LogFilenamePrefix  = 'outcmaes';                               % Store CMA-
 opts.LogModulo          = 1;                                        % Keep CMA-ES file logging enabled so the run can be inspected afterward.
 opts.LogPlot            = 'off';                                    % Disable live plotting because optimization scripts should not create extra figures during long runs.
 opts.DispModulo         = 1;                                        % Print regular CMA-ES progress so users can see that the optimizer is still running.
+
+% Override the CMA-ES clock-based default only when an experiment supplied a seed.
+if ~isempty(cmaesSettings.seed)
+    opts.Seed = cmaesSettings.seed;
+end
 
 % Tell the user when parfor was requested but cannot be used in this MATLAB session.
 if cmaesSettings.useParfor && opts.ParforRun == 0

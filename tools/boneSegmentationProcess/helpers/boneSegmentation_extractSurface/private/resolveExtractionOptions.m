@@ -9,12 +9,15 @@ function resolvedOptions = resolveExtractionOptions(options)
 % Output:
 %   resolvedOptions : Validated scalar struct containing every required option.
 
-% Walk from functions/boneSurfaceExtraction/helpers to the project root so
-% moving this helper does not change where the tool-owned JSON file is stored.
-helperDirectory = fileparts(mfilename('fullpath'));
-projectDirectory = fileparts(fileparts(fileparts(helperDirectory)));
-configurationPath = fullfile(projectDirectory, 'tools', ...
-    'boneSegmentationProcess', 'configs', 'boneSurfaceExtraction.json');
+% Walk from this private folder to the owning bone-segmentation tool. Keeping
+% the default JSON beside the tool makes the algorithm and its configuration
+% move together instead of depending on the project-wide functions folder.
+privateHelperDirectory = fileparts(mfilename('fullpath'));
+surfaceExtractionHelperDirectory = fileparts(privateHelperDirectory);
+sharedHelperDirectory = fileparts(surfaceExtractionHelperDirectory);
+extractionToolDirectory = fileparts(sharedHelperDirectory);
+configurationPath = fullfile(extractionToolDirectory, 'configs', ...
+    'boneSurfaceExtraction.json');
 
 if ~isfile(configurationPath)
     error('extractBoneSurfacesFromSegmentation:InvalidOptions', ...
