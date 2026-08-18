@@ -111,6 +111,12 @@ cost = negative mean intensity-and-coverage score
 
 `normalFacingToleranceDeg`, `minReferencePixels`, `nMinPixels`, and `lambdaMissing` may be arrays in the hyperparameter-sweep configuration. The experiment runner evaluates their complete Cartesian product.
 
+`bonePoseCostFunction` is the stable function called by scripts and CMA-ES.
+It currently forwards each evaluation to `bonePoseCostIntensityCoverageV1`,
+which owns the original intensity-and-coverage calculation and its local
+helpers. This separation keeps optimizer code unchanged when another cost
+model is introduced later.
+
 ### Optimizer parameters
 
 The optimizer represents a candidate as a local six-value perturbation `[vx; vy; vz; wx; wy; wz]` around the coarse CT-to-reference transform. Translation is expressed in the mesh length unit, normally millimetres, and rotation is configured in degrees before conversion to radians.
