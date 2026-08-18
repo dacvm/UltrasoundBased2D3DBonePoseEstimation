@@ -19,7 +19,7 @@ if isempty(plotTable)
 end
 
 % Draw cost and RMSE IQRs before drawing the median markers.
-figureHandle = figure('Name', 'Optimizer Cost and Surface RMSE', 'Color', 'w');
+figureHandle = figure('Name', 'Optimizer Cost and Surface RMSE');
 hold on;
 for combinationIndex = 1:height(plotTable)
     xMedian = plotTable.medianBestCost(combinationIndex);
@@ -40,7 +40,8 @@ numberOfLabels = min(20, height(plotTable));
 for labelIndex = 1:numberOfLabels
     text(plotTable.medianBestCost(labelIndex), ...
          plotTable.medianSurfaceRmseMm(labelIndex), ...
-         ['  ', char(plotTable.combinationId(labelIndex))], ...
+         ['  ', char(erase(plotTable.combinationId(labelIndex), ...
+                           "combination_"))], ...
          'FontSize', 8, 'VerticalAlignment', 'bottom');
 end
 hold off;

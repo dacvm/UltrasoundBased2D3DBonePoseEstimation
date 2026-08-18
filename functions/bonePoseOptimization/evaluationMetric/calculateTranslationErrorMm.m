@@ -18,7 +18,6 @@ validateattributes(T_bone_ref_estimate, {'numeric'}, ...
     {'size', [4 4], 'finite'}, mfilename, 'T_bone_ref_estimate');
 
 % Compare the two bone origins in the shared reference frame.
-translationDifferenceRef = ...
-    T_bone_ref_estimate(1:3, 4) - T_bone_ref_groundTruth(1:3, 4);
+translationDifferenceRef = T_bone_ref_estimate(1:3, 4) - T_bone_ref_groundTruth(1:3, 4);
 translationErrorMm = norm(translationDifferenceRef);
 end

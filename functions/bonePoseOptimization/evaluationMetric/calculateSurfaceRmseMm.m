@@ -12,24 +12,20 @@ function surfaceRmseMm = calculateSurfaceRmseMm(boneMeshRefGroundTruth, boneMesh
 %   surfaceRmseMm          - RMS corresponding-vertex distance in millimetres.
 
 % Both meshes must come from the same source model for row-wise comparison.
-if ~isa(boneMeshRefGroundTruth, 'triangulation') || ...
-        ~isa(boneMeshRefEstimate, 'triangulation')
+if ~isa(boneMeshRefGroundTruth, 'triangulation') || ~isa(boneMeshRefEstimate, 'triangulation')
     error('calculateSurfaceRmseMm:ExpectedTriangulation', ...
-        'Both bone meshes must be triangulation objects.');
+          'Both bone meshes must be triangulation objects.');
 end
 
 % Matching connectivity confirms that the two vertex arrays share one ordering.
-if ~isequal(boneMeshRefGroundTruth.ConnectivityList, ...
-            boneMeshRefEstimate.ConnectivityList) || ...
-        ~isequal(size(boneMeshRefGroundTruth.Points), ...
-                 size(boneMeshRefEstimate.Points))
+if ~isequal(boneMeshRefGroundTruth.ConnectivityList, boneMeshRefEstimate.ConnectivityList) || ...
+   ~isequal(size(boneMeshRefGroundTruth.Points), size(boneMeshRefEstimate.Points))
     error('calculateSurfaceRmseMm:MeshCorrespondenceMismatch', ...
-        'Ground-truth and estimated meshes must have matching vertices and connectivity.');
+          'Ground-truth and estimated meshes must have matching vertices and connectivity.');
 end
 
 % Calculate one 3D displacement magnitude for every corresponding vertex.
-vertexDifferenceRef = ...
-    boneMeshRefEstimate.Points - boneMeshRefGroundTruth.Points;
+vertexDifferenceRef   = boneMeshRefEstimate.Points - boneMeshRefGroundTruth.Points;
 vertexSquaredDistance = sum(vertexDifferenceRef.^2, 2);
 
 % Combine all surface-point errors into one value used for run ranking.

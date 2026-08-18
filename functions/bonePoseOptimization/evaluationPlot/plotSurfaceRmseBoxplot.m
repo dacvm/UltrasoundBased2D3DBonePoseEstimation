@@ -18,25 +18,24 @@ rankedCombinations = perCombinationTable(rankedRows, :);
 numberToPlot = min(topCombinationCount, height(rankedCombinations));
 if numberToPlot == 0
     error('plotSurfaceRmseBoxplot:NoEvaluatedCombinations', ...
-        'No evaluated combinations are available for the RMSE boxplot.');
+          'No evaluated combinations are available for the RMSE boxplot.');
 end
 
-topCombinationIds = rankedCombinations.combinationId(1:numberToPlot);
+topCombinationIds    = rankedCombinations.combinationId(1:numberToPlot);
+topCombinationLabels = erase(topCombinationIds, "combination_");
 plotRows = ismember(string(perRunTable.combinationId), topCombinationIds) & ...
            isfinite(perRunTable.surfaceRmseMm);
 plotRuns = perRunTable(plotRows, :);
 
 % Use an ordered category so the x-axis follows the surface-RMSE ranking.
 combinationCategory = categorical(string(plotRuns.combinationId), ...
-    topCombinationIds, cellstr(topCombinationIds), 'Ordinal', true);
+    topCombinationIds, cellstr(topCombinationLabels), 'Ordinal', true);
 
 % Draw both summary boxes and the actual CMA-ES seed measurements.
-figureHandle = figure('Name', 'Surface RMSE Across Seeds', 'Color', 'w');
-boxchart(combinationCategory, plotRuns.surfaceRmseMm, ...
-    'BoxFaceColor', [0.32 0.56 0.82]);
+figureHandle = figure('Name', 'Surface RMSE Across Seeds');
+boxchart(combinationCategory, plotRuns.surfaceRmseMm, 'BoxFaceColor', [0.32 0.56 0.82]);
 hold on;
-swarmchart(combinationCategory, plotRuns.surfaceRmseMm, 28, ...
-    [0.10 0.10 0.10], 'filled', 'MarkerFaceAlpha', 0.65);
+swarmchart(combinationCategory, plotRuns.surfaceRmseMm, 28, [0.10 0.10 0.10], 'filled', 'MarkerFaceAlpha', 0.65);
 hold off;
 
 grid on;

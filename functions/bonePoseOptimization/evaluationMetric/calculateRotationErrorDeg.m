@@ -18,8 +18,7 @@ validateattributes(T_bone_ref_estimate, {'numeric'}, ...
     {'size', [4 4], 'finite'}, mfilename, 'T_bone_ref_estimate');
 
 % Express the estimated orientation relative to the ground-truth orientation.
-R_boneError = T_bone_ref_groundTruth(1:3, 1:3).' * ...
-              T_bone_ref_estimate(1:3, 1:3);
+R_boneError      = T_bone_ref_groundTruth(1:3, 1:3).' * T_bone_ref_estimate(1:3, 1:3);
 
 % Convert the relative rotation matrix to its shortest rotation angle.
 cosRotationError = (trace(R_boneError) - 1) / 2;

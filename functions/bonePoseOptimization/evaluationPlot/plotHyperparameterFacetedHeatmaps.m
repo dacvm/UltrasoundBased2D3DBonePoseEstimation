@@ -10,17 +10,16 @@ function figureHandle = plotHyperparameterFacetedHeatmaps(perCombinationTable)
 %   figureHandle        - Handle to the created MATLAB figure.
 
 % Build stable axis and facet values from the complete combination table.
-minReferenceValues = unique(perCombinationTable.minReferencePixels, 'sorted');
-nMinValues = unique(perCombinationTable.nMinPixels, 'sorted');
-normalToleranceValues = unique(perCombinationTable.normalFacingToleranceDeg, 'sorted');
-lambdaValues = unique(perCombinationTable.lambdaMissing, 'sorted');
+minReferenceValues      = unique(perCombinationTable.minReferencePixels, 'sorted');
+nMinValues              = unique(perCombinationTable.nMinPixels, 'sorted');
+normalToleranceValues   = unique(perCombinationTable.normalFacingToleranceDeg, 'sorted');
+lambdaValues            = unique(perCombinationTable.lambdaMissing, 'sorted');
 
 % Use one colour range so colours have the same meaning in every panel.
-finiteRmse = perCombinationTable.medianSurfaceRmseMm( ...
-    isfinite(perCombinationTable.medianSurfaceRmseMm));
+finiteRmse = perCombinationTable.medianSurfaceRmseMm(isfinite(perCombinationTable.medianSurfaceRmseMm));
 if isempty(finiteRmse)
     error('plotHyperparameterFacetedHeatmaps:NoEvaluatedCombinations', ...
-        'No evaluated combinations are available for the heatmaps.');
+          'No evaluated combinations are available for the heatmaps.');
 end
 colorLimits = [min(finiteRmse), max(finiteRmse)];
 if colorLimits(1) == colorLimits(2)
@@ -28,12 +27,13 @@ if colorLimits(1) == colorLimits(2)
 end
 
 % Arrange normal tolerance by rows and lambda by columns as agreed for the sweep.
-figureHandle = figure('Name', 'Hyperparameter Faceted Heatmaps', 'Color', 'w');
+figureHandle = figure('Name', 'Hyperparameter Faceted Heatmaps');
 layout = tiledlayout(numel(normalToleranceValues), numel(lambdaValues), ...
     'TileSpacing', 'compact', 'Padding', 'compact');
 
 for normalIndex = 1:numel(normalToleranceValues)
     for lambdaIndex = 1:numel(lambdaValues)
+
         heatmapValues = nan(numel(nMinValues), numel(minReferenceValues));
 
         % Fill each cell from the matching hyperparameter-combination row.
@@ -45,8 +45,7 @@ for normalIndex = 1:numel(normalToleranceValues)
                     perCombinationTable.minReferencePixels == minReferenceValues(xIndex) & ...
                     perCombinationTable.nMinPixels == nMinValues(yIndex);
                 if any(matchingRow)
-                    heatmapValues(yIndex, xIndex) = ...
-                        perCombinationTable.medianSurfaceRmseMm(find(matchingRow, 1));
+                    heatmapValues(yIndex, xIndex) = perCombinationTable.medianSurfaceRmseMm(find(matchingRow, 1));
                 end
             end
         end
