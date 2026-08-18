@@ -22,8 +22,7 @@ rawConfig       = jsondecode(fileread(configFilePath));
 
 % The intersection tolerance remains one explicit non-cost sweep setting in Stage 2.
 experimentSpec.intersection.normalFacingToleranceDeg = normalizePositiveCandidates( ...
-    experimentSpec.intersection.normalFacingToleranceDeg, ...
-    'intersection.normalFacingToleranceDeg');
+    experimentSpec.intersection.normalFacingToleranceDeg, 'intersection.normalFacingToleranceDeg');
 
 %% READ THE EXPERIMENT SETTINGS
 

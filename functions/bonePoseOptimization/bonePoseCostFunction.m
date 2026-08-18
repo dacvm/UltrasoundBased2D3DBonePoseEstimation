@@ -23,14 +23,12 @@ if nargin < 3 || isempty(config)
 end
 
 % Fail before geometry work when the runtime configuration cannot identify its model.
-if ~isstruct(config) || ~isfield(config, 'cost') || ...
-        ~isstruct(config.cost) || ~isfield(config.cost, 'model')
-    error('bonePoseCostFunction:MissingCostModel', ...
-        'The runtime configuration must define cost.model.');
+if ~isstruct(config) || ~isfield(config, 'cost') || ~isstruct(config.cost) || ~isfield(config.cost, 'model')
+    error('bonePoseCostFunction:MissingCostModel', 'The runtime configuration must define cost.model.');
 end
 
 % Resolve only approved project models instead of accepting a JSON function name.
-costDefinition = getBonePoseCostDefinition(config.cost.model);
+costDefinition  = getBonePoseCostDefinition(config.cost.model);
 [cost, details] = costDefinition.evaluateFcn(poseVector, data, config);
 
 % Record the canonical model beside its diagnostics for direct workspace inspection.

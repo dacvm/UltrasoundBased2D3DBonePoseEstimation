@@ -15,23 +15,20 @@ if isstring(modelName) && isscalar(modelName)
     modelName = char(modelName);
 elseif ~ischar(modelName) || ~isrow(modelName)
     error('getBonePoseCostDefinition:InvalidModelName', ...
-        'cost.model must be a character vector or string scalar.');
+          'cost.model must be a character vector or string scalar.');
 end
 
 % Keep the supported models together so a new developer can find the extension point.
 switch modelName
     case 'intensityCoverage_v1'
-        definition.modelName = 'intensityCoverage_v1';
-        definition.evaluateFcn = @bonePoseCostIntensityCoverageV1;
-        definition.validateExperimentConfigFcn = ...
-            @validateBonePoseCostIntensityCoverageV1Config;
-        definition.fixedParameterNames = {'intensityMax'};
-        definition.hyperparameterNames = ...
-            {'minReferencePixels', 'nMinPixels', 'lambdaMissing'};
-        definition.requiresBoneSurface = false;
+        definition.modelName                    = 'intensityCoverage_v1';
+        definition.evaluateFcn                  = @bonePoseCostIntensityCoverageV1;
+        definition.validateExperimentConfigFcn  = @validateBonePoseCostIntensityCoverageV1Config;
+        definition.fixedParameterNames          = {'intensityMax'};
+        definition.hyperparameterNames          = {'minReferencePixels', 'nMinPixels', 'lambdaMissing'};
+        definition.requiresBoneSurface          = false;
 
     otherwise
-        error('getBonePoseCostDefinition:UnsupportedModel', ...
-            'Unsupported cost model: %s', modelName);
+        error('getBonePoseCostDefinition:UnsupportedModel', 'Unsupported cost model: %s', modelName);
 end
 end

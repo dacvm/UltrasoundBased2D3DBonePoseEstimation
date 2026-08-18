@@ -90,6 +90,19 @@ The optimization configuration points to three prepared MAT files:
 
 All three files must describe the same specimen, bone, pin selection, marker geometry, units, and coordinate-frame conventions. The `input.bone` setting selects the target bone code, such as `F` for femur or `T` for tibia.
 
+### Optimization code organization
+
+The three stable workflow entry points remain directly under
+`functions/bonePoseOptimization/`: cost evaluation, one optimization run, and
+one experiment run. Supporting functions are grouped one level below:
+
+- `configuration/` reads JSON and builds experiment and scalar run settings.
+- `costModels/` contains model registration, versioned cost functions, and validators.
+- `inputPreparation/` loads and prepares reusable optimization inputs.
+- `poseEvaluation/` converts optimizer states and evaluates candidate-pose geometry.
+- `evaluationMetric/` and `evaluationPlot/` analyze saved results.
+- `tests/` verifies the active pipeline, while `legacy/` stores inactive historical code.
+
 ### Cost-function parameters
 
 The cost function rewards bright, well-covered probe-facing mesh intersections and penalizes active ultrasound planes that have too few current intersection pixels.
