@@ -1,4 +1,5 @@
 {
+  "schemaVersion": 4,
   "project": {
     "root": "..",
     "functionsFolderName": "functions"
@@ -13,10 +14,15 @@
     "normalFacingToleranceDeg": [30]
   },
   "cost": {
-    "intensityMax": 255,
-    "minReferencePixels": [50],
-    "nMinPixels": [100],
-    "lambdaMissing": [1.0]
+    "model": "intensityCoverage_v1",
+    "fixedParameters": {
+      "intensityMax": 255
+    },
+    "hyperparameters": {
+      "minReferencePixels": [50],
+      "nMinPixels": [100],
+      "lambdaMissing": [1.0]
+    }
   },
   "logging": {
     "printPreparationProgress": false,

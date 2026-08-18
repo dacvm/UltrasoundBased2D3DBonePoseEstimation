@@ -1,7 +1,7 @@
-function tests = testBonePoseOptimizationV03
-%TESTBONEPOSEOPTIMIZATIONV03 Test v03 configuration and experiment planning.
-% This suite checks candidate parsing, Cartesian-product planning, shared
-% repeat seeds, failure recording, and preservation of the v02 scalar flow.
+function tests = testBonePoseOptimizationExperiment
+%TESTBONEPOSEOPTIMIZATIONEXPERIMENT Test active configuration and planning.
+% This suite checks schema and model identity, candidate parsing,
+% Cartesian-product planning, repeat seeds, and failure recording.
 %
 % Output:
 %   tests - MATLAB function-based test suite discovered by runtests.
@@ -12,7 +12,7 @@ end
 
 
 function setupOnce(testCase)
-%SETUPONCE Load the real v02 and v03 configurations once for this suite.
+%SETUPONCE Load the two active configurations once for this suite.
 % testCase receives the project root, configuration paths, and parsed
 % configurations in TestData. This function has no output.
 
@@ -21,35 +21,34 @@ testFilePath = mfilename('fullpath');
 projectRoot = fileparts(fileparts(fileparts(fileparts(testFilePath))));
 addpath(genpath(fullfile(projectRoot, 'functions')));
 
-% Parse both versions so later tests can stay focused on one behavior.
-v02ConfigPath = fullfile(projectRoot, 'config', ...
-    'bonePoseOptimizationConfig_v02.json');
-v03ConfigPath = fullfile(projectRoot, 'config', ...
+% Parse the active sweep and sanity configurations used by the main scripts.
+sweepConfigPath = fullfile(projectRoot, 'config', ...
     'bonePoseOptimizationHyperparamSweepConfig.json');
 sanityConfigPath = fullfile(projectRoot, 'config', ...
     'bonePoseOptimizationSanityCheckConfig.json');
 testCase.TestData.projectRoot = projectRoot;
-testCase.TestData.v02ConfigPath = v02ConfigPath;
-testCase.TestData.v03ConfigPath = v03ConfigPath;
+testCase.TestData.sweepConfigPath = sweepConfigPath;
 testCase.TestData.sanityConfigPath = sanityConfigPath;
-testCase.TestData.v02Config = createBonePoseOptimizationConfig(v02ConfigPath);
-testCase.TestData.v03Spec = ...
-    createBonePoseOptimizationExperimentConfig(v03ConfigPath);
+testCase.TestData.sweepSpec = ...
+    createBonePoseOptimizationExperimentConfig(sweepConfigPath);
 testCase.TestData.sanitySpec = ...
     createBonePoseOptimizationExperimentConfig(sanityConfigPath);
 end
 
 
-function testV03ConfigurationKeepsCandidatesAndSeeds(testCase)
-%TESTV03CONFIGURATIONKEEPSCANDIDATESANDSEEDS Check the checked-in v03 defaults.
-% testCase supplies the parsed v03 specification. This function has no output.
+function testActiveConfigurationKeepsModelCandidatesAndSeeds(testCase)
+%TESTACTIVECONFIGURATIONKEEPSMODELCANDIDATESANDSEEDS Check the active schema.
+% testCase supplies the parsed sweep specification. This function has no output.
 
 % Validate the experiment schema without depending on the user's current sweep values.
-spec = testCase.TestData.v03Spec;
+spec = testCase.TestData.sweepSpec;
+verifyEqual(testCase, spec.schemaVersion, 4);
+verifyEqual(testCase, spec.cost.model, 'intensityCoverage_v1');
 verifyTrue(testCase, all(spec.intersection.normalFacingToleranceDeg > 0));
-verifyTrue(testCase, all(spec.cost.minReferencePixels > 0));
-verifyTrue(testCase, all(spec.cost.nMinPixels > 0));
-verifyTrue(testCase, all(spec.cost.lambdaMissing >= 0));
+verifyTrue(testCase, all(spec.cost.hyperparameters.minReferencePixels > 0));
+verifyTrue(testCase, all(spec.cost.hyperparameters.nMinPixels > 0));
+verifyTrue(testCase, all(spec.cost.hyperparameters.lambdaMissing >= 0));
+verifyTrue(testCase, isscalar(spec.cost.fixedParameters.intensityMax));
 verifyTrue(testCase, all(spec.experiment.seeds > 0));
 verifyEqual(testCase, numel(unique(spec.experiment.seeds)), ...
     numel(spec.experiment.seeds));
@@ -63,11 +62,11 @@ function testPlanBuildsCartesianProductAndRepeatsSeeds(testCase)
 % function has no output.
 
 % Use a small mixed-size grid so the expected combination count is easy to verify.
-spec = testCase.TestData.v03Spec;
+spec = testCase.TestData.sweepSpec;
 spec.intersection.normalFacingToleranceDeg = [20 30];
-spec.cost.minReferencePixels = 50;
-spec.cost.nMinPixels = [50 100];
-spec.cost.lambdaMissing = [0.5 1.0];
+spec.cost.hyperparameters.minReferencePixels = 50;
+spec.cost.hyperparameters.nMinPixels = [50 100];
+spec.cost.hyperparameters.lambdaMissing = [0.5 1.0];
 spec.experiment.seeds = [7 8 9];
 plan = createBonePoseOptimizationExperimentPlan(spec);
 
@@ -80,6 +79,8 @@ verifyEqual(testCase, plan.numberOfRuns, 24);
 for combinationNumber = 1:plan.numberOfCombinations
     selectedRows = plan.runs.combinationNumber == combinationNumber;
     verifyEqual(testCase, plan.runs.seed(selectedRows), [7; 8; 9]);
+    verifyEqual(testCase, unique(plan.runs.costModel(selectedRows)), ...
+        "intensityCoverage_v1");
 end
 
 % Every plan row stores scalar values that can be copied into a runtime config.
@@ -106,19 +107,23 @@ verifyEqual(testCase, plan.numberOfRuns, 1);
 runConfig = createBonePoseOptimizationRunConfig( ...
     spec, plan.combinations(1, :), plan.runs.seed(1));
 verifyTrue(testCase, isscalar(runConfig.intersection.normalFacingToleranceDeg));
-verifyTrue(testCase, isscalar(runConfig.cost.minReferencePixels));
-verifyTrue(testCase, isscalar(runConfig.cost.nMinPixels));
-verifyTrue(testCase, isscalar(runConfig.cost.lambdaMissing));
+verifyEqual(testCase, runConfig.cost.model, 'intensityCoverage_v1');
+verifyTrue(testCase, isscalar(runConfig.cost.parameters.intensityMax));
+verifyTrue(testCase, isscalar(runConfig.cost.parameters.minReferencePixels));
+verifyTrue(testCase, isscalar(runConfig.cost.parameters.nMinPixels));
+verifyTrue(testCase, isscalar(runConfig.cost.parameters.lambdaMissing));
+verifyFalse(testCase, isfield(runConfig.cost, 'fixedParameters'));
+verifyFalse(testCase, isfield(runConfig.cost, 'hyperparameters'));
 verifyEqual(testCase, runConfig.optimizer.seed, spec.experiment.seeds(1));
 end
 
 
 function testDuplicateSeedsAreRejected(testCase)
 %TESTDUPLICATESEEDSAREREJECTED Check that repeated stochastic runs stay distinct.
-% testCase supplies the checked-in v03 JSON path. This function has no output.
+% testCase supplies the checked-in sweep JSON path. This function has no output.
 
 % Copy the JSON data and introduce one duplicate seed for this focused validation test.
-rawConfig = jsondecode(fileread(testCase.TestData.v03ConfigPath));
+rawConfig = jsondecode(fileread(testCase.TestData.sweepConfigPath));
 rawConfig.experiment.seeds = [1001 1001];
 [temporaryConfigPath, temporaryConfigCleanup] = writeTemporaryJson(rawConfig); %#ok<ASGLU>
 
@@ -132,63 +137,110 @@ end
 
 function testDuplicateCandidatesAreRejected(testCase)
 %TESTDUPLICATECANDIDATESAREREJECTED Avoid duplicate hyperparameter combinations.
-% testCase supplies the checked-in v03 JSON path. This function has no output.
+% testCase supplies the checked-in sweep JSON path. This function has no output.
 
 % Duplicate lambda values would otherwise create two identical optimization groups.
-rawConfig = jsondecode(fileread(testCase.TestData.v03ConfigPath));
-rawConfig.cost.lambdaMissing = [1 1];
+rawConfig = jsondecode(fileread(testCase.TestData.sweepConfigPath));
+rawConfig.cost.hyperparameters.lambdaMissing = [1 1];
 [temporaryConfigPath, temporaryConfigCleanup] = writeTemporaryJson(rawConfig); %#ok<ASGLU>
 
 % Reject the duplicate while reporting that the candidate list is the problem.
 verifyError(testCase, ...
     @() createBonePoseOptimizationExperimentConfig(temporaryConfigPath), ...
-    'createBonePoseOptimizationExperimentConfig:DuplicateCandidate');
+    'validateBonePoseCostIntensityCoverageV1Config:DuplicateCandidate');
 clear temporaryConfigCleanup;
 end
 
 
-function testV02ConfigurationRemainsScalar(testCase)
-%TESTV02CONFIGURATIONREMAINSSCALAR Check backward compatibility of the old reader.
-% testCase supplies the parsed v02 configuration. This function has no output.
+function testUnsupportedSchemaAndModelAreRejected(testCase)
+%TESTUNSUPPORTEDSCHEMAANDMODELAREREJECTED Check the two version boundaries.
+% testCase supplies the active sweep JSON and MATLAB verification methods.
 
-% The v02 script must still receive one immediately executable scalar configuration.
-config = testCase.TestData.v02Config;
-verifyTrue(testCase, isscalar(config.intersection.normalFacingToleranceDeg));
-verifyTrue(testCase, isscalar(config.cost.minReferencePixels));
-verifyTrue(testCase, isscalar(config.cost.nMinPixels));
-verifyTrue(testCase, isscalar(config.cost.lambdaMissing));
-verifyFalse(testCase, isfield(config.optimizer, 'seed'));
+rawConfig = jsondecode(fileread(testCase.TestData.sweepConfigPath));
+rawConfig.schemaVersion = 3;
+[temporaryConfigPath, temporaryConfigCleanup] = ...
+    writeTemporaryJson(rawConfig); %#ok<ASGLU>
+verifyError(testCase, ...
+    @() createBonePoseOptimizationExperimentConfig(temporaryConfigPath), ...
+    'createBonePoseOptimizationConfig:UnsupportedSchemaVersion');
+clear temporaryConfigCleanup;
+
+rawConfig = jsondecode(fileread(testCase.TestData.sweepConfigPath));
+rawConfig.cost.model = 'unknown_model';
+[temporaryConfigPath, temporaryConfigCleanup] = ...
+    writeTemporaryJson(rawConfig); %#ok<ASGLU>
+verifyError(testCase, ...
+    @() createBonePoseOptimizationExperimentConfig(temporaryConfigPath), ...
+    'getBonePoseCostDefinition:UnsupportedModel');
+clear temporaryConfigCleanup;
+end
+
+
+function testCostParameterSpellingIsValidated(testCase)
+%TESTCOSTPARAMETERSPELLINGISVALIDATED Check missing and unexpected V1 fields.
+% testCase supplies the active sweep JSON and MATLAB verification methods.
+
+rawConfig = jsondecode(fileread(testCase.TestData.sweepConfigPath));
+rawConfig.cost.hyperparameters = rmfield( ...
+    rawConfig.cost.hyperparameters, 'nMinPixels');
+[temporaryConfigPath, temporaryConfigCleanup] = ...
+    writeTemporaryJson(rawConfig); %#ok<ASGLU>
+verifyError(testCase, ...
+    @() createBonePoseOptimizationExperimentConfig(temporaryConfigPath), ...
+    'validateBonePoseCostIntensityCoverageV1Config:MissingParameter');
+clear temporaryConfigCleanup;
+
+rawConfig = jsondecode(fileread(testCase.TestData.sweepConfigPath));
+rawConfig.cost.hyperparameters.misspelledParameter = 1;
+[temporaryConfigPath, temporaryConfigCleanup] = ...
+    writeTemporaryJson(rawConfig); %#ok<ASGLU>
+verifyError(testCase, ...
+    @() createBonePoseOptimizationExperimentConfig(temporaryConfigPath), ...
+    'validateBonePoseCostIntensityCoverageV1Config:UnexpectedParameter');
+clear temporaryConfigCleanup;
 end
 
 
 function testPreparationFailuresAreSavedAndDoNotStopSeeds(testCase)
 %TESTPREPARATIONFAILURESARESAVEDANDDONOTSTOPSEEDS Check simple unattended failure handling.
-% testCase supplies a valid v03 spec that is redirected to temporary output.
+% testCase supplies a valid active spec that is redirected to temporary output.
 % This function has no output.
 
 % Use a missing input so this test exercises output handling without running CMA-ES.
-spec = testCase.TestData.v03Spec;
+spec = testCase.TestData.sweepSpec;
 temporaryOutputRoot = tempname;
 temporaryOutputCleanup = onCleanup(@() removeTemporaryFolder(temporaryOutputRoot));
-spec.experiment.name = 'v03_failure_test';
+spec.experiment.name = 'schemaVersion04_failure_test';
 spec.experiment.outputFolder = temporaryOutputRoot;
 spec.experiment.seeds = [31 32];
 spec.intersection.normalFacingToleranceDeg = ...
     spec.intersection.normalFacingToleranceDeg(1);
-spec.cost.minReferencePixels = spec.cost.minReferencePixels(1);
-spec.cost.nMinPixels = spec.cost.nMinPixels(1);
-spec.cost.lambdaMissing = spec.cost.lambdaMissing(1);
+spec.cost.hyperparameters.minReferencePixels = ...
+    spec.cost.hyperparameters.minReferencePixels(1);
+spec.cost.hyperparameters.nMinPixels = ...
+    spec.cost.hyperparameters.nMinPixels(1);
+spec.cost.hyperparameters.lambdaMissing = ...
+    spec.cost.hyperparameters.lambdaMissing(1);
 spec.input.validSnapshotsMatFile = fullfile(temporaryOutputRoot, 'missing.mat');
 
 % One preparation failure should create one failed result for each planned seed.
 experimentResult = runBonePoseOptimizationExperiment(spec);
 verifyEqual(testCase, experimentResult.summaryTable.status, ...
     ["failed"; "failed"]);
+verifyEqual(testCase, experimentResult.summaryTable.costModel, ...
+    repmat("intensityCoverage_v1", 2, 1));
 verifyTrue(testCase, all(isfile(experimentResult.summaryTable.resultFilePath)));
 verifyTrue(testCase, isfile(fullfile( ...
     experimentResult.experimentFolder, 'summary.csv')));
 verifyFalse(testCase, isfile(fullfile( ...
     experimentResult.experimentFolder, 'validation_context.mat')));
+
+% Failed runs still record the exact scalar cost configuration that was attempted.
+savedRun = load(char(experimentResult.summaryTable.resultFilePath(1)), 'runResult');
+verifyEqual(testCase, savedRun.runResult.configuration.cost.model, ...
+    'intensityCoverage_v1');
+verifyTrue(testCase, isscalar( ...
+    savedRun.runResult.configuration.cost.parameters.lambdaMissing));
 
 % A second invocation creates a separate experiment instead of resuming the first.
 secondResult = runBonePoseOptimizationExperiment(spec);
@@ -207,7 +259,7 @@ function [temporaryConfigPath, cleanupObject] = writeTemporaryJson(rawConfig)
 temporaryConfigPath = [tempname '.json'];
 fileId = fopen(temporaryConfigPath, 'w');
 if fileId < 0
-    error('testBonePoseOptimizationV03:TemporaryFileOpenFailed', ...
+    error('testBonePoseOptimizationExperiment:TemporaryFileOpenFailed', ...
         'Could not open a temporary JSON file for writing.');
 end
 fileCleanup = onCleanup(@() fclose(fileId));

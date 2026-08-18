@@ -128,7 +128,7 @@ optimizationResult.cmaes.cmaesOptions         = opts;                           
 optimizationResult.run.runFolder              = runFolder;         % Point to the unique folder containing this run's logs and saved variables.
 optimizationResult.run.progressFilePath       = progressFilePath;  % Point to the progress MAT file required by the external CMA-ES script.
 optimizationResult.run.status                 = 'cmaes_completed'; % Confirm that the wrapper reached the end after CMA-ES returned.
-optimizationResult.run.seed                   = cmaesSettings.seed; % Preserve the requested repeat seed; v02 stores empty because it uses the CMA-ES default.
+optimizationResult.run.seed                   = cmaesSettings.seed; % Preserve the requested repeat seed when the runtime config supplies one.
 end
 
 %% HELPER: READ CMA-ES SETTINGS FROM CONFIGURATION
@@ -176,7 +176,7 @@ cmaesSettings.seed                   = getOptionalSetting(optimizerConfig, 'seed
 defaultOutputFolder                  = fullfile(config.project.root, 'output', 'bonePoseOptimization', 'cmaes');        % Build a default output folder under the project root when the config does not provide one.
 cmaesSettings.outputFolder           = char(getOptionalSetting(optimizerConfig, 'outputFolder', defaultOutputFolder));  % Base folder where unique per-run CMA-ES output folders will be created.
 
-% Validate a supplied seed here because v02 intentionally leaves this setting empty.
+% Validate a supplied seed here while allowing direct unseeded optimizer calls.
 if ~isempty(cmaesSettings.seed)
     validateattributes(cmaesSettings.seed, {'numeric'}, ...
         {'scalar', 'positive', 'finite', 'integer'}, mfilename, 'seed');

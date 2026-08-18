@@ -61,7 +61,7 @@ if nargin < 3 || isempty(config)
     config = data.config;
 end
 
-% Read cost settings through a helper so older config files still get safe defaults.
+% Read the scalar settings prepared by createBonePoseOptimizationRunConfig.
 costSettings = getCostSettings(config, data);
 
 %% CONVERT POSE VECTOR TO MESH TRANSFORM
@@ -261,16 +261,12 @@ end
 %% HELPER: READ COST SETTINGS
 
 function costSettings = getCostSettings(config, data)
-%GETCOSTSETTINGS Read objective settings while supporting older config structs.
-% This helper keeps optional cost fields in one place so the main cost logic stays readable.
+%GETCOSTSETTINGS Read scalar V1 settings from the runtime configuration.
+% This helper keeps setting defaults and image-based intensity inference out
+% of the main scientific calculation.
 
-% Use the cost section when it exists because new JSON configs store objective options there.
-if isfield(config, 'cost') && isstruct(config.cost)
-    costConfig = config.cost;
-else
-    % Use an empty struct when older configs do not yet define cost settings.
-    costConfig = struct();
-end
+% Runtime configs merge fixed and selected sweep values into one parameter group.
+costConfig = config.cost.parameters;
 
 % Read or infer the intensity maximum used to normalize sampled image brightness.
 costSettings.intensityMax           = resolveIntensityMax(getOptionalSetting(costConfig, 'intensityMax', []), data);
@@ -348,7 +344,7 @@ end
 
 function intensityMax = resolveIntensityMax(configuredIntensityMax, data)
 %RESOLVEINTENSITYMAX Resolve the image-intensity normalization denominator.
-% This helper lets users set config.cost.intensityMax, while still giving older configs a safe image-based default.
+% This helper uses the configured runtime value and retains image-based inference as a safe fallback.
 
 % Use the configured value when it is a positive finite scalar.
 if isnumeric(configuredIntensityMax) && isscalar(configuredIntensityMax) && isfinite(configuredIntensityMax) && configuredIntensityMax > 0
@@ -366,7 +362,7 @@ end
 
 function intensityMax = inferIntensityMaxFromPlanes(planes)
 %INFERINTENSITYMAXFROMPLANES Infer a safe intensity denominator from the first available image.
-% This helper avoids a hard failure when older configs do not yet define config.cost.intensityMax.
+% This helper provides a finite fallback when the configured intensity scale is empty or invalid.
 
 % Start with the common 8-bit ultrasound denominator so empty data still gets a finite default.
 intensityMax = 255;

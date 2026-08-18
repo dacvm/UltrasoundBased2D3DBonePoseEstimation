@@ -1,6 +1,6 @@
-function tests = testBonePoseOptimizationV02
-%TESTBONEPOSEOPTIMIZATIONV02 Test the standardized v02 input boundary.
-% This test suite checks the real standardized tibia artifacts, transform
+function tests = testBonePoseOptimizationInputs
+%TESTBONEPOSEOPTIMIZATIONINPUTS Test the standardized input boundary.
+% This suite checks the real standardized tibia artifacts, transform
 % conventions, initial cost evaluation, and separation of validation ground
 % truth from estimation data.
 %
@@ -21,12 +21,17 @@ function setupOnce(testCase)
 testFilePath = mfilename('fullpath');
 projectRoot = fileparts(fileparts(fileparts(fileparts(testFilePath))));
 
-% Add project helpers exactly as the v02 main script does.
+% Add reusable project functions before reading the active configuration.
 addpath(genpath(fullfile(projectRoot, 'functions')));
 
 % Prepare the current standardized tibia inputs only once because intersection work is slow.
-configPath = fullfile(projectRoot, 'config', 'bonePoseOptimizationConfig_v02.json');
-config = createBonePoseOptimizationConfig(configPath);
+configPath = fullfile(projectRoot, 'config', ...
+    'bonePoseOptimizationSanityCheckConfig.json');
+experimentSpec = createBonePoseOptimizationExperimentConfig(configPath);
+experimentPlan = createBonePoseOptimizationExperimentPlan(experimentSpec);
+config = createBonePoseOptimizationRunConfig( ...
+    experimentSpec, experimentPlan.combinations(1, :), ...
+    experimentPlan.runs.seed(1));
 [data, validationData] = prepareBonePoseOptimizationInputs(config);
 [initialCost, initialDetails] = bonePoseCostFunction(zeros(6, 1), data, config);
 
@@ -41,7 +46,7 @@ end
 
 
 function testConfigurationUsesStandardizedInputs(testCase)
-%TESTCONFIGURATIONUSESSTANDARDIZEDINPUTS Check the v02 target and resolved paths.
+%TESTCONFIGURATIONUSESSTANDARDIZEDINPUTS Check the target and resolved paths.
 % testCase supplies the parsed configuration. This function has no output.
 
 % The current standardized experiment targets the tibia.
@@ -106,7 +111,8 @@ function testInitialPoseProducesUsableCoverage(testCase)
 
 data = testCase.TestData.data;
 details = testCase.TestData.initialDetails;
-minimumPixels = testCase.TestData.config.cost.minReferencePixels;
+minimumPixels = ...
+    testCase.TestData.config.cost.parameters.minReferencePixels;
 
 % Preparation must create one finite nonnegative reference count per plane.
 verifyEqual(testCase, numel(data.nInitialIntersectionPixels), ...

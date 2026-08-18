@@ -5,11 +5,11 @@ addpath(genpath('functions'));
 
 %% CREATE CONFIGURATION
 
-% Use the same v03-shaped configuration schema as the unattended experiment workflow.
+% Use the same active configuration schema as the unattended experiment workflow.
 configFilePath = fullfile(pwd, 'config', 'bonePoseOptimizationSanityCheckConfig.json');
 % Read the candidate values and explicit repeat seed from the sanity-check file.
 experimentSpec = createBonePoseOptimizationExperimentConfig(configFilePath);
-% Expand the specification through the same plan builder used by the v03 experiment.
+% Expand the specification through the same plan builder used by the experiment.
 experimentPlan = createBonePoseOptimizationExperimentPlan(experimentSpec);
 
 % Keep this interactive workflow focused on exactly one visible optimization run.

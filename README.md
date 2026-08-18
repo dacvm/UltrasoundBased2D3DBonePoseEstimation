@@ -94,13 +94,18 @@ All three files must describe the same specimen, bone, pin selection, marker geo
 
 The cost function rewards bright, well-covered probe-facing mesh intersections and penalizes active ultrasound planes that have too few current intersection pixels.
 
+The two active JSON files use `schemaVersion: 4`. Each experiment selects one
+cost model explicitly and separates fixed settings from values that participate
+in the hyperparameter sweep.
+
 | Setting | Meaning |
 | --- | --- |
 | `intersection.normalFacingToleranceDeg` | Maximum angular difference used when deciding whether an intersected mesh face points toward the ultrasound probe. In a sweep configuration this may contain several candidate values. |
-| `cost.intensityMax` | Intensity used to normalize sampled ultrasound brightness, for example `255` for an 8-bit image. This remains fixed during the current sweep. |
-| `cost.minReferencePixels` | Minimum number of probe-facing pixels at the coarse initial pose for an image plane to participate in the final cost average. |
-| `cost.nMinPixels` | Minimum number of probe-facing pixels required at the current candidate pose before an active plane is marked as missing. |
-| `cost.lambdaMissing` | Weight applied to the fraction of active planes marked as missing. A larger value discourages candidate poses that explain only a small subset of the images. |
+| `cost.model` | Versioned cost-model name. The current model is `intensityCoverage_v1`. |
+| `cost.fixedParameters.intensityMax` | Intensity used to normalize sampled ultrasound brightness, for example `255` for an 8-bit image. This remains fixed during the complete experiment. |
+| `cost.hyperparameters.minReferencePixels` | Minimum number of probe-facing pixels at the coarse initial pose for an image plane to participate in the final cost average. |
+| `cost.hyperparameters.nMinPixels` | Minimum number of probe-facing pixels required at the current candidate pose before an active plane is marked as missing. |
+| `cost.hyperparameters.lambdaMissing` | Weight applied to the fraction of active planes marked as missing. A larger value discourages candidate poses that explain only a small subset of the images. |
 
 The minimized scalar objective has the high-level form:
 
@@ -109,13 +114,25 @@ cost = negative mean intensity-and-coverage score
        + lambdaMissing * mean missing-plane penalty
 ```
 
-`normalFacingToleranceDeg`, `minReferencePixels`, `nMinPixels`, and `lambdaMissing` may be arrays in the hyperparameter-sweep configuration. The experiment runner evaluates their complete Cartesian product.
+`normalFacingToleranceDeg` and the fields under `cost.hyperparameters` may be
+arrays in the sweep configuration. The experiment specification retains these
+candidate arrays. Before preparation or optimization, the selected values are
+merged with the fixed settings under `runConfig.cost.parameters`, where every
+value is scalar.
 
 `bonePoseCostFunction` is the stable function called by scripts and CMA-ES.
-It currently forwards each evaluation to `bonePoseCostIntensityCoverageV1`,
-which owns the original intensity-and-coverage calculation and its local
-helpers. This separation keeps optimizer code unchanged when another cost
-model is introduced later.
+It resolves `cost.model` through `getBonePoseCostDefinition` and forwards the
+evaluation to the approved versioned implementation. The current
+`bonePoseCostIntensityCoverageV1` function owns the original calculation and
+its local helpers. New models can therefore be registered without changing
+scripts or optimizer code.
+
+Stage 2 intentionally keeps experiment planning explicit. To add a model,
+create its evaluator and config validator, add one case to
+`getBonePoseCostDefinition`, update the active JSON, and then list that model's
+swept values in `createBonePoseOptimizationExperimentPlan` and
+`createBonePoseOptimizationRunConfig`. This small amount of manual wiring keeps
+the run tables readable and makes every saved column intentional.
 
 ### Optimizer parameters
 
@@ -166,6 +183,9 @@ Edit one of the following files:
 
 - `config/bonePoseOptimizationSanityCheckConfig.json` for one interactive test run.
 - `config/bonePoseOptimizationHyperparamSweepConfig.json` for an unattended multi-parameter, multi-seed experiment.
+
+The file under `config/legacy/` records the former schemaVersion02 layout for historical
+reference only. Active readers do not execute schema-less legacy configs.
 
 Set `project.root` relative to the configuration directory or provide an absolute path. The supplied configuration files use `".."`, which resolves to this repository root. Input paths are then resolved relative to that project root.
 
@@ -258,7 +278,7 @@ output/bonePoseOptimization/experiments/
 | `summary.csv` | Flat, analysis-friendly row for every planned combination-seed run. |
 | `summary.mat` | MATLAB version of the same summary table with MATLAB data types preserved. |
 
-The summary begins with every run marked `pending`. After each attempt, its row is updated with identifiers, scalar hyperparameters, seed, status, timestamps, runtime, initial and best costs, function-evaluation count, CMA-ES stop reason, result path, and any error information.
+The summary begins with every run marked `pending`. After each attempt, its row is updated with identifiers, cost-model name, scalar hyperparameters, seed, status, timestamps, runtime, initial and best costs, function-evaluation count, CMA-ES stop reason, result path, and any error information.
 
 ### Per-run `runResult.mat`
 

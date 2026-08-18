@@ -5,21 +5,14 @@ function [data, validationData] = prepareBonePoseOptimizationInputs(config)
 % once so the cost function only needs to evaluate candidate poses.
 %
 % Input:
-%   config         - Configuration returned by
-%                    createBonePoseOptimizationConfig.
+%   config         - Scalar configuration returned by
+%                    createBonePoseOptimizationRunConfig.
 %
 % Outputs:
 %   data           - Estimation-only data containing the CT mesh, ultrasound
 %                    planes, initial transforms, and initial pixel counts.
 %   validationData - Saved ground-truth intersections, bone pose, and source
 %                    metadata. This output must not be passed to the optimizer.
-
-%% HANDLE OPTIONAL CONFIGURATION
-
-% Load the v02 configuration when this function is called directly.
-if nargin < 1 || isempty(config)
-    config = createBonePoseOptimizationConfig();
-end
 
 % Use one uppercase code to match the same bone across all standardized files.
 targetBone = upper(char(config.input.bone));

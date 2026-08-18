@@ -1,8 +1,8 @@
 function tests = testBonePoseCostDispatcher
 %TESTBONEPOSECOSTDISPATCHER Test the stable cost-function entry point.
 % This suite compares the public dispatcher with the version 1 intensity
-% implementation. It is needed to ensure the new boundary does not change
-% costs, diagnostic details, optional configuration, or established errors.
+% implementation. It ensures model selection does not change costs,
+% diagnostics, optional configuration, or established errors.
 %
 % Output:
 %   tests - MATLAB function-based test suite discovered by runtests.
@@ -95,6 +95,13 @@ verifyError(testCase, ...
 verifyError(testCase, ...
     @() bonePoseCostIntensityCoverageV1(zeros(6, 1), invalidData), ...
     'bonePoseCostFunction:InitialCountSizeMismatch');
+
+% A runtime configuration must identify the model before geometry is evaluated.
+missingModelConfig = testCase.TestData.config;
+missingModelConfig.cost = rmfield(missingModelConfig.cost, 'model');
+verifyError(testCase, ...
+    @() bonePoseCostFunction(zeros(6, 1), data, missingModelConfig), ...
+    'bonePoseCostFunction:MissingCostModel');
 end
 
 
@@ -106,6 +113,7 @@ function verifyCostEvaluationEqual(testCase, actualCost, actualDetails, expected
 
 % The dispatcher performs no calculation, so both scalar values should be identical.
 verifyEqual(testCase, actualCost, expectedCost);
+verifyEqual(testCase, actualDetails.costModel, 'intensityCoverage_v1');
 
 % Compare the triangulation explicitly so mesh geometry remains easy to diagnose.
 verifyEqual(testCase, actualDetails.boneMeshRefCandidate.ConnectivityList, ...
@@ -113,8 +121,8 @@ verifyEqual(testCase, actualDetails.boneMeshRefCandidate.ConnectivityList, ...
 verifyEqual(testCase, actualDetails.boneMeshRefCandidate.Points, ...
     expectedDetails.boneMeshRefCandidate.Points);
 
-% Compare every remaining diagnostic field after removing the mesh object.
-actualDetails = rmfield(actualDetails, 'boneMeshRefCandidate');
+% Compare every V1 diagnostic after removing dispatcher-owned model identity and the mesh.
+actualDetails = rmfield(actualDetails, {'boneMeshRefCandidate', 'costModel'});
 expectedDetails = rmfield(expectedDetails, 'boneMeshRefCandidate');
 verifyEqual(testCase, actualDetails, expectedDetails);
 end

@@ -1,22 +1,22 @@
 function config = createBonePoseOptimizationConfig(configFilePath)
-%CREATEBONEPOSEOPTIMIZATIONCONFIG Load standardized bone-pose optimization settings.
-% This function reads the v02 JSON configuration and resolves every input
-% and output path against the project root. Keeping path handling here lets
-% the main script focus on the registration workflow.
+%CREATEBONEPOSEOPTIMIZATIONCONFIG Load shared schemaVersion04 settings.
+% This function reads one active bone-pose configuration, validates its
+% selected cost model, and resolves project paths. Experiment-specific seed
+% and output settings are added by createBonePoseOptimizationExperimentConfig.
 %
 % Input:
-%   configFilePath - Optional path to the JSON configuration file. When it
-%                    is omitted, the v02 configuration under config/ is used.
+%   configFilePath - Path to an active schemaVersion04 JSON configuration.
 %
 % Output:
 %   config         - Nested struct containing project paths, standardized
 %                    input files, and optimization settings.
 
-%% SELECT AND READ THE CONFIGURATION FILE
+%% READ THE CONFIGURATION FILE
 
-% Use the standardized v02 configuration when the caller does not provide one.
+% Active workflows must select their JSON explicitly so archived configs are not used by accident.
 if nargin < 1 || isempty(configFilePath)
-    configFilePath = fullfile(pwd, 'config', 'bonePoseOptimizationConfig_v02.json');
+    error('createBonePoseOptimizationConfig:MissingConfigFilePath', ...
+        'An active schemaVersion04 configuration path is required.');
 end
 
 % Normalize MATLAB string and character inputs before using file functions.
@@ -34,6 +34,18 @@ end
 rawConfig = jsondecode(fileread(configFilePath));
 % Resolve the project root relative to the folder containing this JSON file.
 configFolder = fileparts(configFilePath);
+
+%% CHECK THE CONFIGURATION SCHEMA
+
+% schemaVersion04 introduces explicit cost-model identity and parameter groups.
+schemaVersion = getRequiredField(rawConfig, 'schemaVersion', 'schemaVersion');
+validateattributes(schemaVersion, {'numeric'}, ...
+    {'scalar', 'real', 'finite', 'integer'}, mfilename, 'schemaVersion');
+if schemaVersion ~= 4
+    error('createBonePoseOptimizationConfig:UnsupportedSchemaVersion', ...
+        'Only schemaVersion04 is supported by the active workflow.');
+end
+config.schemaVersion = 4;
 
 %% RESOLVE PROJECT AND INPUT PATHS
 
@@ -74,12 +86,23 @@ config.intersection.normalFacingToleranceDeg = getRequiredField( ...
     rawConfig.intersection, 'normalFacingToleranceDeg', ...
     'intersection.normalFacingToleranceDeg');
 
-% Read cost settings with the same defaults used by the cost function.
-costConfig = getOptionalField(rawConfig, 'cost', struct());
-config.cost.intensityMax       = getOptionalField(costConfig, 'intensityMax', []);
-config.cost.minReferencePixels = getOptionalField(costConfig, 'minReferencePixels', 10);
-config.cost.nMinPixels         = getOptionalField(costConfig, 'nMinPixels', 10);
-config.cost.lambdaMissing      = getOptionalField(costConfig, 'lambdaMissing', 1.0);
+% Read the selected model before asking its own validator to check its parameters.
+costConfig = getRequiredField(rawConfig, 'cost', 'cost');
+modelName = ensureScalarText( ...
+    getRequiredField(costConfig, 'model', 'cost.model'), 'cost.model');
+costDefinition = getBonePoseCostDefinition(modelName);
+
+fixedParameters = getRequiredField( ...
+    costConfig, 'fixedParameters', 'cost.fixedParameters');
+hyperparameters = getRequiredField( ...
+    costConfig, 'hyperparameters', 'cost.hyperparameters');
+[fixedParameters, hyperparameters] = ...
+    costDefinition.validateExperimentConfigFcn( ...
+    fixedParameters, hyperparameters);
+
+config.cost.model = costDefinition.modelName;
+config.cost.fixedParameters = fixedParameters;
+config.cost.hyperparameters = hyperparameters;
 
 % Copy the two progress switches used during preparation and repeated evaluations.
 config.logging.printPreparationProgress = getRequiredField( ...

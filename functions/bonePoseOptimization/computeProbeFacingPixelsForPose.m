@@ -17,13 +17,6 @@ function [poseEvaluation, boneMeshRefCandidate] = ...
 %   poseEvaluation      - Per-plane intersection geometry and selected pixels.
 %   boneMeshRefCandidate - Candidate triangulation in reference coordinates.
 
-%% HANDLE OPTIONAL CONFIGURATION
-
-% Load standard settings when this geometry helper is called directly.
-if nargin < 4 || isempty(config)
-    config = createBonePoseOptimizationConfig();
-end
-
 %% TRANSFORM THE CT MESH
 
 % Transform only vertex coordinates because rigid motion preserves connectivity.

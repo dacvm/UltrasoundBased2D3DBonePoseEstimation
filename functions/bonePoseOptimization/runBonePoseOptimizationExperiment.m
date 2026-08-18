@@ -1,5 +1,5 @@
 function experimentResult = runBonePoseOptimizationExperiment(experimentSpec)
-%RUNBONEPOSEOPTIMIZATIONEXPERIMENT Run all v03 combinations and repeat seeds.
+%RUNBONEPOSEOPTIMIZATIONEXPERIMENT Run all combinations and repeat seeds.
 % This function creates a new timestamped experiment, prepares each scalar
 % hyperparameter combination once, runs CMA-ES for every configured seed,
 % and saves each result immediately. It intentionally does not resume old
@@ -25,7 +25,7 @@ configSnapshotPath          = fullfile(experimentFolder, 'experiment_config_snap
 [configCopied, copyMessage] = copyfile(experimentSpec.source.configFilePath, configSnapshotPath);
 if ~configCopied
     error('runBonePoseOptimizationExperiment:ConfigCopyFailed', ...
-          'Could not copy the v03 configuration: %s', copyMessage);
+          'Could not copy the experiment configuration: %s', copyMessage);
 end
 
 % Record the software context that may affect stochastic parallel execution.
@@ -123,7 +123,7 @@ for combinationIndex = 1:experimentPlan.numberOfCombinations
         fprintf('Running %s with seed %d.\n', char(runRow.runId), runRow.seed);
         [runResult, summaryRecord] = runOneSeed(runRow, seedConfig, seedData, validationReference, initialPoseVector, initialCost);
 
-        % Save immediately so completed work survives even though v03 has no resume feature.
+        % Save immediately so completed work survives even though this runner has no resume feature.
         saveRunResult(runResult);
         summaryTable = updateSummaryRow(summaryTable, runIndex, summaryRecord);
         saveExperimentSummary(experimentFolder, summaryTable);
@@ -393,7 +393,7 @@ end
 
 
 function experimentFolder = createExperimentFolder(outputFolder, experimentName)
-%CREATEEXPERIMENTFOLDER Create one new timestamped v03 experiment folder.
+%CREATEEXPERIMENTFOLDER Create one new timestamped experiment folder.
 % outputFolder is the configured base, experimentName is the readable prefix,
 % and experimentFolder is the unique directory created for this invocation.
 
