@@ -6,15 +6,40 @@ addpath(genpath('functions'));
 %% SELECT THE COMPLETED EXPERIMENT
 
 % Edit only this folder name when evaluating a different sweep experiment.
-experimentFolderName = 'costFunction_v01_20260813_191441_237';
+experimentFolderName = 'costFunction_v01_20260819_120610_647';
 experimentFolder = fullfile(pwd, 'output', 'bonePoseOptimization', 'experiments', experimentFolderName);
 
 % Keep the detailed seed-distribution plot readable when a sweep is large.
 topCombinationCount = 20;
 
-%% LOAD THE EXPERIMENT SUMMARY AND GROUND TRUTH
+%% LOAD THE EXPERIMENT PLAN, SUMMARY, AND GROUND TRUTH
 
-% The summary identifies every planned run and the path to its saved result.
+% The experiment plan tells the evaluator which cost model was used and which
+% summary-table columns are swept parameters. Stop before loading when this
+% file is missing because those details should not be guessed from the table.
+planFilePath = fullfile(experimentFolder, 'experiment_plan.mat');
+if ~isfile(planFilePath)
+    error('main_bonePoseOptimization_evaluation:MissingExperimentPlan', ...
+          'Could not find the experiment plan: %s', planFilePath);
+end
+planData = load(planFilePath, 'experimentSpec', 'experimentPlan');
+
+% Check that the MAT-file contains both saved plan variables, uses the current
+% schema, and provides the ordered parameter-name list. These fields are needed
+% to build generic evaluation tables with the correct parameter columns.
+hasSupportedExperimentMetadata = isfield(planData, 'experimentSpec') && ...
+    isfield(planData, 'experimentPlan') && ...
+    isfield(planData.experimentSpec, 'schemaVersion') && ...
+    planData.experimentSpec.schemaVersion == 4 && ...
+    isfield(planData.experimentPlan, 'parameterNames');
+if ~hasSupportedExperimentMetadata
+    error('main_bonePoseOptimization_evaluation:UnsupportedExperimentPlan', ...
+          'Evaluation requires a schema-version-4 experiment plan with parameter metadata.');
+end
+parameterNames = planData.experimentPlan.parameterNames;
+
+% The summary contains one row for every optimizer run and points to each saved
+% result. Stop when it is missing because there would be no run results to score.
 summaryFilePath = fullfile(experimentFolder, 'summary.mat');
 if ~isfile(summaryFilePath)
     error('main_bonePoseOptimization_evaluation:MissingSummary', ...
@@ -22,6 +47,16 @@ if ~isfile(summaryFilePath)
 end
 summaryData = load(summaryFilePath, 'summaryTable');
 perRunTable = summaryData.summaryTable;
+
+% Confirm that all summary rows use one cost model and that it matches the
+% experiment plan. This prevents parameter names from one model being applied
+% to result rows produced by a different model.
+expectedCostModel = string(planData.experimentSpec.cost.model);
+summaryCostModels = unique(string(perRunTable.costModel));
+if numel(summaryCostModels) ~= 1 || summaryCostModels ~= expectedCostModel
+    error('main_bonePoseOptimization_evaluation:CostModelMismatch', ...
+          'The summary cost model does not match the saved experiment specification.');
+end
 
 % Load one shared ground-truth pose and mesh for comparison with every seed.
 validationFilePath = fullfile(experimentFolder, 'validation_context.mat');
@@ -121,8 +156,8 @@ perRunTable = movevars(perRunTable, 'surfaceRmseRank', 'Before', 'runNumber');
 
 %% CREATE THE RANKED PER-COMBINATION TABLE
 
-% Aggregate the seed rows only after every individual run has been evaluated.
-perCombinationTable = createCombinationEvaluationTable(perRunTable);
+% Aggregate the seed rows using the parameter order saved by the experiment plan.
+perCombinationTable = createCombinationEvaluationTable(perRunTable, parameterNames);
 
 %% SAVE THE EVALUATION TABLES
 
@@ -134,7 +169,12 @@ end
 
 writetable(perRunTable, fullfile(evaluationFolder, 'per_run_evaluation.csv'));
 writetable(perCombinationTable, fullfile(evaluationFolder, 'per_combination_evaluation.csv'));
-save(fullfile(evaluationFolder, 'evaluation_tables.mat'), 'perRunTable', 'perCombinationTable');
+
+% Save the small metadata needed to interpret generic parameter columns later.
+evaluationMetadata.schemaVersion  = planData.experimentSpec.schemaVersion;
+evaluationMetadata.costModel      = char(expectedCostModel);
+evaluationMetadata.parameterNames = parameterNames;
+save(fullfile(evaluationFolder, 'evaluation_tables.mat'), 'perRunTable', 'perCombinationTable', 'evaluationMetadata');
 
 % Show the main hyperparameter-selection table after saving exact values.
 disp(perCombinationTable);

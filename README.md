@@ -145,8 +145,10 @@ those parameter groups in a documented field order. The planner reads these
 validated fields to create sweep columns, and the runtime-config builder merges
 the selected scalar values without model-specific edits. To add a model, create
 its evaluator and validator, add one registry case, and update the active JSON.
-Combination-level evaluation tables and heatmap choices remain explicit until
-their later refactoring stages.
+Combination-level evaluation reads the validator-ordered parameter names from
+the saved experiment plan. This lets new numeric cost hyperparameters flow into
+the evaluation tables without adding model-specific table columns. Heatmap
+choices remain explicit until their later refactoring stage.
 
 ### Optimizer parameters
 
@@ -293,6 +295,23 @@ output/bonePoseOptimization/experiments/
 | `summary.mat` | MATLAB version of the same summary table with MATLAB data types preserved. |
 
 The summary begins with every run marked `pending`. After each attempt, its row is updated with identifiers, cost-model name, scalar hyperparameters, seed, status, timestamps, runtime, initial and best costs, function-evaluation count, CMA-ES stop reason, result path, and any error information.
+
+### Evaluation tables
+
+`main_bonePoseOptimization_evaluation.m` loads the schema-version-4 experiment
+plan together with the summary and validation context. The saved
+`experimentPlan.parameterNames` list defines which summary columns are swept
+parameters and keeps them in the order chosen by the cost-model validator.
+
+The evaluation output contains one CSV row per run and one ranked CSV row per
+parameter combination. Both tables retain the cost-model name and all declared
+parameter columns. The MAT output also stores the schema version, cost model,
+and parameter-name list in `evaluationMetadata`.
+
+The active evaluator requires a schema-version-4 experiment plan containing
+`parameterNames`. Older experiment plans that do not contain this metadata are
+not inferred automatically and should be inspected with the code version that
+created them.
 
 ### Per-run `runResult.mat`
 
