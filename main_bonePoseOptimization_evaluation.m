@@ -12,6 +12,18 @@ experimentFolder = fullfile(pwd, 'output', 'bonePoseOptimization', 'experiments'
 % Keep the detailed seed-distribution plot readable when a sweep is large.
 topCombinationCount = 20;
 
+% Choose how the hyperparameter heatmaps are arranged. The x- and y-parameters
+% form each heatmap. The panel parameters create rows and columns of heatmaps,
+% so every swept value remains visible without adding more plot axes.
+heatmapSettings.xParameter           = 'minReferencePixels';
+heatmapSettings.yParameter           = 'nMinPixels';
+heatmapSettings.panelRowParameter    = 'normalFacingToleranceDeg';
+heatmapSettings.panelColumnParameter = 'lambdaMissing';
+
+% Put parameters here when this heatmap should hold them at chosen values.
+% This affects only the figure; it does not change the optimization settings.
+heatmapSettings.parametersToHold = struct();
+
 %% LOAD THE EXPERIMENT PLAN, SUMMARY, AND GROUND TRUTH
 
 % The experiment plan tells the evaluator which cost model was used and which
@@ -182,8 +194,8 @@ disp(perCombinationTable);
 %% DISPLAY THE EVALUATION PLOTS
 
 % Keep one figure handle per display so users can adjust figures interactively.
-figureSurfaceRmseBoxplot        = plotSurfaceRmseBoxplot(perRunTable, perCombinationTable, topCombinationCount);
-figureRankedSurfaceRmse         = plotRankedSurfaceRmse(perCombinationTable);
-figureTranslationRotationErrors = plotTranslationRotationErrors(perCombinationTable);
-figureHyperparameterHeatmaps    = plotHyperparameterFacetedHeatmaps(perCombinationTable);
-figureOptimizerDiagnostic       = plotOptimizerCostVsSurfaceRmse(perCombinationTable);
+figureSurfaceRmseBoxplot            = plotSurfaceRmseBoxplot(perRunTable, perCombinationTable, topCombinationCount);
+figureRankedSurfaceRmse             = plotRankedSurfaceRmse(perCombinationTable);
+figureTranslationRotationErrors     = plotTranslationRotationErrors(perCombinationTable);
+figureHyperparameterPaneledHeatmaps = plotHyperparameterPaneledHeatmaps(perCombinationTable, parameterNames, heatmapSettings);
+figureOptimizerDiagnostic           = plotOptimizerCostVsSurfaceRmse(perCombinationTable);

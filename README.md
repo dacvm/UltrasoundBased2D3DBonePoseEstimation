@@ -313,6 +313,16 @@ The active evaluator requires a schema-version-4 experiment plan containing
 not inferred automatically and should be inspected with the code version that
 created them.
 
+The evaluator's `heatmapSettings` block controls one paneled heatmap figure.
+`xParameter` and `yParameter` form the cells inside each heatmap, while
+`panelRowParameter` and `panelColumnParameter` arrange the remaining parameter
+values as rows and columns of small heatmaps. A parameter can instead be given
+one value in `parametersToHold` when the figure should show only that slice.
+Every swept parameter must have exactly one of these roles, which prevents a
+new cost-model parameter from being hidden accidentally. To inspect a second
+arrangement, copy the settings block under a new name and call
+`plotHyperparameterPaneledHeatmaps` again.
+
 ### Per-run `runResult.mat`
 
 Each seed folder contains one `runResult.mat`, including failed runs. Its top-level structure is:

@@ -174,23 +174,109 @@ function testEvaluationPlotsReturnFigures(testCase)
 % testCase provides MATLAB verification methods. This function has no output.
 
 % Hide test figures so automated runs do not interrupt the user.
-originalVisibility = get(groot, 'defaultFigureVisible');
-set(groot, 'defaultFigureVisible', 'off');
-visibilityCleanup = onCleanup(@() set( ...
-    groot, 'defaultFigureVisible', originalVisibility));
-figureCleanup = onCleanup(@() close(findall(groot, 'Type', 'figure')));
+[visibilityCleanup, figureCleanup] = hideEvaluationFigures(); %#ok<ASGLU>
 
 [perRunTable, parameterNames] = createSyntheticPerRunTable();
 perCombinationTable = createCombinationEvaluationTable(perRunTable, parameterNames);
+heatmapSettings = createDefaultHeatmapSettings();
 
 figureHandles = [ ...
     plotSurfaceRmseBoxplot(perRunTable, perCombinationTable, 20), ...
     plotRankedSurfaceRmse(perCombinationTable), ...
     plotTranslationRotationErrors(perCombinationTable), ...
-    plotHyperparameterFacetedHeatmaps(perCombinationTable), ...
+    plotHyperparameterPaneledHeatmaps( ...
+        perCombinationTable, parameterNames, heatmapSettings), ...
     plotOptimizerCostVsSurfaceRmse(perCombinationTable)];
 
 verifyTrue(testCase, all(isgraphics(figureHandles, 'figure')));
+end
+
+
+function testPaneledHeatmapSupportsSimpleAndFutureViews(testCase)
+%TESTPANELEDHEATMAPSUPPORTSSIMPLEANDFUTUREVIEWS Check readable plot choices.
+% testCase provides MATLAB verification methods. This function has no output.
+
+% Hide and close every figure created by the three heatmap views below.
+[visibilityCleanup, figureCleanup] = hideEvaluationFigures(); %#ok<ASGLU>
+
+[perRunTable, parameterNames] = createSyntheticPerRunTable();
+perCombinationTable = createCombinationEvaluationTable(perRunTable, parameterNames);
+
+% The current four parameters produce one panel in this small test dataset.
+defaultSettings = createDefaultHeatmapSettings();
+defaultFigure = plotHyperparameterPaneledHeatmaps( ...
+    perCombinationTable, parameterNames, defaultSettings);
+verifyEqual(testCase, numel(findall(defaultFigure, 'Type', 'image')), 1);
+
+% A user may keep two parameters on the axes and fix every other parameter.
+simpleSettings.xParameter = 'minReferencePixels';
+simpleSettings.yParameter = 'nMinPixels';
+simpleSettings.panelRowParameter = '';
+simpleSettings.panelColumnParameter = '';
+simpleSettings.parametersToHold.normalFacingToleranceDeg = 30;
+simpleSettings.parametersToHold.lambdaMissing = 1;
+simpleFigure = plotHyperparameterPaneledHeatmaps( ...
+    perCombinationTable, parameterNames, simpleSettings);
+verifyEqual(testCase, numel(findall(simpleFigure, 'Type', 'image')), 1);
+
+% A future parameter can become a panel direction with one small settings edit.
+perCombinationTable.futureWeight = [1; 2];
+futureParameterNames = [parameterNames, {'futureWeight'}];
+futureSettings = defaultSettings;
+futureSettings.panelColumnParameter = 'futureWeight';
+futureSettings.parametersToHold.lambdaMissing = 1;
+futureFigure = plotHyperparameterPaneledHeatmaps( ...
+    perCombinationTable, futureParameterNames, futureSettings);
+verifyEqual(testCase, numel(findall(futureFigure, 'Type', 'image')), 2);
+
+% The same future parameter can instead select one fixed experiment slice.
+heldFutureSettings = defaultSettings;
+heldFutureSettings.parametersToHold.futureWeight = 1;
+heldFutureFigure = plotHyperparameterPaneledHeatmaps( ...
+    perCombinationTable, futureParameterNames, heldFutureSettings);
+verifyEqual(testCase, numel(findall(heldFutureFigure, 'Type', 'image')), 1);
+end
+
+
+function testPaneledHeatmapRejectsUnclearSelections(testCase)
+%TESTPANELEDHEATMAPREJECTSUNCLEARSELECTIONS Check choices that hide dimensions.
+% testCase provides MATLAB verification methods. This function has no output.
+
+% Close a partly created figure if the duplicate-cell check raises an error.
+[visibilityCleanup, figureCleanup] = hideEvaluationFigures(); %#ok<ASGLU>
+
+[perRunTable, parameterNames] = createSyntheticPerRunTable();
+perCombinationTable = createCombinationEvaluationTable(perRunTable, parameterNames);
+defaultSettings = createDefaultHeatmapSettings();
+
+% A new parameter must be displayed or fixed instead of disappearing silently.
+tableWithFutureParameter = perCombinationTable;
+tableWithFutureParameter.futureWeight = [1; 2];
+futureParameterNames = [parameterNames, {'futureWeight'}];
+verifyError(testCase, @() plotHyperparameterPaneledHeatmaps( ...
+    tableWithFutureParameter, futureParameterNames, defaultSettings), ...
+    'plotHyperparameterPaneledHeatmaps:UnassignedParameter');
+
+% One parameter cannot control two plot roles because cells would be unclear.
+repeatedSettings = defaultSettings;
+repeatedSettings.panelRowParameter = repeatedSettings.xParameter;
+verifyError(testCase, @() plotHyperparameterPaneledHeatmaps( ...
+    perCombinationTable, parameterNames, repeatedSettings), ...
+    'plotHyperparameterPaneledHeatmaps:RepeatedParameter');
+
+% A fixed value must be one of the values recorded by the experiment.
+missingValueSettings = defaultSettings;
+missingValueSettings.panelColumnParameter = '';
+missingValueSettings.parametersToHold.lambdaMissing = 99;
+verifyError(testCase, @() plotHyperparameterPaneledHeatmaps( ...
+    perCombinationTable, parameterNames, missingValueSettings), ...
+    'plotHyperparameterPaneledHeatmaps:HeldValueNotFound');
+
+% Duplicate full combinations must not be reduced to an arbitrary table row.
+duplicateCombinationTable = [perCombinationTable; perCombinationTable(1, :)];
+verifyError(testCase, @() plotHyperparameterPaneledHeatmaps( ...
+    duplicateCombinationTable, parameterNames, defaultSettings), ...
+    'plotHyperparameterPaneledHeatmaps:AmbiguousCell');
 end
 
 
@@ -226,4 +312,30 @@ perRunTable = table(runNumber, runId, combinationNumber, combinationId, ...
 % Match the canonical parameter order returned by the V1 validator and planner.
 parameterNames = {'normalFacingToleranceDeg', 'minReferencePixels', ...
     'nMinPixels', 'lambdaMissing'};
+end
+
+
+function heatmapSettings = createDefaultHeatmapSettings()
+%CREATEDEFAULTHEATMAPSETTINGS Build the current four-parameter plot layout.
+% This function has no input. heatmapSettings assigns two parameters to the
+% heatmap axes and two parameters to the panel rows and columns.
+
+heatmapSettings.xParameter = 'minReferencePixels';
+heatmapSettings.yParameter = 'nMinPixels';
+heatmapSettings.panelRowParameter = 'normalFacingToleranceDeg';
+heatmapSettings.panelColumnParameter = 'lambdaMissing';
+heatmapSettings.parametersToHold = struct();
+end
+
+
+function [visibilityCleanup, figureCleanup] = hideEvaluationFigures()
+%HIDEEVALUATIONFIGURES Keep automated plot figures out of the user's desktop.
+% This function has no input. visibilityCleanup restores MATLAB's original
+% figure visibility, and figureCleanup closes figures created during the test.
+
+originalVisibility = get(groot, 'defaultFigureVisible');
+set(groot, 'defaultFigureVisible', 'off');
+visibilityCleanup = onCleanup(@() set( ...
+    groot, 'defaultFigureVisible', originalVisibility));
+figureCleanup = onCleanup(@() close(findall(groot, 'Type', 'figure')));
 end
