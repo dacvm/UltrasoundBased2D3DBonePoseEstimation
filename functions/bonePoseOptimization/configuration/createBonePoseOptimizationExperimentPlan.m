@@ -2,9 +2,9 @@ function experimentPlan = createBonePoseOptimizationExperimentPlan(experimentSpe
 %CREATEBONEPOSEOPTIMIZATIONEXPERIMENTPLAN Expand candidates into run rows.
 % This function creates the full Cartesian product of the explicit
 % intersection tolerance and the selected cost model's hyperparameters. It
-% then repeats each combination for every configured seed. Reading parameter
-% names from the model definition lets future cost models extend the plan
-% without adding model-specific columns here.
+% then repeats each combination for every configured seed. Reading the
+% validated parameter fields lets future cost models extend the plan without
+% adding model-specific columns here.
 %
 % Input:
 %   experimentSpec - Validated schemaVersion04 experiment specification.
@@ -15,16 +15,25 @@ function experimentPlan = createBonePoseOptimizationExperimentPlan(experimentSpe
 
 %% BUILD THE HYPERPARAMETER COMBINATIONS
 
-% Keep the geometric tolerance first, followed by the cost model's documented order.
-costDefinition = getBonePoseCostDefinition(experimentSpec.cost.model);
-parameterNames = [{'normalFacingToleranceDeg'}, costDefinition.hyperparameterNames];
+% The model validator has already placed its parameters in canonical order.
+costHyperparameterNames = fieldnames(experimentSpec.cost.hyperparameters).';
+
+% Cost parameters must not overwrite identifiers owned by the experiment tables.
+reservedParameterNames = {'combinationNumber', 'combinationId', 'costModel', 'runNumber', 'runId', 'seed', 'normalFacingToleranceDeg'};
+if any(ismember(costHyperparameterNames, reservedParameterNames))
+    error('createBonePoseOptimizationExperimentPlan:ReservedParameterName', ...
+          'A cost hyperparameter name conflicts with an experiment-table column.');
+end
+
+% Keep the geometric tolerance first, followed by the validator's documented order.
+parameterNames = [{'normalFacingToleranceDeg'}, costHyperparameterNames];
 experimentPlan.parameterNames = parameterNames;
 
 % Collect candidate vectors in the same order as their future table columns.
 candidateValues    = cell(1, numel(parameterNames));
 candidateValues{1} = experimentSpec.intersection.normalFacingToleranceDeg;
-for parameterIndex = 1:numel(costDefinition.hyperparameterNames)
-    parameterName = costDefinition.hyperparameterNames{parameterIndex};
+for parameterIndex = 1:numel(costHyperparameterNames)
+    parameterName = costHyperparameterNames{parameterIndex};
     candidateValues{parameterIndex + 1} = experimentSpec.cost.hyperparameters.(parameterName);
 end
 

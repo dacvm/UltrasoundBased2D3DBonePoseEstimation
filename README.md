@@ -140,13 +140,13 @@ evaluation to the approved versioned implementation. The current
 its local helpers. New models can therefore be registered without changing
 scripts or optimizer code.
 
-Experiment planning reads fixed and swept parameter names from
-`getBonePoseCostDefinition`. To add a model, create its evaluator and config
-validator, add one registry case, and update the active JSON. The planner then
-creates the declared sweep columns, and the runtime-config builder merges the
-selected scalar values without model-specific edits. Combination-level
-evaluation tables and heatmap choices remain explicit until their later
-refactoring stages.
+Each model-specific validator checks its fixed and swept settings, then returns
+those parameter groups in a documented field order. The planner reads these
+validated fields to create sweep columns, and the runtime-config builder merges
+the selected scalar values without model-specific edits. To add a model, create
+its evaluator and validator, add one registry case, and update the active JSON.
+Combination-level evaluation tables and heatmap choices remain explicit until
+their later refactoring stages.
 
 ### Optimizer parameters
 

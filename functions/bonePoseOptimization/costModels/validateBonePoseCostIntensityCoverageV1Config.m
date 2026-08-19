@@ -16,16 +16,24 @@ function [fixedParameters, hyperparameters] = validateBonePoseCostIntensityCover
 validateFieldNames(fixedParameters, {'intensityMax'}, 'cost.fixedParameters');
 validateFieldNames(hyperparameters, {'minReferencePixels', 'nMinPixels', 'lambdaMissing'}, 'cost.hyperparameters');
 
-% Intensity normalization is fixed for the complete experiment.
-validateattributes(fixedParameters.intensityMax, {'numeric'}, ...
-    {'scalar', 'real', 'positive', 'finite'}, mfilename, ...
-    'cost.fixedParameters.intensityMax');
-fixedParameters.intensityMax = double(fixedParameters.intensityMax);
+% Read and validate the fixed value before rebuilding the output structure.
+intensityMax = fixedParameters.intensityMax;
+validateattributes(intensityMax, {'numeric'}, {'scalar', 'real', 'positive', 'finite'}, mfilename, 'cost.fixedParameters.intensityMax');
 
-% Normalize candidate arrays so generic planning receives one stable shape.
-hyperparameters.minReferencePixels  = normalizeCandidates(hyperparameters.minReferencePixels, 'cost.hyperparameters.minReferencePixels', true);
-hyperparameters.nMinPixels          = normalizeCandidates(hyperparameters.nMinPixels, 'cost.hyperparameters.nMinPixels', true);
-hyperparameters.lambdaMissing       = normalizeCandidates(hyperparameters.lambdaMissing, 'cost.hyperparameters.lambdaMissing', false);
+% Normalize candidate arrays before rebuilding the output structure.
+minReferencePixels  = normalizeCandidates(hyperparameters.minReferencePixels, 'cost.hyperparameters.minReferencePixels', true);
+nMinPixels          = normalizeCandidates(hyperparameters.nMinPixels, 'cost.hyperparameters.nMinPixels', true);
+lambdaMissing       = normalizeCandidates(hyperparameters.lambdaMissing, 'cost.hyperparameters.lambdaMissing', false);
+
+% Build the validated groups in one documented order. The generic planner
+% uses this field order for stable table columns and combination numbers.
+fixedParameters = struct();
+fixedParameters.intensityMax = double(intensityMax);
+
+hyperparameters = struct();
+hyperparameters.minReferencePixels = minReferencePixels;
+hyperparameters.nMinPixels         = nMinPixels;
+hyperparameters.lambdaMissing      = lambdaMissing;
 end
 
 

@@ -34,8 +34,9 @@ end
 runConfig = experimentSpec;
 runConfig.intersection.normalFacingToleranceDeg = combinationRow.normalFacingToleranceDeg;
 
-% Resolve the model's ordered parameter lists instead of naming one model's fields here.
-costDefinition = getBonePoseCostDefinition(experimentSpec.cost.model);
+% Read the canonical field order returned by the model-specific validator.
+fixedParameterNames = fieldnames(experimentSpec.cost.fixedParameters).';
+hyperparameterNames = fieldnames(experimentSpec.cost.hyperparameters).';
 
 % Keep every cost value used during evaluation together as finite scalar settings.
 runConfig.cost = struct();
@@ -43,16 +44,16 @@ runConfig.cost.model = experimentSpec.cost.model;
 runConfig.cost.parameters = struct();
 
 % Copy settings that stay fixed for every combination in this experiment.
-for parameterIndex = 1:numel(costDefinition.fixedParameterNames)
-    parameterName  = costDefinition.fixedParameterNames{parameterIndex};
+for parameterIndex = 1:numel(fixedParameterNames)
+    parameterName  = fixedParameterNames{parameterIndex};
     parameterValue = experimentSpec.cost.fixedParameters.(parameterName);
     validateattributes(parameterValue, {'numeric'}, {'scalar', 'real', 'finite'}, mfilename, parameterName);
     runConfig.cost.parameters.(parameterName) = parameterValue;
 end
 
 % Copy this combination's selected value for every swept cost parameter.
-for parameterIndex = 1:numel(costDefinition.hyperparameterNames)
-    parameterName = costDefinition.hyperparameterNames{parameterIndex};
+for parameterIndex = 1:numel(hyperparameterNames)
+    parameterName = hyperparameterNames{parameterIndex};
     if ~ismember(parameterName, combinationRow.Properties.VariableNames)
         error('createBonePoseOptimizationRunConfig:MissingParameterColumn', ...
               'combinationRow is missing parameter column %s.', parameterName);

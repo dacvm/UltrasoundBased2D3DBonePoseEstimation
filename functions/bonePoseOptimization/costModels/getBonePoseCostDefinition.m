@@ -1,14 +1,33 @@
 function definition = getBonePoseCostDefinition(modelName)
-%GETBONEPOSECOSTDEFINITION Describe one supported bone-pose cost model.
-% This function is the single readable list of cost models available to the
-% optimization pipeline. It maps a configured model name to its evaluator,
-% parameter names, validation function, and required prepared inputs.
+%GETBONEPOSECOSTDEFINITION Connect a cost-model name to its implementation.
+% The JSON configuration stores a readable model name instead of MATLAB
+% function handles. This function translates that name into the matching
+% cost evaluator, configuration validator, and input requirements.
+%
+% Configuration loading uses the validator returned here, while the stable
+% bonePoseCostFunction dispatcher uses the evaluator returned here. Keeping
+% both mappings together prevents these two parts of the pipeline from
+% accidentally supporting different model lists or calling mismatched code.
+%
+% This registry becomes important when the project has more than one cost
+% model. Without it, separate model-selection switch blocks would be needed
+% in configuration loading and cost evaluation. Those duplicated lists could
+% drift apart when a model is added, renamed, or removed.
+%
+% To add a new cost model:
+%   1. Create its cost evaluator and model-specific configuration validator.
+%   2. Add one case below that connects a new model name to both functions.
+%   3. Set cost.model and the model's parameter values in the experiment JSON.
+% The validator owns the accepted fixed parameters, hyperparameters, value
+% checks, and canonical field order. Do not repeat parameter names here. The
+% generic planner reads the validated hyperparameter fields automatically.
 %
 % Input:
 %   modelName  - Character vector or string scalar naming the cost model.
 %
 % Output:
-%   definition - Struct describing the selected cost model.
+%   definition - Struct containing the selected model name, evaluator,
+%                validator, and declared input requirements.
 
 % Normalize the text once so configuration and runtime callers use the same name.
 if isstring(modelName) && isscalar(modelName)
@@ -24,25 +43,9 @@ switch modelName
         definition.modelName                    = 'intensityCoverage_v1';
         definition.evaluateFcn                  = @bonePoseCostIntensityCoverageV1;
         definition.validateExperimentConfigFcn  = @validateBonePoseCostIntensityCoverageV1Config;
-        definition.fixedParameterNames          = {'intensityMax'};
-        definition.hyperparameterNames          = {'minReferencePixels', 'nMinPixels', 'lambdaMissing'};
         definition.requiresBoneSurface          = false;
 
     otherwise
         error('getBonePoseCostDefinition:UnsupportedModel', 'Unsupported cost model: %s', modelName);
-end
-
-% Check the small parameter-name contract once so planning can safely use names as table columns.
-allParameterNames = [definition.fixedParameterNames, definition.hyperparameterNames];
-if numel(unique(allParameterNames)) ~= numel(allParameterNames) || ~all(cellfun(@isvarname, allParameterNames))
-    error('getBonePoseCostDefinition:InvalidParameterNames', ...
-          'Cost-model parameter names must be unique valid MATLAB variable names.');
-end
-
-% Swept names share a table with these workflow columns, so they must not reuse them.
-reservedSweepNames = {'combinationNumber', 'combinationId', 'costModel', 'runNumber', 'runId', 'seed', 'normalFacingToleranceDeg'};
-if any(ismember(definition.hyperparameterNames, reservedSweepNames))
-    error('getBonePoseCostDefinition:ReservedHyperparameterName', ...
-          'A cost hyperparameter name conflicts with an experiment-table column.');
 end
 end

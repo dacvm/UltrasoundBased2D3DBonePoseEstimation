@@ -54,12 +54,11 @@ verifyEqual(testCase, numel(unique(spec.experiment.seeds)), ...
     numel(spec.experiment.seeds));
 verifyTrue(testCase, isfolder(fileparts(spec.experiment.outputFolder)));
 
-% The registry order must describe the same fields returned by model validation.
-definition = getBonePoseCostDefinition(spec.cost.model);
+% The model validator returns the parameter groups in their canonical order.
 verifyEqual(testCase, fieldnames(spec.cost.fixedParameters).', ...
-    definition.fixedParameterNames);
+    {'intensityMax'});
 verifyEqual(testCase, fieldnames(spec.cost.hyperparameters).', ...
-    definition.hyperparameterNames);
+    {'minReferencePixels', 'nMinPixels', 'lambdaMissing'});
 end
 
 
@@ -82,7 +81,7 @@ verifyEqual(testCase, plan.numberOfCombinations, 8);
 verifyEqual(testCase, plan.numberOfSeeds, 3);
 verifyEqual(testCase, plan.numberOfRuns, 24);
 
-% The explicit intersection setting stays first, followed by registry order.
+% The explicit intersection setting stays first, followed by validator order.
 expectedParameterNames = {'normalFacingToleranceDeg', ...
     'minReferencePixels', 'nMinPixels', 'lambdaMissing'};
 verifyEqual(testCase, plan.parameterNames, expectedParameterNames);
@@ -183,20 +182,40 @@ clear temporaryConfigCleanup;
 end
 
 
-function testPlanUsesDefinitionOrderInsteadOfStructFieldOrder(testCase)
-%TESTPLANUSESDEFINITIONORDERINSTEADOFSTRUCTFIELDORDER Check stable columns.
-% testCase supplies a valid experiment specification. This function has no output.
+function testValidatorSetsOrderIndependentlyOfJsonFieldOrder(testCase)
+%TESTVALIDATORSETSORDERINDEPENDENTLYOFJSONFIELDORDER Check stable columns.
+% testCase supplies the checked-in sweep JSON path. This function has no output.
 
-% Reorder the MATLAB struct to represent a JSON file whose fields were written differently.
-spec = testCase.TestData.sweepSpec;
-spec.cost.hyperparameters = orderfields(spec.cost.hyperparameters, ...
+% Write equivalent JSON settings with the cost fields in a different order.
+rawConfig = jsondecode(fileread(testCase.TestData.sweepConfigPath));
+rawConfig.cost.hyperparameters = orderfields( ...
+    rawConfig.cost.hyperparameters, ...
     {'lambdaMissing', 'nMinPixels', 'minReferencePixels'});
-plan = createBonePoseOptimizationExperimentPlan(spec);
+[temporaryConfigPath, temporaryConfigCleanup] = ...
+    writeTemporaryJson(rawConfig); %#ok<ASGLU>
 
-% The registry remains the canonical order used by tables and combination IDs.
+% Parsing must restore the model's canonical order before planning starts.
+spec = createBonePoseOptimizationExperimentConfig(temporaryConfigPath);
+plan = createBonePoseOptimizationExperimentPlan(spec);
+verifyEqual(testCase, fieldnames(spec.cost.hyperparameters).', ...
+    {'minReferencePixels', 'nMinPixels', 'lambdaMissing'});
 verifyEqual(testCase, plan.parameterNames, ...
     {'normalFacingToleranceDeg', 'minReferencePixels', ...
      'nMinPixels', 'lambdaMissing'});
+clear temporaryConfigCleanup;
+end
+
+
+function testPlanRejectsReservedParameterNames(testCase)
+%TESTPLANREJECTSRESERVEDPARAMETERNAMES Protect experiment table columns.
+% testCase supplies a valid experiment specification. This function has no output.
+
+% A cost parameter must not reuse the seed column owned by the run table.
+spec = testCase.TestData.sweepSpec;
+spec.cost.hyperparameters.seed = 1;
+verifyError(testCase, ...
+    @() createBonePoseOptimizationExperimentPlan(spec), ...
+    'createBonePoseOptimizationExperimentPlan:ReservedParameterName');
 end
 
 
@@ -206,9 +225,9 @@ function testRunConfigCopiesAllDeclaredParameters(testCase)
 
 spec = testCase.TestData.sweepSpec;
 plan = createBonePoseOptimizationExperimentPlan(spec);
-definition = getBonePoseCostDefinition(spec.cost.model);
-expectedCostNames = [definition.fixedParameterNames, ...
-    definition.hyperparameterNames];
+fixedParameterNames = fieldnames(spec.cost.fixedParameters).';
+hyperparameterNames = fieldnames(spec.cost.hyperparameters).';
+expectedCostNames = [fixedParameterNames, hyperparameterNames];
 
 % Check every combination because each selected value must reach its runtime config.
 for combinationIndex = 1:plan.numberOfCombinations
@@ -221,14 +240,14 @@ for combinationIndex = 1:plan.numberOfCombinations
     verifyFalse(testCase, isfield(runConfig.cost, 'hyperparameters'));
     verifyFalse(testCase, isfield(runConfig.optimizer, 'seed'));
 
-    for parameterIndex = 1:numel(definition.fixedParameterNames)
-        parameterName = definition.fixedParameterNames{parameterIndex};
+    for parameterIndex = 1:numel(fixedParameterNames)
+        parameterName = fixedParameterNames{parameterIndex};
         verifyEqual(testCase, runConfig.cost.parameters.(parameterName), ...
             spec.cost.fixedParameters.(parameterName));
     end
 
-    for parameterIndex = 1:numel(definition.hyperparameterNames)
-        parameterName = definition.hyperparameterNames{parameterIndex};
+    for parameterIndex = 1:numel(hyperparameterNames)
+        parameterName = hyperparameterNames{parameterIndex};
         verifyEqual(testCase, runConfig.cost.parameters.(parameterName), ...
             combinationRow.(parameterName));
         verifyTrue(testCase, isscalar( ...

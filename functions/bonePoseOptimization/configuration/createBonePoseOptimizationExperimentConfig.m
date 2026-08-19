@@ -2,7 +2,7 @@ function experimentSpec = createBonePoseOptimizationExperimentConfig(configFileP
 %CREATEBONEPOSEOPTIMIZATIONEXPERIMENTCONFIG Read an active experiment JSON file.
 % This function loads the shared schemaVersion04 settings, validates the
 % intersection candidates and repeat seeds, and resolves the experiment
-% output folder. Cost-model parameters are validated by their model definition.
+% output folder. Cost-model parameters are checked by their model validator.
 %
 % Input:
 %   configFilePath - Path to a schemaVersion04 experiment configuration.
@@ -15,10 +15,6 @@ function experimentSpec = createBonePoseOptimizationExperimentConfig(configFileP
 
 % Reuse the shared schema, path, and cost-model parsing.
 experimentSpec  = createBonePoseOptimizationConfig(configFilePath);
-% Read the raw JSON once more because the shared reader does not own experiment settings.
-rawConfig       = jsondecode(fileread(configFilePath));
-
-%% NORMALIZE THE HYPERPARAMETER CANDIDATES
 
 % The intersection tolerance remains one explicit non-cost sweep setting.
 experimentSpec.intersection.normalFacingToleranceDeg = normalizePositiveCandidates( ...
@@ -26,8 +22,10 @@ experimentSpec.intersection.normalFacingToleranceDeg = normalizePositiveCandidat
 
 %% READ THE EXPERIMENT SETTINGS
 
+% Read the raw JSON once more because the shared reader does not own experiment settings.
+rawConfig        = jsondecode(fileread(configFilePath));
 % Require one experiment section because it identifies and repeats the complete sweep.
-experimentConfig                = getRequiredField(rawConfig, 'experiment', 'experiment');
+experimentConfig = getRequiredField(rawConfig, 'experiment', 'experiment');
 
 % Use a readable name in folder names and saved metadata.
 experimentSpec.experiment.name  = ensureSafeExperimentName(getRequiredField(experimentConfig, 'name', 'experiment.name'));
