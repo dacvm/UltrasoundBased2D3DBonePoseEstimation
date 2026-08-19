@@ -712,9 +712,23 @@ if isfile(coarseRegistrationOutputFilePath)
           'Coarse-registration output already exists: %s', coarseRegistrationOutputFilePath);
 end
 
-% Save the complete struct array, including skipped-bone status entries and
-% registered transforms and meshes. Version 7.3 supports large mesh data.
-save(coarseRegistrationOutputFilePath, 'coarseRegistration', '-v7.3');
+% Record each input file and the variables loaded from it. Keeping these
+% fields flat makes the saved provenance easy to inspect and extend.
+coarseRegistrationMetadata = struct();
+coarseRegistrationMetadata.createdAt                    = char(datetime('now'));
+coarseRegistrationMetadata.sourceUltrasoundFile         = ultrasoundFilePath;
+coarseRegistrationMetadata.sourceUltrasoundVariables    = ["validSnapshots", "validBonePoses"];
+coarseRegistrationMetadata.sourceBoneSurfaceFile        = fullpath_boneSurface;
+coarseRegistrationMetadata.sourceBoneSurfaceVariables   = ["surfaceResults", "extractionMetadata"];
+coarseRegistrationMetadata.sourceCtFile                 = ctmatFullPath;
+coarseRegistrationMetadata.sourceCtVariable             = "bones";
+coarseRegistrationMetadata.sourceBoneLandmarksFile      = bonelandmarksFullPath;
+coarseRegistrationMetadata.sourceBoneLandmarksVariables = ["landmarks", "intersectionDiagnostics"];
+coarseRegistrationMetadata.configurationFile            = configurationFilePath;
+
+% Save the result and its provenance together. Version 7.3 supports the
+% registered meshes stored inside coarseRegistration.
+save(coarseRegistrationOutputFilePath, 'coarseRegistration', 'coarseRegistrationMetadata', '-v7.3');
 
 % Print the resolved path so the generated artifact is easy to locate after
 % the figures and processing steps have completed.

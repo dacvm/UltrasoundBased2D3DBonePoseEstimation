@@ -1,6 +1,6 @@
 function [segmentationFigure, segmentationResults] = ...
         launchBoneSegmentationTools( ...
-        ultrasoundSequence, outputDirectory)
+        ultrasoundSequence, outputDirectory, sourceUltrasoundFile)
 %LAUNCHBONESEGMENTATIONTOOLS Open the ultrasound segmentation mock-up.
 % This function builds an interactive tool for reviewing an ultrasound
 % sequence, tuning a simple three-stage image-processing pipeline, optionally
@@ -16,6 +16,9 @@ function [segmentationFigure, segmentationResults] = ...
 %                        the stored image, physical dimensions, and metadata.
 %   outputDirectory    : Existing directory suggested by the MAT-file export
 %                        dialog when the user presses Export.
+%   sourceUltrasoundFile : Full path of the MAT-file that supplied
+%                          ultrasoundSequence. The export stores this path so
+%                          later processing can identify the source dataset.
 %
 % Outputs:
 %   segmentationFigure : Handle to the non-blocking uifigure that owns the
@@ -1786,9 +1789,19 @@ end
         % Build grouped output so repeated local source indices stay scoped by
         % their source directory in both the return value and MAT-file.
         segmentationResults = buildSegmentationResults();
+
+        % Keep the provenance metadata short and readable. These fields tell a
+        % later workflow where the ultrasound data came from and how many
+        % frames were included in this export.
+        segmentationMetadata = struct( ...
+            'createdAt', char(datetime('now')), ...
+            'sourceUltrasoundFile', char(string(sourceUltrasoundFile)), ...
+            'sourceVariable', 'validSnapshots', ...
+            'numberOfFrames', numberOfImages);
         outputFilePath = fullfile(selectedDirectory, selectedFileName);
         try
-            save(outputFilePath, 'segmentationResults', '-v7.3');
+            save(outputFilePath, ...
+                'segmentationResults', 'segmentationMetadata', '-v7.3');
         catch saveError
             uialert(segmentationFigure, ...
                 sprintf('Could not export segmentation results:\n\n%s', ...

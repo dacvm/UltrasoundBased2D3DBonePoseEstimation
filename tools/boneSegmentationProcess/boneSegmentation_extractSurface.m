@@ -120,33 +120,29 @@ end
 % surfaceCoordinatesXYZRef field that the later 3D recovery step will fill.
 [surfaceResults, extractionMetadata] = extractBoneSurfacesFromSegmentation(segmentationResults, ultrasoundSequence, extractionOptions);
 
-% The public function receives arrays rather than file paths, so record the
-% resolved provenance here before saving the result artifact.
-extractionMetadata.sourceSegmentationFile = segmentationFilePath;
-extractionMetadata.sourceUltrasoundFile   = ultrasoundFilePath;
-extractionMetadata.configurationFile      = configurationFilePath;
+% The extraction function receives arrays, so add the original file and
+% variable names here while they are still easy to identify.
+extractionMetadata.sourceSegmentationFile     = segmentationFilePath;
+extractionMetadata.sourceSegmentationVariable = 'segmentationResults';
+extractionMetadata.sourceUltrasoundFile       = ultrasoundFilePath;
+extractionMetadata.sourceUltrasoundVariable   = 'validSnapshots';
+extractionMetadata.configurationFile          = configurationFilePath;
 
 % Create metadata
 runTimestamp = char(datetime('now', 'Format', 'yyyyMMdd_HHmmss'));
 surfaceOutputFilePath = fullfile(boneSurfaceOutputDirectory, ['boneSurface_', runTimestamp, '.mat']);
 
 % Save the numerical result before opening the non-blocking review window.
-% The GUI is intentionally not part of the saved artifact because it can be
-% recreated from these arrays and the recorded configuration at any time.
-extractionMetadata.outputFile = surfaceOutputFilePath;
-
+% The GUI is not part of the saved artifact because it can be recreated from
+% the surface results and configuration file.
 save(surfaceOutputFilePath, 'surfaceResults', 'extractionMetadata', '-v7.3');
 
 % Count nested records rather than outer source groups so the message reports
 % the number of processed ultrasound frames after grouped extraction.
-numberOfSurfaceRecords = sum(arrayfun( ...
-    @(surfaceGroup) numel(surfaceGroup.data), surfaceResults));
-fprintf('Saved %d surface result(s) to:\n%s\n', ...
-    numberOfSurfaceRecords, surfaceOutputFilePath);
+numberOfSurfaceRecords = sum(arrayfun(@(surfaceGroup) numel(surfaceGroup.data), surfaceResults));
+fprintf('Saved %d surface result(s) to:\n%s\n', numberOfSurfaceRecords, surfaceOutputFilePath);
 
 % Launch one interactive browser instead of creating paged 3-by-3 figures.
 % Row selection redraws a single image and the JSON settings remain read only.
-reviewFigureHandle = createBoneSurfaceReviewGUI( ...
-    surfaceResults, segmentationResults, ultrasoundSequence, ...
-    extractionOptions, configurationFilePath);
+reviewFigureHandle = createBoneSurfaceReviewGUI(surfaceResults, segmentationResults, ultrasoundSequence, extractionOptions, configurationFilePath);
 fprintf('Opened the interactive bone-surface review GUI.\n');
