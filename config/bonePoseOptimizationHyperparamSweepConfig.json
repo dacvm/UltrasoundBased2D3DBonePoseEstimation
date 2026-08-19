@@ -8,7 +8,7 @@
     "bone": "T",
     "validSnapshotsMatFile": "tools/ultrasoundSpatialProcessing/outputs/validSnapshots_20260812_160247.mat",
     "ctPostProcessedMatFile": "tools/ctkneePostProcess/outputs/kneephantom/kneephantom_bones_and_bonepins.mat",
-    "coarseRegistrationMatFile": "tools/bonePreRegistration/outputs/coarseRegistration_20260812_200530.mat"
+    "coarseRegistrationMatFile": "tools/bonePreRegistration/outputs/coarseRegistration_20260819_205443.mat"
   },
   "intersection": {
     "normalFacingToleranceDeg": [30]

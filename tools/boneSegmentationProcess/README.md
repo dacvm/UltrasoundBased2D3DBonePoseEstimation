@@ -227,6 +227,9 @@ extractionMetadata
 +-- createdAt
 +-- algorithmVersion
 +-- numberOfFrames
++-- coordinateConvention
++-- beamAxis
++-- beamDirection
 +-- sourceSegmentationFile
 +-- sourceSegmentationVariable
 +-- sourceUltrasoundFile
@@ -262,13 +265,16 @@ Important result fields are:
 | `numberOfSegments` | Number of separate continuous surface pieces retained in the image. A value greater than one means the extractor found disconnected pieces rather than one uninterrupted curve. |
 | `status` | `extracted` means at least one surface segment passed the configured checks. `noSurface` means the image was processed but no usable surface remained. `skippedUnprocessed` means the matching Bone Segmentation (from Part 1) record was not processed, so absence of a surface was not inferred. |
 
-The extraction metadata remains small and focuses on the origin of the data:
+The extraction metadata remains small and records both input provenance and the conventions needed to interpret the surface coordinates:
 
 | Metadata field | Explanation |
 | --- | --- |
 | `createdAt` | Date and time when the surface extraction was performed. |
 | `algorithmVersion` | Version of the surface-extraction algorithm. |
 | `numberOfFrames` | Total number of input records, including extracted, no-surface, and skipped records. |
+| `coordinateConvention` | Structured image-coordinate description. `indexBase` is `1`, `coordinateOrder` is `["x", "y"]`, `imageAxisByCoordinate` is `["column", "row"]`, and `origin` is `"topLeftPixelCenter"`. |
+| `beamAxis` | Structured beam-axis description. `name` is `"row"` and `matlabDimension` is `1`. |
+| `beamDirection` | Structured beam-direction description. `name` is `"increasingRowIndex"` and `rowIndexStep` is `1`, meaning depth increases toward larger row indices. |
 | `sourceSegmentationFile` | Full path of the Part 1 segmentation MAT-file. |
 | `sourceSegmentationVariable` | Name of the loaded segmentation variable, currently `segmentationResults`. |
 | `sourceUltrasoundFile` | Full path of the matching ultrasound MAT-file. |

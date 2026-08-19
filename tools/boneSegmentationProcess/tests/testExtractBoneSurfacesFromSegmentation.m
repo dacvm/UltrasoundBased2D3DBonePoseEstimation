@@ -1197,12 +1197,28 @@ verifyEqual(testCase, surfaceResults.numberOfSegments, 1);
 % The public extractor returns only the small metadata fields it can know
 % without receiving file paths from the orchestration script.
 metadataFields = sort([ ...
-    "createdAt"; "algorithmVersion"; "numberOfFrames"]);
+    "createdAt"; "algorithmVersion"; "numberOfFrames"; ...
+    "coordinateConvention"; "beamAxis"; "beamDirection"]);
 verifyEqual(testCase, sort(string(fieldnames(extractionMetadata))), ...
     metadataFields);
 verifyNotEmpty(testCase, extractionMetadata.createdAt);
 verifyEqual(testCase, string(extractionMetadata.algorithmVersion), "1.2.0");
 verifyEqual(testCase, extractionMetadata.numberOfFrames, 1);
+
+% Verify both the readable labels and the numeric values used by later code.
+verifyEqual(testCase, extractionMetadata.coordinateConvention.indexBase, 1);
+verifyEqual(testCase, ...
+    extractionMetadata.coordinateConvention.coordinateOrder, ["x", "y"]);
+verifyEqual(testCase, ...
+    extractionMetadata.coordinateConvention.imageAxisByCoordinate, ...
+    ["column", "row"]);
+verifyEqual(testCase, extractionMetadata.coordinateConvention.origin, ...
+    "topLeftPixelCenter");
+verifyEqual(testCase, extractionMetadata.beamAxis.name, "row");
+verifyEqual(testCase, extractionMetadata.beamAxis.matlabDimension, 1);
+verifyEqual(testCase, extractionMetadata.beamDirection.name, ...
+    "increasingRowIndex");
+verifyEqual(testCase, extractionMetadata.beamDirection.rowIndexStep, 1);
 end
 
 function writeFailingQuadprogShim(temporaryDirectory)
