@@ -19,31 +19,44 @@ targetBone = upper(char(config.input.bone));
 
 %% LOAD STANDARDIZED TOOL OUTPUTS
 
-% Load reviewed snapshots and their matching ground-truth bone poses together.
-snapshotOutput = loadRequiredVariables( ...
-    config.input.validSnapshotsMatFile, {'validSnapshots', 'validBonePoses'});
-validSnapshots = snapshotOutput.validSnapshots;
-validBonePoses = snapshotOutput.validBonePoses;
+% snapshotOutput is structured as:
+%   snapshotOutput.validSnapshots = struct array of reviewed snapshots;
+%   snapshotOutput.validBonePoses  = struct containing ground-truth poses.
+% So we extract both saved variables from the wrapper returned by MATLAB load.
+snapshotOutput            = loadRequiredVariables(config.input.validSnapshotsMatFile, {'validSnapshots', 'validBonePoses'});
+validSnapshots            = snapshotOutput.validSnapshots;
+validBonePoses            = snapshotOutput.validBonePoses;
 
-% Load the CT model and coarse registration from their owning tool outputs.
-ctOutput = loadRequiredVariables( ...
-    config.input.ctPostProcessedMatFile, {'bones'});
-coarseOutput = loadRequiredVariables( ...
-    config.input.coarseRegistrationMatFile, {'coarseRegistration'});
-bones = ctOutput.bones;
-coarseRegistration = coarseOutput.coarseRegistration;
+% bones and coarseRegistration are structured as arrays with one record per bone:
+%   bones(1).bone              = 'F';
+%   bones(2).bone              = 'T';
+%   coarseRegistration(1).bone = 'F';
+%   coarseRegistration(2).bone = 'T';
+% So we load the complete CT-model and coarse-registration arrays first.
+ctOutput                  = loadRequiredVariables(config.input.ctPostProcessedMatFile, {'bones'});
+coarseOutput              = loadRequiredVariables(config.input.coarseRegistrationMatFile, {'coarseRegistration'});
+bones                     = ctOutput.bones;
+coarseRegistration        = coarseOutput.coarseRegistration;
 
-% Find one CT model and one coarse registration using the shared bone code.
-boneIndex = findUniqueBoneIndex(bones, targetBone, 'CT bone model');
-coarseIndex = findUniqueBoneIndex( ...
-    coarseRegistration, targetBone, 'coarse-registration result');
-currentBone = bones(boneIndex);
+% currentCoarseRegistration is one record selected from coarseRegistration:
+%   currentCoarseRegistration.bone            = targetBone;
+%   currentCoarseRegistration.status          = "registered";
+%   currentCoarseRegistration.T_CT_ref_est    = 4-by-4 transform;
+%   currentCoarseRegistration.T_bone_ref_est  = 4-by-4 transform;
+%   currentCoarseRegistration.boneMeshRef_est = triangulation in ref coordinates.
+% So we find the matching bone codes instead of assuming a fixed array position.
+boneIndex                 = findUniqueBoneIndex(bones, targetBone, 'CT bone model');
+coarseIndex               = findUniqueBoneIndex(coarseRegistration, targetBone, 'coarse-registration result');
+currentBone               = bones(boneIndex);
 currentCoarseRegistration = coarseRegistration(coarseIndex);
 
-% Match the validation pose independently so array ordering cannot select another bone.
-groundTruthIndex = findUniqueBoneIndex( ...
-    validBonePoses.bonePoses, targetBone, 'ground-truth bone pose');
-currentGroundTruthPose = validBonePoses.bonePoses(groundTruthIndex).data;
+% validBonePoses.bonePoses is also an array with one record per bone:
+%   validBonePoses.bonePoses(1).bone = 'F';
+%   validBonePoses.bonePoses(2).bone = 'T';
+% Each record's data field contains its ground-truth transforms and mesh.
+% So we select the targetBone record and keep its data for later validation.
+groundTruthIndex          = findUniqueBoneIndex(validBonePoses.bonePoses, targetBone, 'ground-truth bone pose');
+currentGroundTruthPose    = validBonePoses.bonePoses(groundTruthIndex).data;
 
 % A skipped coarse-registration record cannot provide an optimization start pose.
 if ~strcmpi(string(currentCoarseRegistration.status), "registered")
@@ -55,8 +68,7 @@ end
 %% COLLECT ESTIMATION AND VALIDATION RECORDS
 
 % Copy planes and ground truth into separate arrays while preserving source order.
-[imagePlanesRef, groundTruthIntersections, snapshotSources] = ...
-    collectBoneSnapshots(validSnapshots, targetBone);
+[imagePlanesRef, groundTruthIntersections, snapshotSources] = collectBoneSnapshots(validSnapshots, targetBone);
 
 % Check the fixed plane geometry before it is used in repeated evaluations.
 validateImagePlanes(imagePlanesRef);
@@ -71,7 +83,7 @@ if ~isa(boneMeshCT, 'triangulation')
 end
 
 % Read the frame-explicit transforms produced by the CT and coarse-registration tools.
-T_bone_CT = currentBone.T_bone_CT;
+T_bone_CT        = currentBone.T_bone_CT;
 T_CT_ref_initial = currentCoarseRegistration.T_CT_ref_est;
 validateRigidTransform(T_bone_CT, 'bones.T_bone_CT');
 validateRigidTransform(T_CT_ref_initial, 'coarseRegistration.T_CT_ref_est');
@@ -80,38 +92,33 @@ validateRigidTransform(T_CT_ref_initial, 'coarseRegistration.T_CT_ref_est');
 T_CT_ref_groundTruth = currentGroundTruthPose.T_CT_ref;
 T_bone_ref_groundTruth = currentGroundTruthPose.T_bone_ref;
 boneMeshRefGroundTruth = currentGroundTruthPose.mesh;
-validateRigidTransform(T_CT_ref_groundTruth, ...
-    'validBonePoses.bonePoses.data.T_CT_ref');
-validateRigidTransform(T_bone_ref_groundTruth, ...
-    'validBonePoses.bonePoses.data.T_bone_ref');
+validateRigidTransform(T_CT_ref_groundTruth, 'validBonePoses.bonePoses.data.T_CT_ref');
+validateRigidTransform(T_bone_ref_groundTruth, 'validBonePoses.bonePoses.data.T_bone_ref');
 if ~isa(boneMeshRefGroundTruth, 'triangulation')
     error('prepareBonePoseOptimizationInputs:InvalidGroundTruthMesh', ...
-        'The ground-truth bone mesh must be a triangulation.');
+          'The ground-truth bone mesh must be a triangulation.');
 end
 
 % The saved anatomical frame must come from the same CT pose and CT bone model.
-if norm(T_bone_ref_groundTruth - ...
-        T_CT_ref_groundTruth * T_bone_CT, 'fro') > 1e-8
+if norm(T_bone_ref_groundTruth - T_CT_ref_groundTruth * T_bone_CT, 'fro') > 1e-8
     error('prepareBonePoseOptimizationInputs:InconsistentGroundTruthTransform', ...
-        'Ground-truth T_bone_ref does not equal T_CT_ref * T_bone_CT.');
+          'Ground-truth T_bone_ref does not equal T_CT_ref * T_bone_CT.');
 end
 
 % Derive the anatomical-frame pose from the CT pose so both always stay synchronized.
 T_bone_ref_initial = T_CT_ref_initial * T_bone_CT;
 if norm(T_bone_ref_initial - currentCoarseRegistration.T_bone_ref_est, 'fro') > 1e-8
     error('prepareBonePoseOptimizationInputs:InconsistentBoneTransform', ...
-        'T_bone_ref_est does not equal T_CT_ref_est * T_bone_CT.');
+          'T_bone_ref_est does not equal T_CT_ref_est * T_bone_CT.');
 end
 
 % Confirm that the coarse mesh belongs to this CT mesh and transform.
-validateCoarseMesh(boneMeshCT, currentCoarseRegistration.boneMeshRef_est, ...
-    T_CT_ref_initial);
+validateCoarseMesh(boneMeshCT, currentCoarseRegistration.boneMeshRef_est, T_CT_ref_initial);
 
 %% COMPUTE THE INITIAL COVERAGE REFERENCE
 
 % Recompute intersections at the coarse pose; saved intersections are validation data only.
-[initialPoseEvaluation, ~] = computeProbeFacingPixelsForPose( ...
-    boneMeshCT, imagePlanesRef, T_CT_ref_initial, config);
+[initialPoseEvaluation, ~] = computeProbeFacingPixelsForPose(boneMeshCT, imagePlanesRef, T_CT_ref_initial, config);
 
 % Store one fixed reference count per plane for active-plane and coverage scoring.
 nInitialIntersectionPixels = arrayfun( ...
@@ -146,6 +153,8 @@ if config.logging.printPreparationProgress
         numel(imagePlanesRef), targetBone);
 end
 end
+
+
 
 
 function loadedData = loadRequiredVariables(filePath, variableNames)
