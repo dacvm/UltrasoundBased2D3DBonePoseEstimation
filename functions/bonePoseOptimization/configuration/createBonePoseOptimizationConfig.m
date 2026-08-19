@@ -90,6 +90,11 @@ fixedParameters = getRequiredField(costConfig, 'fixedParameters', 'cost.fixedPar
 hyperparameters = getRequiredField(costConfig, 'hyperparameters', 'cost.hyperparameters');
 [fixedParameters, hyperparameters] = costDefinition.validateExperimentConfigFcn(fixedParameters, hyperparameters);
 
+% Confirm that the validator and registry describe the same parameter groups.
+% This prevents a future model parameter from being validated but then omitted from planning.
+validateParameterGroupNames(fixedParameters, costDefinition.fixedParameterNames, 'cost.fixedParameters');
+validateParameterGroupNames(hyperparameters, costDefinition.hyperparameterNames, 'cost.hyperparameters');
+
 config.cost.model           = costDefinition.modelName;
 config.cost.fixedParameters = fixedParameters;
 config.cost.hyperparameters = hyperparameters;
@@ -122,6 +127,22 @@ config.optimizer.outputFolder = makeAbsolutePath(outputFolder, config.project.ro
 
 % Keep the source JSON path with the parsed settings for reproducibility.
 config.source.configFilePath  = configFilePath;
+end
+
+
+function validateParameterGroupNames(parameterStruct, expectedNames, displayName)
+%VALIDATEPARAMETERGROUPNAMES Match validated settings to model metadata.
+% parameterStruct contains one validated parameter group, expectedNames lists
+% the names declared by the cost model, and displayName identifies the group.
+% This function has no output and throws when the two sources disagree.
+
+% Compare names as sets because the cost definition, not JSON field order,
+% controls the stable order used by experiment planning.
+actualNames = fieldnames(parameterStruct).';
+if ~isempty(setxor(actualNames, expectedNames))
+    error('createBonePoseOptimizationConfig:CostDefinitionMismatch', ...
+          '%s does not match the selected cost-model definition.', displayName);
+end
 end
 
 

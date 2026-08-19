@@ -22,7 +22,7 @@ validateattributes(fixedParameters.intensityMax, {'numeric'}, ...
     'cost.fixedParameters.intensityMax');
 fixedParameters.intensityMax = double(fixedParameters.intensityMax);
 
-% Normalize candidate arrays now so the explicit Stage 2 planner sees one stable shape.
+% Normalize candidate arrays so generic planning receives one stable shape.
 hyperparameters.minReferencePixels  = normalizeCandidates(hyperparameters.minReferencePixels, 'cost.hyperparameters.minReferencePixels', true);
 hyperparameters.nMinPixels          = normalizeCandidates(hyperparameters.nMinPixels, 'cost.hyperparameters.nMinPixels', true);
 hyperparameters.lambdaMissing       = normalizeCandidates(hyperparameters.lambdaMissing, 'cost.hyperparameters.lambdaMissing', false);

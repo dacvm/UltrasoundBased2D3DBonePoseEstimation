@@ -31,4 +31,18 @@ switch modelName
     otherwise
         error('getBonePoseCostDefinition:UnsupportedModel', 'Unsupported cost model: %s', modelName);
 end
+
+% Check the small parameter-name contract once so planning can safely use names as table columns.
+allParameterNames = [definition.fixedParameterNames, definition.hyperparameterNames];
+if numel(unique(allParameterNames)) ~= numel(allParameterNames) || ~all(cellfun(@isvarname, allParameterNames))
+    error('getBonePoseCostDefinition:InvalidParameterNames', ...
+          'Cost-model parameter names must be unique valid MATLAB variable names.');
+end
+
+% Swept names share a table with these workflow columns, so they must not reuse them.
+reservedSweepNames = {'combinationNumber', 'combinationId', 'costModel', 'runNumber', 'runId', 'seed', 'normalFacingToleranceDeg'};
+if any(ismember(definition.hyperparameterNames, reservedSweepNames))
+    error('getBonePoseCostDefinition:ReservedHyperparameterName', ...
+          'A cost hyperparameter name conflicts with an experiment-table column.');
+end
 end

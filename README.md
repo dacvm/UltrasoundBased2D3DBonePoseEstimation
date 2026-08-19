@@ -140,12 +140,13 @@ evaluation to the approved versioned implementation. The current
 its local helpers. New models can therefore be registered without changing
 scripts or optimizer code.
 
-Stage 2 intentionally keeps experiment planning explicit. To add a model,
-create its evaluator and config validator, add one case to
-`getBonePoseCostDefinition`, update the active JSON, and then list that model's
-swept values in `createBonePoseOptimizationExperimentPlan` and
-`createBonePoseOptimizationRunConfig`. This small amount of manual wiring keeps
-the run tables readable and makes every saved column intentional.
+Experiment planning reads fixed and swept parameter names from
+`getBonePoseCostDefinition`. To add a model, create its evaluator and config
+validator, add one registry case, and update the active JSON. The planner then
+creates the declared sweep columns, and the runtime-config builder merges the
+selected scalar values without model-specific edits. Combination-level
+evaluation tables and heatmap choices remain explicit until their later
+refactoring stages.
 
 ### Optimizer parameters
 

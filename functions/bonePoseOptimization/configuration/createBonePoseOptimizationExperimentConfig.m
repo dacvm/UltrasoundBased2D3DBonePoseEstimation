@@ -20,7 +20,7 @@ rawConfig       = jsondecode(fileread(configFilePath));
 
 %% NORMALIZE THE HYPERPARAMETER CANDIDATES
 
-% The intersection tolerance remains one explicit non-cost sweep setting in Stage 2.
+% The intersection tolerance remains one explicit non-cost sweep setting.
 experimentSpec.intersection.normalFacingToleranceDeg = normalizePositiveCandidates( ...
     experimentSpec.intersection.normalFacingToleranceDeg, 'intersection.normalFacingToleranceDeg');
 

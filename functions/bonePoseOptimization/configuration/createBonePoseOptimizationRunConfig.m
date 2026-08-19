@@ -17,19 +17,51 @@ function runConfig = createBonePoseOptimizationRunConfig(experimentSpec, combina
 %   runConfig      - Scalar configuration ready for input preparation, cost
 %                    evaluation, and optimization.
 
+% One row must describe one unambiguous scalar parameter combination.
+if ~istable(combinationRow) || height(combinationRow) ~= 1
+    error('createBonePoseOptimizationRunConfig:ExpectedOneCombinationRow', ...
+          'combinationRow must be exactly one table row.');
+end
+
+% Guard against accidentally pairing a plan row with another cost model.
+if ~ismember('costModel', combinationRow.Properties.VariableNames) || ...
+        string(combinationRow.costModel) ~= string(experimentSpec.cost.model)
+    error('createBonePoseOptimizationRunConfig:CostModelMismatch', ...
+          'combinationRow must belong to experimentSpec.cost.model.');
+end
+
 % Copy the shared settings before replacing candidate groups with runtime values.
 runConfig = experimentSpec;
 runConfig.intersection.normalFacingToleranceDeg = combinationRow.normalFacingToleranceDeg;
 
+% Resolve the model's ordered parameter lists instead of naming one model's fields here.
+costDefinition = getBonePoseCostDefinition(experimentSpec.cost.model);
+
 % Keep every cost value used during evaluation together as finite scalar settings.
 runConfig.cost = struct();
 runConfig.cost.model = experimentSpec.cost.model;
-runConfig.cost.parameters.intensityMax = ...
-    experimentSpec.cost.fixedParameters.intensityMax;
-runConfig.cost.parameters.minReferencePixels = ...
-    combinationRow.minReferencePixels;
-runConfig.cost.parameters.nMinPixels = combinationRow.nMinPixels;
-runConfig.cost.parameters.lambdaMissing = combinationRow.lambdaMissing;
+runConfig.cost.parameters = struct();
+
+% Copy settings that stay fixed for every combination in this experiment.
+for parameterIndex = 1:numel(costDefinition.fixedParameterNames)
+    parameterName  = costDefinition.fixedParameterNames{parameterIndex};
+    parameterValue = experimentSpec.cost.fixedParameters.(parameterName);
+    validateattributes(parameterValue, {'numeric'}, {'scalar', 'real', 'finite'}, mfilename, parameterName);
+    runConfig.cost.parameters.(parameterName) = parameterValue;
+end
+
+% Copy this combination's selected value for every swept cost parameter.
+for parameterIndex = 1:numel(costDefinition.hyperparameterNames)
+    parameterName = costDefinition.hyperparameterNames{parameterIndex};
+    if ~ismember(parameterName, combinationRow.Properties.VariableNames)
+        error('createBonePoseOptimizationRunConfig:MissingParameterColumn', ...
+              'combinationRow is missing parameter column %s.', parameterName);
+    end
+    parameterValue = combinationRow.(parameterName);
+    validateattributes(parameterValue, {'numeric'}, ...
+        {'scalar', 'real', 'finite'}, mfilename, parameterName);
+    runConfig.cost.parameters.(parameterName) = parameterValue;
+end
 
 % Add the seed only for a specific repeat run; preparation itself does not need one.
 if nargin >= 3 && ~isempty(seed)

@@ -53,6 +53,13 @@ verifyTrue(testCase, all(spec.experiment.seeds > 0));
 verifyEqual(testCase, numel(unique(spec.experiment.seeds)), ...
     numel(spec.experiment.seeds));
 verifyTrue(testCase, isfolder(fileparts(spec.experiment.outputFolder)));
+
+% The registry order must describe the same fields returned by model validation.
+definition = getBonePoseCostDefinition(spec.cost.model);
+verifyEqual(testCase, fieldnames(spec.cost.fixedParameters).', ...
+    definition.fixedParameterNames);
+verifyEqual(testCase, fieldnames(spec.cost.hyperparameters).', ...
+    definition.hyperparameterNames);
 end
 
 
@@ -74,6 +81,30 @@ plan = createBonePoseOptimizationExperimentPlan(spec);
 verifyEqual(testCase, plan.numberOfCombinations, 8);
 verifyEqual(testCase, plan.numberOfSeeds, 3);
 verifyEqual(testCase, plan.numberOfRuns, 24);
+
+% The explicit intersection setting stays first, followed by registry order.
+expectedParameterNames = {'normalFacingToleranceDeg', ...
+    'minReferencePixels', 'nMinPixels', 'lambdaMissing'};
+verifyEqual(testCase, plan.parameterNames, expectedParameterNames);
+verifyEqual(testCase, plan.combinations.Properties.VariableNames, ...
+    [{'combinationNumber', 'combinationId', 'costModel'}, ...
+     expectedParameterNames]);
+verifyEqual(testCase, plan.runs.Properties.VariableNames, ...
+    [{'runNumber', 'runId', 'combinationNumber', 'combinationId', ...
+      'costModel', 'seed'}, expectedParameterNames]);
+
+% Preserve the established NDGRID ordering so existing combination IDs keep their meaning.
+expectedCombinationValues = [ ...
+    20, 50,  50, 0.5; ...
+    30, 50,  50, 0.5; ...
+    20, 50, 100, 0.5; ...
+    30, 50, 100, 0.5; ...
+    20, 50,  50, 1.0; ...
+    30, 50,  50, 1.0; ...
+    20, 50, 100, 1.0; ...
+    30, 50, 100, 1.0];
+verifyEqual(testCase, plan.combinations{:, expectedParameterNames}, ...
+    expectedCombinationValues);
 
 % Every combination must receive the same ordered seed list.
 for combinationNumber = 1:plan.numberOfCombinations
@@ -149,6 +180,88 @@ verifyError(testCase, ...
     @() createBonePoseOptimizationExperimentConfig(temporaryConfigPath), ...
     'validateBonePoseCostIntensityCoverageV1Config:DuplicateCandidate');
 clear temporaryConfigCleanup;
+end
+
+
+function testPlanUsesDefinitionOrderInsteadOfStructFieldOrder(testCase)
+%TESTPLANUSESDEFINITIONORDERINSTEADOFSTRUCTFIELDORDER Check stable columns.
+% testCase supplies a valid experiment specification. This function has no output.
+
+% Reorder the MATLAB struct to represent a JSON file whose fields were written differently.
+spec = testCase.TestData.sweepSpec;
+spec.cost.hyperparameters = orderfields(spec.cost.hyperparameters, ...
+    {'lambdaMissing', 'nMinPixels', 'minReferencePixels'});
+plan = createBonePoseOptimizationExperimentPlan(spec);
+
+% The registry remains the canonical order used by tables and combination IDs.
+verifyEqual(testCase, plan.parameterNames, ...
+    {'normalFacingToleranceDeg', 'minReferencePixels', ...
+     'nMinPixels', 'lambdaMissing'});
+end
+
+
+function testRunConfigCopiesAllDeclaredParameters(testCase)
+%TESTRUNCONFIGCOPIESALLDECLAREDPARAMETERS Check generic scalarization.
+% testCase supplies a valid sweep specification. This function has no output.
+
+spec = testCase.TestData.sweepSpec;
+plan = createBonePoseOptimizationExperimentPlan(spec);
+definition = getBonePoseCostDefinition(spec.cost.model);
+expectedCostNames = [definition.fixedParameterNames, ...
+    definition.hyperparameterNames];
+
+% Check every combination because each selected value must reach its runtime config.
+for combinationIndex = 1:plan.numberOfCombinations
+    combinationRow = plan.combinations(combinationIndex, :);
+    runConfig = createBonePoseOptimizationRunConfig(spec, combinationRow);
+
+    verifyEqual(testCase, fieldnames(runConfig.cost.parameters).', ...
+        expectedCostNames);
+    verifyFalse(testCase, isfield(runConfig.cost, 'fixedParameters'));
+    verifyFalse(testCase, isfield(runConfig.cost, 'hyperparameters'));
+    verifyFalse(testCase, isfield(runConfig.optimizer, 'seed'));
+
+    for parameterIndex = 1:numel(definition.fixedParameterNames)
+        parameterName = definition.fixedParameterNames{parameterIndex};
+        verifyEqual(testCase, runConfig.cost.parameters.(parameterName), ...
+            spec.cost.fixedParameters.(parameterName));
+    end
+
+    for parameterIndex = 1:numel(definition.hyperparameterNames)
+        parameterName = definition.hyperparameterNames{parameterIndex};
+        verifyEqual(testCase, runConfig.cost.parameters.(parameterName), ...
+            combinationRow.(parameterName));
+        verifyTrue(testCase, isscalar( ...
+            runConfig.cost.parameters.(parameterName)));
+    end
+end
+end
+
+
+function testRunConfigRejectsInvalidCombinationRows(testCase)
+%TESTRUNCONFIGREJECTSINVALIDCOMBINATIONROWS Check readable row errors.
+% testCase supplies a valid experiment specification and plan. This function has no output.
+
+spec = testCase.TestData.sweepSpec;
+plan = createBonePoseOptimizationExperimentPlan(spec);
+
+% A runtime configuration represents one combination, never a table slice.
+verifyError(testCase, ...
+    @() createBonePoseOptimizationRunConfig(spec, plan.combinations(1:2, :)), ...
+    'createBonePoseOptimizationRunConfig:ExpectedOneCombinationRow');
+
+% Prevent a row from a different model being used with this experiment specification.
+mismatchedRow = plan.combinations(1, :);
+mismatchedRow.costModel = "another_model";
+verifyError(testCase, ...
+    @() createBonePoseOptimizationRunConfig(spec, mismatchedRow), ...
+    'createBonePoseOptimizationRunConfig:CostModelMismatch');
+
+% Report an omitted parameter column directly instead of failing inside a cost evaluation.
+missingColumnRow = removevars(plan.combinations(1, :), 'lambdaMissing');
+verifyError(testCase, ...
+    @() createBonePoseOptimizationRunConfig(spec, missingColumnRow), ...
+    'createBonePoseOptimizationRunConfig:MissingParameterColumn');
 end
 
 
