@@ -71,4 +71,7 @@ addpath(functionsDirectory);
 
 % Open the non-blocking browser. Its callbacks keep the processing state
 % alive after this script finishes running.
-[segmentationFigure, segmentationResults] = launchBoneSegmentationTools(ultrasoundSequence, segmentationOutputDirectory);
+% Pass the input MAT-file path to the browser so each exported segmentation
+% can record which ultrasound dataset it came from.
+[segmentationFigure, segmentationResults] = launchBoneSegmentationTools( ...
+    ultrasoundSequence, segmentationOutputDirectory, ultrasoundFilePath);
