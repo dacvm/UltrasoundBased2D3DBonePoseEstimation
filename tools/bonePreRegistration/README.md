@@ -226,7 +226,7 @@ coarseRegistration_yyyyMMdd_HHmmss.mat
 
 ## Output Structure
 
-The MATLAB v7.3 output contains one variable named `coarseRegistration`:
+The MATLAB v7.3 output contains `coarseRegistration` and the small provenance structure `coarseRegistrationMetadata`:
 
 ```text
 coarseRegistration(1..B)
@@ -236,6 +236,18 @@ coarseRegistration(1..B)
 +-- T_CT_ref_est
 +-- T_bone_ref_est
 +-- boneMeshRef_est
+
+coarseRegistrationMetadata
++-- createdAt
++-- sourceUltrasoundFile
++-- sourceUltrasoundVariables
++-- sourceBoneSurfaceFile
++-- sourceBoneSurfaceVariables
++-- sourceCtFile
++-- sourceCtVariable
++-- sourceBoneLandmarksFile
++-- sourceBoneLandmarksVariables
++-- configurationFile
 ```
 
 | Field | Explanation |
@@ -248,12 +260,29 @@ coarseRegistration(1..B)
 
 Skipped entries keep `T_CT_ref_est`, `T_bone_ref_est`, and `boneMeshRef_est` empty. This allows downstream code to inspect `status` without losing the bone's identity.
 
+The metadata fields identify every input used by the coarse-registration workflow:
+
+| Metadata field | Explanation |
+| --- | --- |
+| `createdAt` | Date and time when the coarse-registration output was saved. |
+| `sourceUltrasoundFile` | Full path of the reviewed ultrasound snapshot MAT-file. |
+| `sourceUltrasoundVariables` | Loaded ultrasound variables: `validSnapshots` and `validBonePoses`. |
+| `sourceBoneSurfaceFile` | Full path of the recovered 3D bone-surface MAT-file. |
+| `sourceBoneSurfaceVariables` | Loaded surface variables: `surfaceResults` and `extractionMetadata`. |
+| `sourceCtFile` | Full path of the CT MAT-file recorded by `validBonePoses`. |
+| `sourceCtVariable` | Loaded CT variable, currently `bones`. |
+| `sourceBoneLandmarksFile` | Full path of the bone-landmark MAT-file. |
+| `sourceBoneLandmarksVariables` | Loaded landmark variables: `landmarks` and `intersectionDiagnostics`. |
+| `configurationFile` | Full path of `bonePreRegistration_3Dsurface.json`. Its contents are not copied into the metadata. |
+
 Load the result with:
 
 ```matlab
 loadedRegistration = load('coarseRegistration_yyyyMMdd_HHmmss.mat', ...
-    'coarseRegistration');
+    'coarseRegistration', 'coarseRegistrationMetadata');
 coarseRegistration = loadedRegistration.coarseRegistration;
+coarseRegistrationMetadata = ...
+    loadedRegistration.coarseRegistrationMetadata;
 ```
 
 ## Common Input Problems
