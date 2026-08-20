@@ -1,8 +1,9 @@
 function [data, validationData] = prepareBonePoseOptimizationInputs(config)
 %PREPAREBONEPOSEOPTIMIZATIONINPUTS Prepare standardized optimization inputs.
-% This function loads the reviewed ultrasound snapshots, CT bone model, and
-% coarse registration produced by tools/. It prepares fixed estimation data
-% once so the cost function only needs to evaluate candidate poses.
+% This function loads reviewed ultrasound snapshots, optional bone-surface
+% measurements, the CT bone model, and coarse registration produced by
+% tools/. It prepares fixed estimation data once so the cost function only
+% needs to evaluate candidate poses.
 %
 % Input:
 %   config         - Scalar configuration returned by
@@ -10,7 +11,7 @@ function [data, validationData] = prepareBonePoseOptimizationInputs(config)
 %
 % Outputs:
 %   data           - Estimation-only data containing the CT mesh, ultrasound
-%                    planes, initial transforms, and initial pixel counts.
+%                    measurements, initial transforms, and initial pixel counts.
 %   validationData - Saved ground-truth intersections, bone pose, and source
 %                    metadata. This output must not be passed to the optimizer.
 
@@ -26,6 +27,15 @@ targetBone = upper(char(config.input.bone));
 snapshotOutput            = loadRequiredVariables(config.input.validSnapshotsMatFile, {'validSnapshots', 'validBonePoses'});
 validSnapshots            = snapshotOutput.validSnapshots;
 validBonePoses            = snapshotOutput.validBonePoses;
+
+% Bone surfaces are another ultrasound measurement input. Load their tool
+% output here beside the snapshots, while keeping them optional for cost
+% models that only use image intensity.
+hasBoneSurface = ~isempty(config.input.boneSurfaceMatFile);
+surfaceOutput = struct();
+if hasBoneSurface
+    surfaceOutput = loadRequiredVariables(config.input.boneSurfaceMatFile, {'surfaceResults', 'extractionMetadata'});
+end
 
 % bones and coarseRegistration are structured as arrays with one record per bone:
 %   bones(1).bone              = 'F';
@@ -61,34 +71,36 @@ currentGroundTruthPose    = validBonePoses.bonePoses(groundTruthIndex).data;
 % A skipped coarse-registration record cannot provide an optimization start pose.
 if ~strcmpi(string(currentCoarseRegistration.status), "registered")
     error('prepareBonePoseOptimizationInputs:BoneNotRegistered', ...
-        'The coarse-registration result for bone %s is not registered: %s', ...
-        targetBone, string(currentCoarseRegistration.status));
+          'The coarse-registration result for bone %s is not registered: %s', ...
+          targetBone, string(currentCoarseRegistration.status));
 end
 
 %% COLLECT ESTIMATION AND VALIDATION RECORDS
 
 % Copy planes and ground truth into separate arrays while preserving source order.
 [imagePlanesRef, groundTruthIntersections, snapshotSources] = collectBoneSnapshots(validSnapshots, targetBone);
-
-% Check the fixed plane geometry before it is used in repeated evaluations.
+% Validate imagePlanesRef whether the necessary fields are exist
 validateImagePlanes(imagePlanesRef);
 
-%% PREPARE OPTIONAL BONE-SURFACE MEASUREMENTS
-
-% Keep one stable data shape even when the selected cost model does not use
-% bone surfaces. Future cost models can check isAvailable before reading them.
+% Use the same stable output shape when no surface artifact is configured.
 boneSurface.isAvailable        = false;
-boneSurface.sourceFilePath     = '';
 boneSurface.extractionMetadata = struct();
 boneSurface.measurements       = struct([]);
 
-% Load a configured surface file even for the current intensity-only model.
-% This lets Stage 6 verify the new input boundary without changing the cost.
-if isfield(config.input, 'boneSurfaceMatFile') && ...
-        ~isempty(config.input.boneSurfaceMatFile)
-    boneSurface = prepareBoneSurfaceMeasurements( ...
-        config.input.boneSurfaceMatFile, snapshotSources, imagePlanesRef, ...
-        targetBone, config.input.validSnapshotsMatFile);
+% Collect surface records independently before comparing them with snapshots.
+if hasBoneSurface
+    collectedBoneSurface = collectBoneSurfaceMeasurements(surfaceOutput, targetBone);
+
+    % Validate boneSurface whether the necessary fields are exist
+    validateBoneSurfaceMeasurements(collectedBoneSurface);
+end
+
+%% VALIDATE AND ALIGN RELATED ULTRASOUND INPUTS
+
+% Bone surfaces come from the reviewed snapshots. Align them explicitly so
+% measurement k always belongs to image plane k in a future cost function.
+if hasBoneSurface
+    boneSurface = alignBoneSurfacesToSnapshots(collectedBoneSurface, snapshotSources, config.input.validSnapshotsMatFile);
 end
 
 %% PREPARE THE CT MESH AND INITIAL POSE
@@ -149,12 +161,14 @@ nInitialIntersectionPixels = arrayfun( ...
 data.bone                       = targetBone;
 data.boneName                   = char(string(currentBone.name));
 data.boneMeshCT                 = boneMeshCT;
-data.imagePlanesRef             = imagePlanesRef;
 data.T_bone_CT                  = T_bone_CT;
 data.T_CT_ref_initial           = T_CT_ref_initial;
 data.T_bone_ref_initial         = T_bone_ref_initial;
+data.imagePlanesRef             = imagePlanesRef;
+data.hasBoneSurface             = boneSurface.isAvailable;
+data.boneSurfaceMetadata        = boneSurface.extractionMetadata;
+data.boneSurfaceMeasurements    = boneSurface.measurements;
 data.nInitialIntersectionPixels = nInitialIntersectionPixels;
-data.boneSurface                = boneSurface;
 data.config                     = config;
 
 % Keep ground truth outside data so estimation code cannot use it accidentally.
@@ -312,6 +326,94 @@ for planeIndex = 1:numel(imagePlanesRef)
         error('prepareBonePoseOptimizationInputs:InvalidPlaneImage', ...
             'Image plane %d has inconsistent dimensions or physical size.', ...
             planeIndex);
+    end
+end
+end
+
+
+function validateBoneSurfaceMeasurements(boneSurface)
+%VALIDATEBONESURFACEMEASUREMENTS Check collected 2D and 3D bone surfaces.
+% This function validates the coordinate convention and every collected
+% surface record independently from the snapshots. It is needed so future
+% cost functions receive surfaces with a clear and consistent meaning.
+%
+% Input:
+%   boneSurface - Struct returned by collectBoneSurfaceMeasurements.
+%
+% Output:
+%   None. The function stops with an error when a surface is invalid.
+
+metadata = boneSurface.extractionMetadata;
+
+% These metadata fields explain how image coordinates follow the ultrasound
+% beam and must be present before their values can be interpreted.
+requiredMetadataFields = {'coordinateConvention', 'beamAxis', 'beamDirection'};
+if ~all(isfield(metadata, requiredMetadataFields))
+    error('prepareBonePoseOptimizationInputs:MissingSurfaceCoordinateMetadata', ...
+          'Surface metadata must define coordinate and beam conventions.');
+end
+
+coordinateConvention = metadata.coordinateConvention;
+coordinateFields = {'indexBase', 'coordinateOrder', ...
+    'imageAxisByCoordinate', 'origin'};
+if ~isstruct(coordinateConvention) || ...
+        ~all(isfield(coordinateConvention, coordinateFields)) || ...
+        coordinateConvention.indexBase ~= 1 || ...
+        ~isequal(string(coordinateConvention.coordinateOrder), ["x", "y"]) || ...
+        ~isequal(string(coordinateConvention.imageAxisByCoordinate), ...
+                 ["column", "row"]) || ...
+        string(coordinateConvention.origin) ~= "topLeftPixelCenter"
+    error('prepareBonePoseOptimizationInputs:UnsupportedSurfaceCoordinateConvention', ...
+          'Bone surfaces must use one-based [x,y] = [column,row] image coordinates.');
+end
+
+% Increasing image rows must follow the beam direction used during surface
+% extraction and 3D recovery.
+beamAxis = metadata.beamAxis;
+beamDirection = metadata.beamDirection;
+if ~isstruct(beamAxis) || ~isstruct(beamDirection) || ...
+        ~all(isfield(beamAxis, {'name', 'matlabDimension'})) || ...
+        ~all(isfield(beamDirection, {'name', 'rowIndexStep'})) || ...
+        string(beamAxis.name) ~= "row" || beamAxis.matlabDimension ~= 1 || ...
+        string(beamDirection.name) ~= "increasingRowIndex" || ...
+        beamDirection.rowIndexStep ~= 1
+    error('prepareBonePoseOptimizationInputs:UnsupportedSurfaceBeamConvention', ...
+          'Bone surfaces must use increasing row index as the beam direction.');
+end
+
+% Validate the fields and coordinate arrays consumed by future cost models.
+measurements = boneSurface.measurements;
+requiredMeasurementFields = {'sourceIndex', 'status', ...
+    'surfaceCoordinatesXY', 'surfaceCoordinatesXYZRef'};
+allowedStatuses = ["extracted", "noSurface", "skippedUnprocessed"];
+
+for measurementIndex = 1:numel(measurements)
+    measurement = measurements(measurementIndex);
+    if ~all(isfield(measurement, requiredMeasurementFields))
+        error('prepareBonePoseOptimizationInputs:InvalidSurfaceRecord', ...
+              'Surface measurement %d is missing a required field.', ...
+              measurementIndex);
+    end
+
+    % Empty surfaces remain valid; each cost model decides how their status
+    % contributes to its objective.
+    if ~any(string(measurement.status) == allowedStatuses)
+        error('prepareBonePoseOptimizationInputs:InvalidSurfaceStatus', ...
+              'Surface measurement %d has unsupported status %s.', ...
+              measurementIndex, string(measurement.status));
+    end
+
+    surfaceCoordinatesXY = measurement.surfaceCoordinatesXY;
+    surfacePointsRef      = measurement.surfaceCoordinatesXYZRef;
+    if ~isnumeric(surfaceCoordinatesXY) || ...
+            size(surfaceCoordinatesXY, 2) ~= 2 || ...
+            ~isnumeric(surfacePointsRef) || size(surfacePointsRef, 2) ~= 3 || ...
+            size(surfaceCoordinatesXY, 1) ~= size(surfacePointsRef, 1) || ...
+            ~all(isfinite(surfaceCoordinatesXY), 'all') || ...
+            ~all(isfinite(surfacePointsRef), 'all')
+        error('prepareBonePoseOptimizationInputs:InvalidSurfaceCoordinates', ...
+              'Surface measurement %d must contain matching finite N-by-2 and N-by-3 coordinates.', ...
+              measurementIndex);
     end
 end
 end

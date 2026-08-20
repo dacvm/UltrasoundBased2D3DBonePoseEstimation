@@ -76,10 +76,8 @@ boneSurfaceMatFile = getOptionalField(rawConfig.input, 'boneSurfaceMatFile', '')
 if isempty(boneSurfaceMatFile)
     config.input.boneSurfaceMatFile = '';
 else
-    boneSurfaceMatFile = ensureScalarText( ...
-        boneSurfaceMatFile, 'input.boneSurfaceMatFile');
-    config.input.boneSurfaceMatFile = makeAbsolutePath( ...
-        boneSurfaceMatFile, config.project.root);
+    boneSurfaceMatFile = ensureScalarText(boneSurfaceMatFile, 'input.boneSurfaceMatFile');
+    config.input.boneSurfaceMatFile = makeAbsolutePath(boneSurfaceMatFile, config.project.root);
 end
 
 config.input.ctPostProcessedMatFile = makeAbsolutePath( ...

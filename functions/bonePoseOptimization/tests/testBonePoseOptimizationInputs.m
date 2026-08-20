@@ -94,23 +94,23 @@ function testBoneSurfacesAlignWithPreparedImages(testCase)
 
 data = testCase.TestData.data;
 snapshotSources = testCase.TestData.validationData.snapshotSources;
-boneSurface = data.boneSurface;
+boneSurfaceMeasurements = data.boneSurfaceMeasurements;
 
 % The configured artifact should provide one surface measurement per image.
-verifyTrue(testCase, boneSurface.isAvailable);
-verifyEqual(testCase, numel(boneSurface.measurements), ...
+verifyTrue(testCase, data.hasBoneSurface);
+verifyEqual(testCase, numel(boneSurfaceMeasurements), ...
     numel(data.imagePlanesRef));
 
 % Group identity and sourceIndex show that flattening preserved correspondence.
-verifyEqual(testCase, string({boneSurface.measurements.groupName}), ...
+verifyEqual(testCase, string({boneSurfaceMeasurements.groupName}), ...
     string({snapshotSources.groupName}));
-verifyEqual(testCase, [boneSurface.measurements.sourceIndex], ...
+verifyEqual(testCase, [boneSurfaceMeasurements.sourceIndex], ...
     [snapshotSources.sourceIndex]);
-verifyEqual(testCase, unique(string({boneSurface.measurements.status})), ...
+verifyEqual(testCase, unique(string({boneSurfaceMeasurements.status})), ...
     "extracted");
 
 % The structured metadata removes ambiguity about image coordinates and beam direction.
-metadata = boneSurface.extractionMetadata;
+metadata = data.boneSurfaceMetadata;
 verifyEqual(testCase, metadata.coordinateConvention.indexBase, 1);
 verifyEqual(testCase, metadata.coordinateConvention.coordinateOrder, ["x", "y"]);
 verifyEqual(testCase, metadata.coordinateConvention.imageAxisByCoordinate, ...
@@ -132,7 +132,7 @@ data = testCase.TestData.data;
 maximumPointErrorMm = 0;
 
 for imageIndex = 1:numel(data.imagePlanesRef)
-    measurement = data.boneSurface.measurements(imageIndex);
+    measurement = data.boneSurfaceMeasurements(imageIndex);
     plane = data.imagePlanesRef(imageIndex);
     surfaceCoordinatesXY = double(measurement.surfaceCoordinatesXY);
 
@@ -163,26 +163,49 @@ function testSurfaceRecordsCanBeReorderedBeforeMatching(testCase)
 % function has no output.
 
 config = testCase.TestData.config;
-surfaceFileData = load(config.input.boneSurfaceMatFile, ...
+surfaceOutput = load(config.input.boneSurfaceMatFile, ...
     'surfaceResults', 'extractionMetadata');
 
 % Reverse both group and record order to ensure array position is never identity.
-surfaceResults = surfaceFileData.surfaceResults(end:-1:1);
-for groupIndex = 1:numel(surfaceResults)
-    surfaceResults(groupIndex).data = surfaceResults(groupIndex).data(end:-1:1);
+surfaceOutput.surfaceResults = surfaceOutput.surfaceResults(end:-1:1);
+for groupIndex = 1:numel(surfaceOutput.surfaceResults)
+    surfaceOutput.surfaceResults(groupIndex).data = ...
+        surfaceOutput.surfaceResults(groupIndex).data(end:-1:1);
 end
-extractionMetadata = surfaceFileData.extractionMetadata;
-[temporaryFilePath, temporaryFileCleanup] = writeTemporarySurfaceFile( ...
-    surfaceResults, extractionMetadata); %#ok<ASGLU>
 
-boneSurface = prepareBoneSurfaceMeasurements( ...
-    temporaryFilePath, testCase.TestData.validationData.snapshotSources, ...
-    testCase.TestData.data.imagePlanesRef, config.input.bone, ...
+collectedBoneSurface = collectBoneSurfaceMeasurements( ...
+    surfaceOutput, config.input.bone);
+boneSurface = alignBoneSurfacesToSnapshots( ...
+    collectedBoneSurface, ...
+    testCase.TestData.validationData.snapshotSources, ...
     config.input.validSnapshotsMatFile);
 
 verifyEqual(testCase, [boneSurface.measurements.sourceIndex], ...
     [testCase.TestData.validationData.snapshotSources.sourceIndex]);
-clear temporaryFileCleanup;
+end
+
+
+function testSurfaceProvenanceMustMatchSnapshots(testCase)
+%TESTSURFACEPROVENANCEMUSTMATCHSNAPSHOTS Check the artifact-level relationship.
+% testCase supplies the real surface and snapshot inputs. This function has
+% no output.
+
+config = testCase.TestData.config;
+surfaceOutput = load(config.input.boneSurfaceMatFile, ...
+    'surfaceResults', 'extractionMetadata');
+
+% Change only the recorded source artifact so collection still succeeds and
+% the explicit alignment boundary is responsible for rejecting the mismatch.
+surfaceOutput.extractionMetadata.sourceUltrasoundFile = ...
+    fullfile(tempdir, 'differentValidSnapshots.mat');
+collectedBoneSurface = collectBoneSurfaceMeasurements( ...
+    surfaceOutput, config.input.bone);
+
+verifyError(testCase, @() alignBoneSurfacesToSnapshots( ...
+    collectedBoneSurface, ...
+    testCase.TestData.validationData.snapshotSources, ...
+    config.input.validSnapshotsMatFile), ...
+    'alignBoneSurfacesToSnapshots:SurfaceSourceMismatch');
 end
 
 
@@ -198,8 +221,9 @@ configWithoutSurface.input.boneSurfaceMatFile = '';
 [costWithoutSurface, detailsWithoutSurface] = bonePoseCostFunction( ...
     zeros(6, 1), dataWithoutSurface, configWithoutSurface);
 
-verifyFalse(testCase, dataWithoutSurface.boneSurface.isAvailable);
-verifyEmpty(testCase, dataWithoutSurface.boneSurface.measurements);
+verifyFalse(testCase, dataWithoutSurface.hasBoneSurface);
+verifyEmpty(testCase, dataWithoutSurface.boneSurfaceMeasurements);
+verifyEmpty(testCase, fieldnames(dataWithoutSurface.boneSurfaceMetadata));
 verifyEqual(testCase, costWithoutSurface, testCase.TestData.initialCost, ...
     'AbsTol', 1e-12);
 verifyEqual(testCase, detailsWithoutSurface.intensityCoverageCost, ...
@@ -368,26 +392,4 @@ config = testCase.TestData.config;
 config.input.bone = 'F';
 verifyError(testCase, @() prepareBonePoseOptimizationInputs(config), ...
     'prepareBonePoseOptimizationInputs:BoneNotRegistered');
-end
-
-
-function [temporaryFilePath, cleanupObject] = writeTemporarySurfaceFile( ...
-        surfaceResults, extractionMetadata)
-%WRITETEMPORARYSURFACEFILE Save one short-lived surface fixture for a test.
-% surfaceResults and extractionMetadata are the two public surface variables,
-% temporaryFilePath is their MAT-file, and cleanupObject removes it afterward.
-
-temporaryFilePath = [tempname, '.mat'];
-save(temporaryFilePath, 'surfaceResults', 'extractionMetadata');
-cleanupObject = onCleanup(@() deleteTemporaryFile(temporaryFilePath));
-end
-
-
-function deleteTemporaryFile(filePath)
-%DELETETEMPORARYFILE Remove a temporary surface fixture when it still exists.
-% filePath identifies the temporary MAT-file. This function has no output.
-
-if isfile(filePath)
-    delete(filePath);
-end
 end
