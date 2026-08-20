@@ -68,6 +68,20 @@ config.input.bone = targetBone;
 config.input.validSnapshotsMatFile = makeAbsolutePath( ...
     getRequiredField(rawConfig.input, 'validSnapshotsMatFile', ...
     'input.validSnapshotsMatFile'), config.project.root);
+
+% Bone surfaces are optional for models that use only image intensity. When
+% a path is supplied, resolve it now so input preparation can load it without
+% depending on MATLAB's current folder.
+boneSurfaceMatFile = getOptionalField(rawConfig.input, 'boneSurfaceMatFile', '');
+if isempty(boneSurfaceMatFile)
+    config.input.boneSurfaceMatFile = '';
+else
+    boneSurfaceMatFile = ensureScalarText( ...
+        boneSurfaceMatFile, 'input.boneSurfaceMatFile');
+    config.input.boneSurfaceMatFile = makeAbsolutePath( ...
+        boneSurfaceMatFile, config.project.root);
+end
+
 config.input.ctPostProcessedMatFile = makeAbsolutePath( ...
     getRequiredField(rawConfig.input, 'ctPostProcessedMatFile', ...
     'input.ctPostProcessedMatFile'), config.project.root);
@@ -85,6 +99,14 @@ config.intersection.normalFacingToleranceDeg = getRequiredField( ...
 costConfig      = getRequiredField(rawConfig, 'cost', 'cost');
 modelName       = ensureScalarText(getRequiredField(costConfig, 'model', 'cost.model'), 'cost.model');
 costDefinition  = getBonePoseCostDefinition(modelName);
+
+% Stop during configuration loading when a selected model needs surface
+% measurements but the experiment has not provided their file.
+if costDefinition.requiresBoneSurface && isempty(config.input.boneSurfaceMatFile)
+    error('createBonePoseOptimizationConfig:MissingBoneSurfaceInput', ...
+          'Cost model %s requires input.boneSurfaceMatFile.', ...
+          costDefinition.modelName);
+end
 
 fixedParameters = getRequiredField(costConfig, 'fixedParameters', 'cost.fixedParameters');
 hyperparameters = getRequiredField(costConfig, 'hyperparameters', 'cost.hyperparameters');

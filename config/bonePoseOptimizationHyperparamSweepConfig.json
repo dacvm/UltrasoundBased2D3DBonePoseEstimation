@@ -7,6 +7,7 @@
   "input": {
     "bone": "T",
     "validSnapshotsMatFile": "tools/ultrasoundSpatialProcessing/outputs/validSnapshots_20260812_160247.mat",
+    "boneSurfaceMatFile": "tools/boneSegmentationProcess/outputs/boneSurface_20260819_205405.mat",
     "ctPostProcessedMatFile": "tools/ctkneePostProcess/outputs/kneephantom/kneephantom_bones_and_bonepins.mat",
     "coarseRegistrationMatFile": "tools/bonePreRegistration/outputs/coarseRegistration_20260819_205443.mat"
   },

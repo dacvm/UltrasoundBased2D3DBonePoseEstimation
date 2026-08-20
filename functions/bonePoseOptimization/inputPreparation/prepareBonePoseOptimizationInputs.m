@@ -73,6 +73,24 @@ end
 % Check the fixed plane geometry before it is used in repeated evaluations.
 validateImagePlanes(imagePlanesRef);
 
+%% PREPARE OPTIONAL BONE-SURFACE MEASUREMENTS
+
+% Keep one stable data shape even when the selected cost model does not use
+% bone surfaces. Future cost models can check isAvailable before reading them.
+boneSurface.isAvailable        = false;
+boneSurface.sourceFilePath     = '';
+boneSurface.extractionMetadata = struct();
+boneSurface.measurements       = struct([]);
+
+% Load a configured surface file even for the current intensity-only model.
+% This lets Stage 6 verify the new input boundary without changing the cost.
+if isfield(config.input, 'boneSurfaceMatFile') && ...
+        ~isempty(config.input.boneSurfaceMatFile)
+    boneSurface = prepareBoneSurfaceMeasurements( ...
+        config.input.boneSurfaceMatFile, snapshotSources, imagePlanesRef, ...
+        targetBone, config.input.validSnapshotsMatFile);
+end
+
 %% PREPARE THE CT MESH AND INITIAL POSE
 
 % Keep the source mesh in CT coordinates throughout optimization preparation.
@@ -136,6 +154,7 @@ data.T_bone_CT                  = T_bone_CT;
 data.T_CT_ref_initial           = T_CT_ref_initial;
 data.T_bone_ref_initial         = T_bone_ref_initial;
 data.nInitialIntersectionPixels = nInitialIntersectionPixels;
+data.boneSurface                = boneSurface;
 data.config                     = config;
 
 % Keep ground truth outside data so estimation code cannot use it accidentally.
