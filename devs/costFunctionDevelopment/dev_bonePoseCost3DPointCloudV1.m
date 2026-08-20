@@ -147,5 +147,162 @@ title(setupAxes, sprintf( ...
 rotate3d(setupFigure, 'on');
 drawnow;
 
-%% 
+%% FIND CLOSEST POINT-SURFACE DISTANCE
 
+% Confirm that the GEOM3D helper is available before starting the expensive
+% correspondence search. The helper finds the nearest point anywhere on the
+% triangular surface instead of restricting the result to mesh vertices.
+if exist('distancePointMesh', 'file') ~= 2
+    error('dev_bonePoseCost3DPointCloudV1:MissingDistancePointMesh', ...
+          'distancePointMesh is not available on the MATLAB path.');
+end
+
+% Read the fixed candidate mesh arrays once because every measured point is
+% compared with the same initial bone mesh in the reference frame.
+boneMeshVerticesRef = boneMeshRefInitial.Points;
+boneMeshFaces       = boneMeshRefInitial.ConnectivityList;
+
+% Keep correspondence results grouped by ultrasound measurement. This
+% preserves the one-to-one relationship between surfacePointCells{k} and
+% its closest mesh points and distances.
+closestBonePointsRefCells          = cell(numberOfMeasurements, 1);
+pointToSurfaceDistanceMmCells      = cell(numberOfMeasurements, 1);
+numberOfSurfacePointsByMeasurement = zeros(numberOfMeasurements, 1);
+meanDistanceMmByMeasurement        = nan(numberOfMeasurements, 1);
+rmseDistanceMmByMeasurement        = nan(numberOfMeasurements, 1);
+maximumDistanceMmByMeasurement     = nan(numberOfMeasurements, 1);
+
+% Measure the complete correspondence-search time so later implementations
+% can be compared with this correctness-first reference.
+correspondenceTimer = tic;
+
+% Loop for all measurement
+for measurementIndex = 1:numberOfMeasurements
+
+    % Read the measured ref-frame points belonging to one ultrasound image.
+    currentSurfacePointsRef = surfacePointCells{measurementIndex};
+    numberOfCurrentPoints   = size(currentSurfacePointsRef, 1);
+    numberOfSurfacePointsByMeasurement(measurementIndex) = numberOfCurrentPoints;
+
+    % Preserve a valid empty result for images where surface extraction did
+    % not return any points.
+    if numberOfCurrentPoints == 0
+        closestBonePointsRefCells{measurementIndex} = zeros(0, 3);
+        pointToSurfaceDistanceMmCells{measurementIndex} = zeros(0, 1);
+        continue;
+    end
+
+    % Preallocate one closest surface point and one unsigned distance for
+    % every measured point in this ultrasound image.
+    currentClosestBonePointsRef = zeros(numberOfCurrentPoints, 3);
+    currentDistancesMm          = zeros(numberOfCurrentPoints, 1);
+
+    for pointIndex = 1:numberOfCurrentPoints
+        % distancePointMesh evaluates triangle interiors, edges, and vertices
+        % and returns the closest surface location in the mesh coordinate frame.
+        [currentDistancesMm(pointIndex), currentClosestBonePointsRef(pointIndex, :)] = ...
+            distancePointMesh(currentSurfacePointsRef(pointIndex, :), boneMeshVerticesRef, boneMeshFaces, 'algorithm', 'vectorized');
+    end
+
+    % Stop immediately if the external geometry helper returns an invalid
+    % result, because silently continuing would corrupt the future cost.
+    if any(~isfinite(currentDistancesMm)) || any(currentDistancesMm < 0) || any(~isfinite(currentClosestBonePointsRef), 'all')
+        error('dev_bonePoseCost3DPointCloudV1:InvalidCorrespondence', ...
+              'Measurement %d produced an invalid point-to-surface correspondence.', ...
+              measurementIndex);
+    end
+
+    % Store the correspondence arrays in the same cell position as their
+    % input surface points so they remain traceable to the source image.
+    closestBonePointsRefCells{measurementIndex}     = currentClosestBonePointsRef;
+    pointToSurfaceDistanceMmCells{measurementIndex} = currentDistancesMm;
+
+    % Calculate simple per-image statistics for inspecting whether one image
+    % has unusually large correspondence distances.
+    meanDistanceMmByMeasurement(measurementIndex)    = mean(currentDistancesMm);
+    rmseDistanceMmByMeasurement(measurementIndex)    = sqrt(mean(currentDistancesMm .^ 2));
+    maximumDistanceMmByMeasurement(measurementIndex) = max(currentDistancesMm);
+
+    fprintf('Matched measurement %d of %d: %d surface points.\n', measurementIndex, numberOfMeasurements, numberOfCurrentPoints);
+
+end
+correspondenceRuntimeSeconds = toc(correspondenceTimer);
+
+% Flatten the aligned cell results for the future global point-cloud cost.
+% The row order remains identical to boneSurfacePointsRef.
+closestBonePointsRef      = vertcat(closestBonePointsRefCells{:});
+pointToSurfaceDistancesMm = vertcat(pointToSurfaceDistanceMmCells{:});
+
+% Verify that flattening did not break the point-to-correspondence alignment.
+if size(closestBonePointsRef, 1) ~= size(boneSurfacePointsRef, 1) || numel(pointToSurfaceDistancesMm) ~= size(boneSurfacePointsRef, 1)
+    error('dev_bonePoseCost3DPointCloudV1:CorrespondenceCountMismatch', ...
+          'The flattened correspondence count does not match the measured point count.');
+end
+
+% Independently reconstruct every distance from its point pair. This check
+% confirms that the stored closest point and reported distance agree.
+reconstructedDistancesMm = vecnorm( boneSurfacePointsRef - closestBonePointsRef, 2, 2);
+distanceAgreementToleranceMm = 1e-9;
+if any(abs(reconstructedDistancesMm - pointToSurfaceDistancesMm) > distanceAgreementToleranceMm)
+    error('dev_bonePoseCost3DPointCloudV1:DistanceMismatch', ...
+          'A reported distance does not match its measured-to-closest-point pair.');
+end
+
+% Summarize each aligned ultrasound measurement in a readable table while
+% retaining empty measurements as rows with unavailable distance statistics.
+measurementIndex  = (1:numberOfMeasurements).';
+sourceIndex       = [data.boneSurfaceMeasurements.sourceIndex].';
+measurementStatus = string({data.boneSurfaceMeasurements.status}).';
+correspondenceSummaryTable = table( ...
+    measurementIndex, ...
+    sourceIndex, ...
+    measurementStatus, ...
+    numberOfSurfacePointsByMeasurement, ...
+    meanDistanceMmByMeasurement, ...
+    rmseDistanceMmByMeasurement, ...
+    maximumDistanceMmByMeasurement);
+
+% Calculate global values directly from all measured points. These are the
+% quantities that will later support the first 3D point-cloud cost model.
+meanPointToSurfaceDistanceMm    = mean(pointToSurfaceDistancesMm);
+rmsePointToSurfaceDistanceMm    = sqrt(mean(pointToSurfaceDistancesMm .^ 2));
+medianPointToSurfaceDistanceMm  = median(pointToSurfaceDistancesMm);
+maximumPointToSurfaceDistanceMm = max(pointToSurfaceDistancesMm);
+
+disp(correspondenceSummaryTable);
+fprintf(['Matched %d measured points in %.3f seconds.\n', ...
+         'Overall distance: mean %.3f mm, RMSE %.3f mm, ', ...
+         'median %.3f mm, maximum %.3f mm.\n'], ...
+    numel(pointToSurfaceDistancesMm), ...
+    correspondenceRuntimeSeconds, ...
+    meanPointToSurfaceDistanceMm, ...
+    rmsePointToSurfaceDistanceMm, ...
+    medianPointToSurfaceDistanceMm, ...
+    maximumPointToSurfaceDistanceMm);
+
+% Interleave every measured point, closest mesh point, and a NaN separator.
+% This draws all correspondences with one graphics object instead of creating
+% thousands of separate line objects that would make the figure sluggish.
+numberOfCorrespondences                 = size(boneSurfacePointsRef, 1);
+correspondenceLinePointsRef             = nan(3 * numberOfCorrespondences, 3);
+correspondenceLinePointsRef(1:3:end, :) = boneSurfacePointsRef;
+correspondenceLinePointsRef(2:3:end, :) = closestBonePointsRef;
+
+% Draw each measured-to-mesh correspondence in the existing setup scene.
+correspondenceLineHandle = line(setupAxes, ...
+    correspondenceLinePointsRef(:, 1), ...
+    correspondenceLinePointsRef(:, 2), ...
+    correspondenceLinePointsRef(:, 3), ...
+    'Color', [0.90, 0.20, 0.15], ...
+    'LineWidth', 0.75, ...
+    'DisplayName', 'Point-to-surface correspondences', ...
+    'Tag', 'dev_point_cloud_correspondence_lines');
+
+% Update the focused legend to include the newly calculated correspondence
+% lines without adding individual anatomical or image coordinate axes.
+legend(setupAxes, ...
+    [boneMeshHandle, ultrasoundImageHandle, boneSurfaceHandle, ...
+     correspondenceLineHandle], ...
+    'Location', 'best', ...
+    'Interpreter', 'none');
+drawnow;
