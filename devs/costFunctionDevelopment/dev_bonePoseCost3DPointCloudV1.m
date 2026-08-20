@@ -50,7 +50,7 @@ end
 
 % Create one interactive reference-frame scene for inspecting the complete
 % fixed setup before any point-to-mesh distance is calculated.
-setupFigure = figure('Name', '3D Point-Cloud Cost Development: Initial Setup', 'Color', 'white');
+setupFigure = figure('Name', '3D Point-Cloud Cost Development: Initial Setup');
 setupAxes = axes(setupFigure);
 hold(setupAxes, 'on');
 grid(setupAxes, 'on');
@@ -109,6 +109,16 @@ for planeIndex = 1:numel(data.imagePlanesRef)
     else
         currentImageHandle.HandleVisibility = 'off';
     end
+
+    % Draw an unlabeled thin coordinate triad so each ultrasound plane's
+    % orientation is visible without filling the scene with text labels.
+    display_axis_v2(setupAxes, ...
+        plane.T_image_ref(1:3, 4), ...
+        plane.T_image_ref(1:3, 1:3), ...
+        axisDisplayScale * 0.6, ...
+        '', ...
+        'Tag', 'dev_point_cloud_ultrasound_axis', ...
+        'Mode', 'thin');
 end
 
 % Overlay the measured ultrasound bone surface as one ref-frame point cloud.
@@ -136,3 +146,6 @@ title(setupAxes, sprintf( ...
     'Interpreter', 'none');
 rotate3d(setupFigure, 'on');
 drawnow;
+
+%% 
+
