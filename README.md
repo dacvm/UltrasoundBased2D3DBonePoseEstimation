@@ -125,15 +125,32 @@ The `experiment.seeds` array controls repeated stochastic runs. A one-sweep conf
 
 This is an ongoing list. The current framework registers the following three versioned cost models; more models can be added through the extension process described in [Processing workflow](#processing-workflow). Every model returns one scalar objective to CMA-ES, and a lower value is always better.
 
+In the tables below, a **fixed parameter** has one value for the complete experiment. A **hyperparameter** is an array of candidate values; the experiment planner includes it in the Cartesian product used to create parameter combinations.
+
 ### `intensityCov_v1`: intensity and coverage
 
 This model intersects the candidate CT mesh with each tracked ultrasound plane and keeps pixels produced by probe-facing mesh faces. It rewards intersections that are both bright and sufficiently covered relative to the intersection at the coarse initial pose. It also penalizes active image planes whose candidate intersection contains too few pixels. This prevents a very small but bright intersection from appearing better than a physically meaningful one.
 
 For every active plane, the score is the normalized mean pixel intensity multiplied by its capped coverage ratio. The final cost is the negative mean score plus the weighted fraction of missing planes.
 
+| Parameter | Type | Meaning |
+| --- | --- | --- |
+| `intensityMax` | Fixed | Positive intensity used to normalize the mean sampled brightness, normally `255` for 8-bit images. |
+| `minReferencePixels` | Hyperparameter | Positive minimum intersection-pixel count at the initial pose. A plane below this threshold is inactive and does not contribute to the cost. |
+| `nMinPixels` | Hyperparameter | Positive minimum pixel count required at the current candidate pose. An active plane below this threshold is marked as missing. |
+| `lambdaMissing` | Hyperparameter | Nonnegative multiplier applied to the fraction of active planes marked as missing. `0` disables this penalty. |
+
+This model does not require `boneSurfaceMatFile`.
+
 ### `ICPLike_v1`: one-way 3D point-to-mesh distance
 
 This model transforms the CT mesh to the candidate pose and measures the distance from every ultrasound-derived 3D bone-surface point to its closest location on the mesh triangles. The returned cost is the root-mean-square of all point-to-surface distances in millimetres. It is one-way: measured ultrasound points must agree with the mesh, but unobserved regions of the mesh do not require corresponding ultrasound points.
+
+| Parameter | Type | Meaning |
+| --- | --- | --- |
+| `nearestVertexCount` | Fixed | Positive integer number of nearby mesh vertices used to seed the local candidate-triangle search for each measured 3D point. A larger value searches a wider mesh neighborhood but increases evaluation time. |
+
+This model requires aligned 3D bone-surface measurements from `boneSurfaceMatFile`.
 
 ### `intensityICP_v1`: combined intensity and 3D distance
 
@@ -146,21 +163,17 @@ cost = weight * intensityCoverageCost
 
 A `weight` of `1` selects only the intensity-and-coverage term, while `0` selects only the normalized point-to-mesh term.
 
-### Cost-function parameters
+| Parameter | Type | Meaning |
+| --- | --- | --- |
+| `intensityMax` | Fixed | Positive intensity used to normalize the mean sampled brightness, normally `255` for 8-bit images. |
+| `nearestVertexCount` | Fixed | Positive integer number of nearby mesh vertices used to seed the local candidate-triangle search for each measured 3D point. A larger value searches a wider mesh neighborhood but increases evaluation time. |
+| `distanceReferenceMm` | Fixed | Positive distance in millimetres used to normalize the point-to-mesh RMSE before it is combined with the dimensionless intensity term. |
+| `minReferencePixels` | Hyperparameter | Positive minimum intersection-pixel count at the initial pose. A plane below this threshold is inactive and does not contribute to the cost. |
+| `nMinPixels` | Hyperparameter | Positive minimum pixel count required at the current candidate pose. An active plane below this threshold is marked as missing. |
+| `lambdaMissing` | Hyperparameter | Nonnegative multiplier applied to the fraction of active planes marked as missing. `0` disables this penalty. |
+| `weight` | Hyperparameter | Convex blend coefficient in the inclusive range `[0, 1]`; it weights the intensity term, while `1 - weight` weights the normalized 3D-distance term. |
 
-Fixed parameters have one value for the complete experiment. Hyperparameters are arrays of candidate values; the experiment planner includes them in the Cartesian product used to create parameter combinations. The validator for each model defines the accepted names, value rules, and column order.
-
-| Parameter | Type | Used by | Meaning |
-| --- | --- | --- | --- |
-| `intensityMax` | Fixed | `intensityCov_v1`, `intensityICP_v1` | Positive intensity used to normalize the mean sampled brightness, normally `255` for 8-bit images. |
-| `nearestVertexCount` | Fixed | `ICPLike_v1`, `intensityICP_v1` | Positive integer number of nearby mesh vertices used to seed the local candidate-triangle search for each measured 3D point. A larger value searches a wider mesh neighborhood but increases evaluation time. |
-| `distanceReferenceMm` | Fixed | `intensityICP_v1` | Positive distance in millimetres used to normalize the point-to-mesh RMSE before it is combined with the dimensionless intensity term. |
-| `minReferencePixels` | Hyperparameter | `intensityCov_v1`, `intensityICP_v1` | Positive minimum intersection-pixel count at the initial pose. A plane below this threshold is inactive and does not contribute to the cost. |
-| `nMinPixels` | Hyperparameter | `intensityCov_v1`, `intensityICP_v1` | Positive minimum pixel count required at the current candidate pose. An active plane below this threshold is marked as missing. |
-| `lambdaMissing` | Hyperparameter | `intensityCov_v1`, `intensityICP_v1` | Nonnegative multiplier applied to the fraction of active planes marked as missing. `0` disables this penalty. |
-| `weight` | Hyperparameter | `intensityICP_v1` | Convex blend coefficient in the inclusive range `[0, 1]`; it weights the intensity term, while `1 - weight` weights the normalized 3D-distance term. |
-
-`intensityCov_v1` does not require `boneSurfaceMatFile`. Both `ICPLike_v1` and `intensityICP_v1` require aligned 3D bone-surface measurements, so their registry definitions set `requiresBoneSurface` to `true`.
+This model requires aligned 3D bone-surface measurements from `boneSurfaceMatFile`.
 
 ## Running the project
 
