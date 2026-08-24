@@ -102,61 +102,7 @@ one experiment run. Supporting functions are grouped one level below:
 - `inputPreparation/` loads and prepares reusable optimization inputs.
 - `poseEvaluation/` converts optimizer states and evaluates candidate-pose geometry.
 - `evaluationMetric/` and `evaluationPlot/` analyze saved results.
-- `tests/` verifies the active pipeline, while `legacy/` stores inactive historical code.
-
-### Cost-function parameters
-
-The active JSON files use `schemaVersion: 4`. Each experiment selects one
-cost model explicitly and separates fixed settings from values that participate
-in the hyperparameter sweep.
-
-| Setting | Meaning |
-| --- | --- |
-| `intersection.normalFacingToleranceDeg` | Maximum angular difference used when deciding whether an intersected mesh face points toward the ultrasound probe. In a sweep configuration this may contain several candidate values. |
-| `cost.model` | Versioned cost-model name: `intensityCov_v1`, `ICPLike_v1`, or `intensityICP_v1`. |
-| `cost.fixedParameters.intensityMax` | Intensity used to normalize sampled ultrasound brightness, for example `255` for an 8-bit image. This remains fixed during the complete experiment. |
-| `cost.fixedParameters.nearestVertexCount` | Number of nearby CT mesh vertices used by the 3D point-cloud cost. |
-| `cost.fixedParameters.distanceReferenceMm` | Reference distance used to make the point-cloud RMSE dimensionless in the combined model. |
-| `cost.hyperparameters.minReferencePixels` | Minimum number of probe-facing pixels at the coarse initial pose for an image plane to participate in the final cost average. |
-| `cost.hyperparameters.nMinPixels` | Minimum number of probe-facing pixels required at the current candidate pose before an active plane is marked as missing. |
-| `cost.hyperparameters.lambdaMissing` | Weight applied to the fraction of active planes marked as missing. A larger value discourages candidate poses that explain only a small subset of the images. |
-| `cost.hyperparameters.weight` | Combined-model blend: `1` uses only intensity coverage, while `0` uses only normalized point-cloud distance. |
-
-The minimized scalar objective has the high-level form:
-
-```text
-cost = negative mean intensity-and-coverage score
-       + lambdaMissing * mean missing-plane penalty
-```
-
-The combined model evaluates both existing costs and minimizes:
-
-```text
-combinedCost = weight * intensityCoverageCost
-             + (1 - weight) * (pointCloudCostMm / distanceReferenceMm)
-```
-
-`normalFacingToleranceDeg` and the fields under `cost.hyperparameters` may be
-arrays in the sweep configuration. The experiment specification retains these
-candidate arrays. Before preparation or optimization, the selected values are
-merged with the fixed settings under `runConfig.cost.parameters`, where every
-value is scalar.
-
-`bonePoseCostFunction` is the stable function called by scripts and CMA-ES.
-It resolves `cost.model` through `getBonePoseCostDefinition` and forwards the
-evaluation to the approved versioned implementation. Each versioned function
-owns one calculation and its local helpers. New models can therefore be
-registered without changing scripts or optimizer code.
-
-Each model-specific validator checks its fixed and swept settings, then returns
-those parameter groups in a documented field order. The planner reads these
-validated fields to create sweep columns, and the runtime-config builder merges
-the selected scalar values without model-specific edits. To add a model, create
-its evaluator and validator, add one registry case, and update the active JSON.
-Combination-level evaluation reads the validator-ordered parameter names from
-the saved experiment plan. This lets new numeric cost hyperparameters flow into
-the evaluation tables without adding model-specific table columns. Heatmap
-choices remain explicit until their later refactoring stage.
+- `tests/` test codes that verifies the active pipeline.
 
 ### Optimizer parameters
 
@@ -175,21 +121,46 @@ The optimizer represents a candidate as a local six-value perturbation `[vx; vy;
 
 The `experiment.seeds` array controls repeated stochastic runs. A one-sweep configuration must contain exactly one parameter combination and one seed. The sweep configuration can contain several values and seeds.
 
-## Processing workflow
+## Supported cost functions
 
-1. **Read and validate the experiment configuration.** The selected JSON file defines the target bone, prepared input files, intersection and cost settings, CMA-ES settings, repeat seeds, and output location. Relative input and output paths are resolved against the configured project root.
+This is an ongoing list. The current framework registers the following three versioned cost models; more models can be added through the extension process described in [Processing workflow](#processing-workflow). Every model returns one scalar objective to CMA-ES, and a lower value is always better.
 
-2. **Create the experiment plan.** For a hyperparameter sweep, the runner builds the Cartesian product of all candidate cost settings and repeats every combination for every configured seed.
+### `intensityCov_v1`: intensity and coverage
 
-3. **Prepare one parameter combination.** The pipeline loads the accepted ultrasound snapshots, CT mesh, and coarse registration; matches them by bone code; validates the image planes and rigid transforms; and calculates the initial probe-facing intersection-pixel counts. Prepared estimation data is reused for every seed belonging to that combination.
+This model intersects the candidate CT mesh with each tracked ultrasound plane and keeps pixels produced by probe-facing mesh faces. It rewards intersections that are both bright and sufficiently covered relative to the intersection at the coarse initial pose. It also penalizes active image planes whose candidate intersection contains too few pixels. This prevents a very small but bright intersection from appearing better than a physically meaningful one.
 
-4. **Evaluate a candidate pose.** A six-value optimizer state is converted to a rigid CT-to-reference transform. The CT mesh is moved into the reference frame and intersected with every finite ultrasound image plane. Only segments produced by probe-facing mesh faces are retained and rasterized to image pixels.
+For every active plane, the score is the normalized mean pixel intensity multiplied by its capped coverage ratio. The final cost is the negative mean score plus the weighted fraction of missing planes.
 
-5. **Calculate the objective value.** Ultrasound intensities are sampled at the selected pixels. Each active plane receives a normalized brightness-and-coverage score, while planes with too few current pixels receive a missing-intersection penalty. Lower total cost is better.
+### `ICPLike_v1`: one-way 3D point-to-mesh distance
 
-6. **Optimize the bone pose.** Bounded CMA-ES repeatedly proposes candidate perturbations and calls the cost function. The best candidate found during the run is converted into final CT-to-reference and bone-to-reference transforms.
+This model transforms the CT mesh to the candidate pose and measures the distance from every ultrasound-derived 3D bone-surface point to its closest location on the mesh triangles. The returned cost is the root-mean-square of all point-to-surface distances in millimetres. It is one-way: measured ultrasound points must agree with the mesh, but unobserved regions of the mesh do not require corresponding ultrasound points.
 
-7. **Validate and save the results.** Successful sweep runs re-evaluate the best pose to save detailed per-plane geometry and cost terms. Ground truth remains separate for later comparison. Every attempted run and the experiment summary are saved immediately so completed work remains available if a later run fails.
+### `intensityICP_v1`: combined intensity and 3D distance
+
+This model evaluates both models above at the same candidate pose. It divides the point-to-mesh RMSE by a reference distance to make that term dimensionless, then returns the convex blend
+
+```text
+cost = weight * intensityCoverageCost
+     + (1 - weight) * (pointCloudRmseMm / distanceReferenceMm)
+```
+
+A `weight` of `1` selects only the intensity-and-coverage term, while `0` selects only the normalized point-to-mesh term.
+
+### Cost-function parameters
+
+Fixed parameters have one value for the complete experiment. Hyperparameters are arrays of candidate values; the experiment planner includes them in the Cartesian product used to create parameter combinations. The validator for each model defines the accepted names, value rules, and column order.
+
+| Parameter | Type | Used by | Meaning |
+| --- | --- | --- | --- |
+| `intensityMax` | Fixed | `intensityCov_v1`, `intensityICP_v1` | Positive intensity used to normalize the mean sampled brightness, normally `255` for 8-bit images. |
+| `nearestVertexCount` | Fixed | `ICPLike_v1`, `intensityICP_v1` | Positive integer number of nearby mesh vertices used to seed the local candidate-triangle search for each measured 3D point. A larger value searches a wider mesh neighborhood but increases evaluation time. |
+| `distanceReferenceMm` | Fixed | `intensityICP_v1` | Positive distance in millimetres used to normalize the point-to-mesh RMSE before it is combined with the dimensionless intensity term. |
+| `minReferencePixels` | Hyperparameter | `intensityCov_v1`, `intensityICP_v1` | Positive minimum intersection-pixel count at the initial pose. A plane below this threshold is inactive and does not contribute to the cost. |
+| `nMinPixels` | Hyperparameter | `intensityCov_v1`, `intensityICP_v1` | Positive minimum pixel count required at the current candidate pose. An active plane below this threshold is marked as missing. |
+| `lambdaMissing` | Hyperparameter | `intensityCov_v1`, `intensityICP_v1` | Nonnegative multiplier applied to the fraction of active planes marked as missing. `0` disables this penalty. |
+| `weight` | Hyperparameter | `intensityICP_v1` | Convex blend coefficient in the inclusive range `[0, 1]`; it weights the intensity term, while `1 - weight` weights the normalized 3D-distance term. |
+
+`intensityCov_v1` does not require `boneSurfaceMatFile`. Both `ICPLike_v1` and `intensityICP_v1` require aligned 3D bone-surface measurements, so their registry definitions set `requiresBoneSurface` to `true`.
 
 ## Running the project
 
@@ -207,7 +178,7 @@ Edit one of the following files:
 
 - `config/optconfig_oneSweep_intensityCov.json` for an intensity-only interactive run.
 - `config/optconfig_oneSweep_ICPLike.json` for an ICP-like point-cloud interactive run.
-- `config/optconfig_oneSweep_intensityICP.json` for the combined interactive run selected by the one-sweep script.
+- `config/optconfig_oneSweep_intensityICP.json` for a combined interactive run after selecting it in the one-sweep script.
 - `config/optconfig_hyperparamSweep_intensityCov.json` for the current unattended multi-parameter, multi-seed experiment.
 
 The file under `config/legacy/` records the former schemaVersion02 layout for historical
@@ -364,3 +335,114 @@ runResult
 For a completed run, `optimizationResult` contains the initial and best pose vectors, initial and best rigid transforms, search bounds, sigma, raw CMA-ES outputs, seed, and optimizer output paths. `final.costDetails` contains the final candidate mesh, per-plane intersection geometry, sampled-pixel counts, brightness and coverage values, missing-plane flags, and separated cost terms.
 
 For a failed run, the same overall shape is retained where practical, while unavailable numeric values are stored as `NaN` or empty structs. The `error` group records whether the failure occurred during preparation or optimization and preserves the MATLAB exception information.
+
+## Processing workflow
+
+The one-sweep and hyperparameter-sweep scripts share the same configuration, planning, input-preparation, optimizer, and cost-dispatch framework. The sweep runner adds loops over parameter combinations and random seeds, plus immediate result saving. The following sequence shows the main function calls; display-only calls in the interactive one-sweep script are omitted.
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant Runner as One-sweep script or experiment runner
+    participant Config as Configuration functions
+    participant Registry as getBonePoseCostDefinition
+    participant Inputs as prepareBonePoseOptimizationInputs
+    participant Optimizer as runBonePoseOptimization / CMA-ES
+    participant Dispatcher as bonePoseCostFunction
+    participant Model as Versioned cost evaluator
+
+    User->>Runner: Run one-sweep or hyperparameter-sweep script
+    Runner->>Config: createBonePoseOptimizationExperimentConfig(JSON)
+    Config->>Registry: Resolve model and validator
+    Registry-->>Config: Evaluator, validator, and input requirements
+    Config->>Config: Validate fixed parameters and hyperparameter arrays
+    Runner->>Config: createBonePoseOptimizationExperimentPlan(experimentSpec)
+    Config->>Config: Expand parameter combinations and repeat seeds
+
+    loop Each parameter combination (exactly one for one-sweep)
+        Runner->>Config: createBonePoseOptimizationRunConfig(...)
+        Runner->>Inputs: Prepare estimation and validation data once
+        Runner->>Dispatcher: Evaluate the initial pose
+        loop Each random seed (exactly one for one-sweep)
+            Runner->>Optimizer: Optimize with the seed-specific config
+            loop Every CMA-ES candidate pose
+                Optimizer->>Dispatcher: bonePoseCostFunction(poseVector, data, config)
+                Dispatcher->>Registry: Resolve config.cost.model
+                Registry-->>Dispatcher: Versioned evaluator handle
+                Dispatcher->>Model: Evaluate candidate geometry and objective
+                Model-->>Dispatcher: Scalar cost and diagnostic details
+                Dispatcher-->>Optimizer: Cost, where lower is better
+            end
+            Optimizer-->>Runner: Best pose, transforms, cost, and diagnostics
+            alt Hyperparameter sweep
+                Runner->>Dispatcher: Re-evaluate the best pose for details
+                Runner->>Runner: Save runResult and refresh summary
+            else Interactive one-sweep
+                Runner->>Runner: Display and retain results in the workspace
+            end
+        end
+    end
+```
+
+At configuration time, `createBonePoseOptimizationExperimentConfig` asks the registry for the selected model's validator. The validator separates values that stay fixed from arrays that should be swept. `createBonePoseOptimizationExperimentPlan` then builds every combination, and `createBonePoseOptimizationRunConfig` merges one combination into `config.cost.parameters`, the scalar structure seen by a cost evaluator.
+
+At optimization time, CMA-ES changes only the six-value local pose perturbation. `bonePoseCostFunction` is the stable public dispatcher: it reads `config.cost.model`, resolves the registered evaluator, and forwards the pose, prepared data, and scalar configuration. Consequently, the optimizer and runner do not need model-specific branches.
+
+### Adding a new cost function
+
+1. **Create a versioned evaluator in `functions/bonePoseOptimization/costModels/`.** Use the interface `[cost, details] = cost_<name>_vNN(poseVector, data, config)`. Perform file loading and other reusable preparation before optimization, not inside this frequently called function. Return one finite numeric scalar, keep the convention that lower is better, and place useful intermediate values in `details` so a saved best pose can be inspected.
+
+   ```matlab
+   function [cost, details] = cost_example_v01(poseVector, data, config)
+   %COST_EXAMPLE_V01 Evaluate one candidate pose with the example model.
+   % This evaluator converts the candidate pose into one finite objective so
+   % the shared CMA-ES framework can optimize a new source of evidence.
+   %
+   % Inputs:
+   %   poseVector - Six-value perturbation around the initial CT pose.
+   %   data       - Prepared inputs reused by every candidate evaluation.
+   %   config     - Scalar runtime settings, including cost.parameters.
+   %
+   % Outputs:
+   %   cost       - Finite scalar objective value; lower is better.
+   %   details    - Diagnostic values needed to inspect this evaluation.
+
+   % Convert and evaluate the candidate here using prepared data and scalar settings.
+   % Replace this placeholder with the model's actual calculation.
+   cost = 0;
+
+   % Save enough context to explain the returned scalar after optimization.
+   details.costSettings = config.cost.parameters;
+   details.status = 'example_cost_computed';
+   end
+   ```
+
+2. **Create its matching validator beside the evaluator.** Use the interface `[fixedParameters, hyperparameters] = validate_cost_<name>_vNN(fixedParameters, hyperparameters)`. Require the exact supported field names, validate every value, convert fixed values to scalar doubles, and normalize each hyperparameter candidate list to a row vector. Rebuild the output structs in the order in which their fields should appear in experiment tables. An empty struct is valid when the model has no fixed parameters or no hyperparameters.
+
+3. **Register the model in `getBonePoseCostDefinition.m`.** Add one `switch` case that assigns the public model name, evaluator, validator, and input requirement:
+
+   ```matlab
+   case 'example_v1'
+       definition.modelName                   = 'example_v1';
+       definition.evaluateFcn                 = @cost_example_v01;
+       definition.validateExperimentConfigFcn = @validate_cost_example_v01;
+       definition.requiresBoneSurface         = false;
+   ```
+
+   Set `requiresBoneSurface` to `true` only when the evaluator needs the aligned measurements from `boneSurfaceMatFile`. If a model needs other prepared data that the framework does not yet provide, extend `prepareBonePoseOptimizationInputs` once so the data is loaded and validated before CMA-ES starts.
+
+4. **Create or copy a schema-version-4 JSON configuration.** Set `cost.model` to the registered name. Put one scalar value per fixed parameter under `fixedParameters` and one or more candidate values per sweepable parameter under `hyperparameters`:
+
+   ```json
+   "cost": {
+     "model": "example_v1",
+     "fixedParameters": {
+       "fixedScale": 1.0
+     },
+     "hyperparameters": {
+       "exampleWeight": [0.25, 0.5, 0.75]
+     }
+   }
+   ```
+
+5. **Test the integration before running a long sweep.** Extend `functions/bonePoseOptimization/tests/testBonePoseCostDispatcher.m` to check the registry mapping and dispatcher, then run a one-sweep configuration with a small CMA-ES evaluation budget. Confirm that the initial and optimized costs are finite, the expected parameter columns appear in the plan, required inputs are enforced, and `details` explains the returned value. Once that passes, use the hyperparameter-sweep entry point without changing the optimizer or experiment runner.
