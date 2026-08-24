@@ -62,6 +62,22 @@ end
 end
 
 
+function testPointCloud3DModelIsRegistered(testCase)
+%TESTPOINTCLOUD3DMODELISREGISTERED Check the new registry connection.
+% testCase provides MATLAB verification methods. This test confirms that
+% configuration loading and cost dispatch resolve the intended functions.
+
+definition = getBonePoseCostDefinition('pointCloud3D_v1');
+
+% Check every registry field because each one serves a different pipeline stage.
+verifyEqual(testCase, definition.modelName, 'pointCloud3D_v1');
+verifyEqual(testCase, definition.evaluateFcn, @bonePoseCost3DPointCloudV1);
+verifyEqual(testCase, definition.validateExperimentConfigFcn, ...
+    @validateBonePoseCost3DPointCloudV1Config);
+verifyTrue(testCase, definition.requiresBoneSurface);
+end
+
+
 function testPublicCostPreservesOptionalConfigAndEdgeCases(testCase)
 %TESTPUBLICCOSTPRESERVESOPTIONALCONFIGANDEDGECASES Check established behavior.
 % testCase supplies prepared real inputs and verification methods. This

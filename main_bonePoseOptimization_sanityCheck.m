@@ -6,7 +6,7 @@ addpath(genpath('functions'));
 %% CREATE CONFIGURATION
 
 % Use the same active configuration schema as the unattended experiment workflow.
-configFilePath = fullfile(pwd, 'config', 'bonePoseOptimizationSanityCheckConfig.json');
+configFilePath = fullfile(pwd, 'config', 'bonePoseOptimizationSanityCheckConfig_pointCloudCost.json');
 % Read the candidate values and explicit repeat seed from the sanity-check file.
 experimentSpec = createBonePoseOptimizationExperimentConfig(configFilePath);
 % Expand the specification through the same plan builder used by the experiment.
@@ -43,7 +43,6 @@ displayBonePoseOptimizationIntersections(data, initialPoseVector, config, 'Initi
 
 % Evaluate the initial pose once so its cost and geometry remain available in the workspace.
 [initialCost, initialCostDetails] = bonePoseCostFunction(initialPoseVector, data, config);
-initialEvaluation = initialCostDetails.poseEvaluation;
 
 % Print a short input summary before the longer optimization starts.
 fprintf('Optimizing bone %s with %d ultrasound planes.\n', data.bone, numel(data.imagePlanesRef));

@@ -15,15 +15,11 @@
     "normalFacingToleranceDeg": [30]
   },
   "cost": {
-    "model": "intensityCoverage_v1",
+    "model": "pointCloud3D_v1",
     "fixedParameters": {
-      "intensityMax": 255
+      "nearestVertexCount": 20
     },
-    "hyperparameters": {
-      "minReferencePixels": [50],
-      "nMinPixels": [100],
-      "lambdaMissing": [1.0]
-    }
+    "hyperparameters": {}
   },
   "logging": {
     "printPreparationProgress": false,
@@ -40,8 +36,8 @@
     "parforWorkers": 6
   },
   "experiment": {
-    "name": "sanityCheck_intensity",
+    "name": "sanityCheck_pointCloud",
     "seeds": [1001],
-    "outputFolder": "output/bonePoseOptimization/sanityChecks"
+    "outputFolder": "output/bonePoseOptimization/sanityChecks/pointCloud3D_v1"
   }
 }

@@ -12,7 +12,7 @@ end
 
 
 function setupOnce(testCase)
-%SETUPONCE Load the two active configurations once for this suite.
+%SETUPONCE Load the active configurations once for this suite.
 % testCase receives the project root, configuration paths, and parsed
 % configurations in TestData. This function has no output.
 
@@ -26,13 +26,18 @@ sweepConfigPath = fullfile(projectRoot, 'config', ...
     'bonePoseOptimizationHyperparamSweepConfig.json');
 sanityConfigPath = fullfile(projectRoot, 'config', ...
     'bonePoseOptimizationSanityCheckConfig.json');
+pointCloudSanityConfigPath = fullfile(projectRoot, 'config', ...
+    'bonePoseOptimizationPointCloud3DSanityCheckConfig.json');
 testCase.TestData.projectRoot = projectRoot;
 testCase.TestData.sweepConfigPath = sweepConfigPath;
 testCase.TestData.sanityConfigPath = sanityConfigPath;
+testCase.TestData.pointCloudSanityConfigPath = pointCloudSanityConfigPath;
 testCase.TestData.sweepSpec = ...
     createBonePoseOptimizationExperimentConfig(sweepConfigPath);
 testCase.TestData.sanitySpec = ...
     createBonePoseOptimizationExperimentConfig(sanityConfigPath);
+testCase.TestData.pointCloudSanitySpec = ...
+    createBonePoseOptimizationExperimentConfig(pointCloudSanityConfigPath);
 end
 
 
@@ -59,6 +64,33 @@ verifyEqual(testCase, fieldnames(spec.cost.fixedParameters).', ...
     {'intensityMax'});
 verifyEqual(testCase, fieldnames(spec.cost.hyperparameters).', ...
     {'minReferencePixels', 'nMinPixels', 'lambdaMissing'});
+end
+
+
+function testPointCloudSanityConfigurationDefinesOneReproducibleRun(testCase)
+%TESTPOINTCLOUDSANITYCONFIGURATIONDEFINESONEREPRODUCIBLERUN Check the 3D sanity setup.
+% testCase supplies the parsed point-cloud specification and verification
+% methods. This test keeps fixed settings separate from sweep parameters.
+
+spec = testCase.TestData.pointCloudSanitySpec;
+plan = createBonePoseOptimizationExperimentPlan(spec);
+runConfig = createBonePoseOptimizationRunConfig( ...
+    spec, plan.combinations(1, :), plan.runs.seed(1));
+
+% The sanity file must select the 3D model and provide its required surface input.
+verifyEqual(testCase, spec.cost.model, 'pointCloud3D_v1');
+verifyTrue(testCase, isfile(spec.input.boneSurfaceMatFile));
+verifyEqual(testCase, spec.experiment.name, 'pointCloud3D_v1_sanity');
+
+% K stays fixed, while the retained intersection tolerance creates only one plan row.
+verifyEqual(testCase, spec.cost.fixedParameters.nearestVertexCount, 20);
+verifyEmpty(testCase, fieldnames(spec.cost.hyperparameters));
+verifyEqual(testCase, plan.parameterNames, {'normalFacingToleranceDeg'});
+verifyEqual(testCase, plan.numberOfCombinations, 1);
+verifyEqual(testCase, plan.numberOfSeeds, 1);
+verifyEqual(testCase, plan.numberOfRuns, 1);
+verifyEqual(testCase, runConfig.cost.parameters.nearestVertexCount, 20);
+verifyEqual(testCase, runConfig.optimizer.seed, 1001);
 end
 
 
