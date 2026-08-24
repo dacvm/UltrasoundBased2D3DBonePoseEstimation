@@ -15,17 +15,14 @@
     "normalFacingToleranceDeg": [30]
   },
   "cost": {
-    "model": "intensityPointCloud_v1",
+    "model": "intensityCoverage_v1",
     "fixedParameters": {
-      "intensityMax": 255,
-      "nearestVertexCount": 20,
-      "distanceReferenceMm": 5.0
+      "intensityMax": 255
     },
     "hyperparameters": {
-      "minReferencePixels": [50],
-      "nMinPixels": [100],
-      "lambdaMissing": [1.0],
-      "weight": [0.25]
+      "minReferencePixels": [50, 100],
+      "nMinPixels": [100, 200],
+      "lambdaMissing": [1.0, 1.5]
     }
   },
   "logging": {
@@ -37,14 +34,14 @@
     "rotationBoundDeg": 10.0,
     "translationSigmaMm": 3.0,
     "rotationSigmaDeg": 3.0,
-    "populationSize": 4,
-    "maxFunctionEvaluations": 10,
-    "useParfor": false,
+    "populationSize": 3,
+    "maxFunctionEvaluations": 5,
+    "useParfor": true,
     "parforWorkers": 6
   },
   "experiment": {
-    "name": "sanityCheck_intensityPointCloud",
-    "seeds": [1001],
-    "outputFolder": "output/bonePoseOptimization/sanityChecks/intensityPointCloud_v1"
+    "name": "intensityICP_v01",
+    "seeds": [1001, 1002, 1003],
+    "outputFolder": "output/bonePoseOptimization/experiments"
   }
 }

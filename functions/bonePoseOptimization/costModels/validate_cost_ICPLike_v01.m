@@ -1,5 +1,5 @@
-function [fixedParameters, hyperparameters] = validateBonePoseCost3DPointCloudV1Config(fixedParameters, hyperparameters)
-%VALIDATEBONEPOSECOST3DPOINTCLOUDV1CONFIG Validate 3D point-cloud V1 settings.
+function [fixedParameters, hyperparameters] = validate_cost_ICPLike_v01(fixedParameters, hyperparameters)
+%VALIDATE_COST_ICPLIKE_V01 Validate 3D point-cloud V1 settings.
 % This function checks the configuration owned by the 3D point-cloud V1
 % cost model. It is needed so the shared configuration reader can validate
 % this model without knowing its model-specific settings.
@@ -41,7 +41,7 @@ function validateFieldNames(sourceStruct, expectedNames, displayName)
 % accepted fields, and displayName identifies the group in error messages.
 
 if ~isstruct(sourceStruct) || ~isscalar(sourceStruct)
-    error('validateBonePoseCost3DPointCloudV1Config:InvalidParameterGroup', ...
+    error('validate_cost_ICPLike_v01:InvalidParameterGroup', ...
         '%s must be a JSON object.', displayName);
 end
 
@@ -50,12 +50,12 @@ missingNames    = setdiff(expectedNames, actualNames, 'stable');
 unexpectedNames = setdiff(actualNames, expectedNames, 'stable');
 
 if ~isempty(missingNames)
-    error('validateBonePoseCost3DPointCloudV1Config:MissingParameter', ...
+    error('validate_cost_ICPLike_v01:MissingParameter', ...
           '%s is missing: %s.', displayName, strjoin(missingNames, ', '));
 end
 
 if ~isempty(unexpectedNames)
-    error('validateBonePoseCost3DPointCloudV1Config:UnexpectedParameter', ...
+    error('validate_cost_ICPLike_v01:UnexpectedParameter', ...
           '%s contains an unsupported field: %s.', displayName, strjoin(unexpectedNames, ', '));
 end
 end

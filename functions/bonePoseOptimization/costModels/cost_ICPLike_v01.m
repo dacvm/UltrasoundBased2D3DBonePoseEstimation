@@ -1,5 +1,5 @@
-function [cost, details] = bonePoseCost3DPointCloudV1(poseVector, data, config)
-%BONEPOSECOST3DPOINTCLOUDV1 Measure how well one candidate bone pose matches 3D ultrasound points.
+function [cost, details] = cost_ICPLike_v01(poseVector, data, config)
+%COST_ICPLIKE_V01 Measure how well one candidate bone pose matches 3D ultrasound points.
 % The optimizer calls this function with one possible six-parameter pose. The
 % function moves the CT bone mesh to that pose, finds the closest location on
 % the mesh surface for every measured ultrasound point, and combines those
@@ -58,21 +58,21 @@ poseVector = poseVector(:);
 % setup error instead of a less helpful missing-field error later in the code.
 requiredDataFields = {'boneMeshCT', 'T_CT_ref_initial', 'T_bone_CT', 'hasBoneSurface', 'boneSurfaceMeasurements'};
 if ~isstruct(data) || ~all(isfield(data, requiredDataFields))
-    error('bonePoseCost3DPointCloudV1:MissingPreparedData', ...
+    error('cost_ICPLike_v01:MissingPreparedData', ...
           'The prepared data is missing fields required by the 3D point-cloud cost.');
 end
 
 % The mesh must retain both its vertices and triangle connectivity, which is
 % why this function requires a triangulation rather than a plain point cloud.
 if ~isa(data.boneMeshCT, 'triangulation')
-    error('bonePoseCost3DPointCloudV1:InvalidBoneMesh', ...
+    error('cost_ICPLike_v01:InvalidBoneMesh', ...
           'data.boneMeshCT must be a triangulation.');
 end
 
 % Stop when no measured surface is available: without measured points there
 % is no geometric evidence from which this cost can be calculated.
 if ~data.hasBoneSurface || isempty(data.boneSurfaceMeasurements)
-    error('bonePoseCost3DPointCloudV1:MissingBoneSurface', ...
+    error('cost_ICPLike_v01:MissingBoneSurface', ...
           'The prepared data does not contain aligned 3D bone-surface measurements.');
 end
 
@@ -80,11 +80,11 @@ end
 % KNNSEARCH performs the coarse local search; DISTANCEPOINTMESH performs the
 % final point-to-triangle calculation inside that local mesh region.
 if exist('knnsearch', 'file') ~= 2
-    error('bonePoseCost3DPointCloudV1:MissingKnnsearch', ...
+    error('cost_ICPLike_v01:MissingKnnsearch', ...
           'knnsearch is required for the KNN candidate-face search.');
 end
 if exist('distancePointMesh', 'file') ~= 2
-    error('bonePoseCost3DPointCloudV1:MissingDistancePointMesh', ...
+    error('cost_ICPLike_v01:MissingDistancePointMesh', ...
           'distancePointMesh from GEOM3D is required for point-to-mesh distances.');
 end
 
@@ -152,7 +152,7 @@ for measurementIndex = 1:numberOfMeasurements
     % Accept an empty N-by-3 array, but reject a wrong shape, nonnumeric data,
     % NaN, or Inf because any of those would invalidate the distance result.
     if ~isnumeric(currentSurfacePointsRef) || size(currentSurfacePointsRef, 2) ~= 3 || ~all(isfinite(currentSurfacePointsRef), 'all')
-        error('bonePoseCost3DPointCloudV1:InvalidBoneSurface', ...
+        error('cost_ICPLike_v01:InvalidBoneSurface', ...
               'Measurement %d must contain finite N-by-3 points in ref.', measurementIndex);
     end
 
@@ -169,7 +169,7 @@ boneSurfacePointsRef = vertcat(surfacePointCells{:});
 % Individual measurements may be empty, but the pooled dataset must contain
 % at least one point or the cost would be undefined.
 if isempty(boneSurfacePointsRef)
-    error('bonePoseCost3DPointCloudV1:EmptyBoneSurface', ...
+    error('cost_ICPLike_v01:EmptyBoneSurface', ...
           'The aligned measurements contain no 3D bone-surface points.');
 end
 
@@ -215,7 +215,7 @@ for pointIndex = 1:numberOfSurfacePoints
     % Every valid triangulation vertex should have an attached face. Treat an
     % empty patch as a mesh/setup error instead of returning a misleading cost.
     if isempty(currentCandidateFaceIndices)
-        error('bonePoseCost3DPointCloudV1:EmptyCandidateFaces', ...
+        error('cost_ICPLike_v01:EmptyCandidateFaces', ...
               'Measured point %d has no candidate mesh faces.', pointIndex);
     end
 
@@ -245,7 +245,7 @@ correspondenceRuntimeSeconds = toc(correspondenceTimer);
 if any(~isfinite(pointToSurfaceDistancesMm)) || ...
         any(pointToSurfaceDistancesMm < 0) || ...
         any(~isfinite(closestBonePointsRef), 'all')
-    error('bonePoseCost3DPointCloudV1:InvalidCorrespondence', ...
+    error('cost_ICPLike_v01:InvalidCorrespondence', ...
           'The KNN candidate-face search produced an invalid correspondence.');
 end
 
@@ -257,7 +257,7 @@ reconstructedDistancesMm = vecnorm(boneSurfacePointsRef - closestBonePointsRef, 
 % Allow only a tiny numerical rounding difference in millimetres.
 distanceAgreementToleranceMm = 1e-9;
 if any(abs(reconstructedDistancesMm - pointToSurfaceDistancesMm) > distanceAgreementToleranceMm)
-    error('bonePoseCost3DPointCloudV1:DistanceMismatch', ...
+    error('cost_ICPLike_v01:DistanceMismatch', ...
           'A reported distance does not match its point correspondence.');
 end
 

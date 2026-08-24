@@ -15,7 +15,7 @@ setup = load(setupFilePath, 'data', 'config', 'initialPoseVector');
 % later pass to the public cost function.
 requiredSetupFields = {'data', 'config', 'initialPoseVector'};
 if ~all(isfield(setup, requiredSetupFields))
-    error('demo_bonePoseCost3DPointCloudV1:InvalidSetup', ...
+    error('demo_cost_ICPLike_v01:InvalidSetup', ...
           'optimization_setup.mat must contain data, config, and initialPoseVector.');
 end
 
@@ -27,7 +27,7 @@ initialPoseVector = setup.initialPoseVector;
 
 % Request details so this demonstration can display exactly the candidate
 % geometry and measurements used to calculate the scalar cost.
-[cost, details] = bonePoseCost3DPointCloudV1(initialPoseVector, data, config);
+[cost, details] = cost_ICPLike_v01(initialPoseVector, data, config);
 
 %% DISPLAY THE SETUP IN THE REFERENCE FRAME
 

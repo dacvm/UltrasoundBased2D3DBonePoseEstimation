@@ -1,5 +1,5 @@
-function [fixedParameters, hyperparameters] = validateBonePoseCostIntensityCoverageV1Config(fixedParameters, hyperparameters)
-%VALIDATEBONEPOSECOSTINTENSITYCOVERAGEV1CONFIG Validate V1 experiment settings.
+function [fixedParameters, hyperparameters] = validate_cost_intensityCov_v01(fixedParameters, hyperparameters)
+%VALIDATE_COST_INTENSITYCOV_V01 Validate V1 experiment settings.
 % This function checks the fixed and sweepable parameters owned by the
 % intensity-and-coverage V1 cost model. It is needed so the shared config
 % reader does not need to know the meaning of each model-specific setting.
@@ -45,7 +45,7 @@ function validateFieldNames(sourceStruct, expectedNames, displayName)
 % accepted fields, and displayName identifies the group in error messages.
 
 if ~isstruct(sourceStruct) || ~isscalar(sourceStruct)
-    error('validateBonePoseCostIntensityCoverageV1Config:InvalidParameterGroup', ...
+    error('validate_cost_intensityCov_v01:InvalidParameterGroup', ...
         '%s must be a JSON object.', displayName);
 end
 
@@ -54,12 +54,12 @@ missingNames    = setdiff(expectedNames, actualNames, 'stable');
 unexpectedNames = setdiff(actualNames, expectedNames, 'stable');
 
 if ~isempty(missingNames)
-    error('validateBonePoseCostIntensityCoverageV1Config:MissingParameter', ...
+    error('validate_cost_intensityCov_v01:MissingParameter', ...
           '%s is missing: %s.', displayName, strjoin(missingNames, ', '));
 end
 
 if ~isempty(unexpectedNames)
-    error('validateBonePoseCostIntensityCoverageV1Config:UnexpectedParameter', ...
+    error('validate_cost_intensityCov_v01:UnexpectedParameter', ...
           '%s contains an unsupported field: %s.', displayName, strjoin(unexpectedNames, ', '));
 end
 end
@@ -76,15 +76,15 @@ validateattributes(rawCandidates, {'numeric'}, ...
     {'vector', 'nonempty', 'real', 'finite'}, mfilename, displayName);
 
 if requirePositive && any(rawCandidates <= 0)
-    error('validateBonePoseCostIntensityCoverageV1Config:NonpositiveCandidate', ...
+    error('validate_cost_intensityCov_v01:NonpositiveCandidate', ...
           '%s values must be positive.', displayName);
 elseif ~requirePositive && any(rawCandidates < 0)
-    error('validateBonePoseCostIntensityCoverageV1Config:NegativeCandidate', ...
+    error('validate_cost_intensityCov_v01:NegativeCandidate', ...
           '%s values must be nonnegative.', displayName);
 end
 
 if numel(unique(rawCandidates)) ~= numel(rawCandidates)
-    error('validateBonePoseCostIntensityCoverageV1Config:DuplicateCandidate', ...
+    error('validate_cost_intensityCov_v01:DuplicateCandidate', ...
         '%s must not contain duplicate values.', displayName);
 end
 

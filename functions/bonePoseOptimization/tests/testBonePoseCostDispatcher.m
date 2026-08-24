@@ -12,7 +12,7 @@ end
 
 
 function setupOnce(testCase)
-%SETUPONCE Prepare one active sanity-check dataset for dispatcher tests.
+%SETUPONCE Prepare one active one-sweep dataset for dispatcher tests.
 % testCase stores the resolved scalar configuration and prepared data for
 % all tests in this suite. This function has no output.
 
@@ -20,9 +20,9 @@ testFilePath = mfilename('fullpath');
 projectRoot = fileparts(fileparts(fileparts(fileparts(testFilePath))));
 addpath(genpath(fullfile(projectRoot, 'functions')));
 
-% Use the maintained sanity-check configuration rather than legacy inputs.
+% Use the maintained one-sweep configuration rather than legacy inputs.
 configPath = fullfile(projectRoot, 'config', ...
-    'bonePoseOptimization_sanityCheckConfig_intensityCoverageCost.json');
+    'optconfig_oneSweep_intensityCov.json');
 experimentSpec = createBonePoseOptimizationExperimentConfig(configPath);
 experimentPlan = createBonePoseOptimizationExperimentPlan(experimentSpec);
 config = createBonePoseOptimizationRunConfig( ...
@@ -30,9 +30,9 @@ config = createBonePoseOptimizationRunConfig( ...
 data = prepareBonePoseOptimizationInputs(config);
 
 % Resolve the combined scalar settings separately while reusing the same
-% prepared measurements, because both sanity files select identical inputs.
+% prepared measurements, because both one-sweep files select identical inputs.
 combinedConfigPath = fullfile(projectRoot, 'config', ...
-    'bonePoseOptimization_sanityCheckConfig_intensityPointCloudCost.json');
+    'optconfig_oneSweep_intensityICP.json');
 combinedSpec = createBonePoseOptimizationExperimentConfig(combinedConfigPath);
 combinedPlan = createBonePoseOptimizationExperimentPlan(combinedSpec);
 combinedConfig = createBonePoseOptimizationRunConfig( ...
@@ -67,7 +67,7 @@ for poseIndex = 1:size(poseVectors, 2)
     poseVector = poseVectors(:, poseIndex);
     [publicCost, publicDetails] = bonePoseCostFunction(poseVector, data, config);
     [versionedCost, versionedDetails] = ...
-        bonePoseCostIntensityCoverageV1(poseVector, data, config);
+        cost_intensityCov_v01(poseVector, data, config);
 
     verifyCostEvaluationEqual(testCase, publicCost, publicDetails, ...
         versionedCost, versionedDetails);
@@ -84,9 +84,9 @@ definition = getBonePoseCostDefinition('pointCloud3D_v1');
 
 % Check every registry field because each one serves a different pipeline stage.
 verifyEqual(testCase, definition.modelName, 'pointCloud3D_v1');
-verifyEqual(testCase, definition.evaluateFcn, @bonePoseCost3DPointCloudV1);
+verifyEqual(testCase, definition.evaluateFcn, @cost_ICPLike_v01);
 verifyEqual(testCase, definition.validateExperimentConfigFcn, ...
-    @validateBonePoseCost3DPointCloudV1Config);
+    @validate_cost_ICPLike_v01);
 verifyTrue(testCase, definition.requiresBoneSurface);
 end
 
@@ -100,9 +100,9 @@ definition = getBonePoseCostDefinition('intensityPointCloud_v1');
 
 verifyEqual(testCase, definition.modelName, 'intensityPointCloud_v1');
 verifyEqual(testCase, definition.evaluateFcn, ...
-    @bonePoseCostIntensityPointCloudV1);
+    @cost_intensityICP_v01);
 verifyEqual(testCase, definition.validateExperimentConfigFcn, ...
-    @validateBonePoseCostIntensityPointCloudV1Config);
+    @validate_cost_intensityICP_v01);
 verifyTrue(testCase, definition.requiresBoneSurface);
 end
 
@@ -119,9 +119,9 @@ poseVector = zeros(6, 1);
 
 % Calculate each established term independently before evaluating the blend.
 [intensityCost, intensityDetails] = ...
-    bonePoseCostIntensityCoverageV1(poseVector, data, config);
+    cost_intensityCov_v01(poseVector, data, config);
 [pointCloudCostMm, pointCloudDetails] = ...
-    bonePoseCost3DPointCloudV1(poseVector, data, config);
+    cost_ICPLike_v01(poseVector, data, config);
 [combinedCost, combinedDetails] = ...
     bonePoseCostFunction(poseVector, data, config);
 
@@ -149,13 +149,13 @@ verifyEqual(testCase, intensityDetails.boneMeshRefCandidate.Points, ...
 % Weight endpoints retain their simple mathematical meaning.
 firstOnlyConfig = config;
 firstOnlyConfig.cost.parameters.weight = 1;
-firstOnlyCost = bonePoseCostIntensityPointCloudV1( ...
+firstOnlyCost = cost_intensityICP_v01( ...
     poseVector, data, firstOnlyConfig);
 verifyEqual(testCase, firstOnlyCost, intensityCost);
 
 secondOnlyConfig = config;
 secondOnlyConfig.cost.parameters.weight = 0;
-secondOnlyCost = bonePoseCostIntensityPointCloudV1( ...
+secondOnlyCost = cost_intensityICP_v01( ...
     poseVector, data, secondOnlyConfig);
 verifyEqual(testCase, secondOnlyCost, expectedPointCloudNormalized);
 end
@@ -171,7 +171,7 @@ data = testCase.TestData.data;
 % Omitting config must continue to use the configuration stored with data.
 [publicCost, publicDetails] = bonePoseCostFunction(zeros(6, 1), data);
 [versionedCost, versionedDetails] = ...
-    bonePoseCostIntensityCoverageV1(zeros(6, 1), data);
+    cost_intensityCov_v01(zeros(6, 1), data);
 verifyCostEvaluationEqual(testCase, publicCost, publicDetails, ...
     versionedCost, versionedDetails);
 
@@ -180,7 +180,7 @@ noActiveData = data;
 noActiveData.nInitialIntersectionPixels(:) = 0;
 [publicCost, publicDetails] = bonePoseCostFunction(zeros(6, 1), noActiveData);
 [versionedCost, versionedDetails] = ...
-    bonePoseCostIntensityCoverageV1(zeros(6, 1), noActiveData);
+    cost_intensityCov_v01(zeros(6, 1), noActiveData);
 verifyCostEvaluationEqual(testCase, publicCost, publicDetails, ...
     versionedCost, versionedDetails);
 
@@ -192,7 +192,7 @@ verifyError(testCase, ...
     @() bonePoseCostFunction(zeros(6, 1), invalidData), ...
     'bonePoseCostFunction:InitialCountSizeMismatch');
 verifyError(testCase, ...
-    @() bonePoseCostIntensityCoverageV1(zeros(6, 1), invalidData), ...
+    @() cost_intensityCov_v01(zeros(6, 1), invalidData), ...
     'bonePoseCostFunction:InitialCountSizeMismatch');
 
 % A runtime configuration must identify the model before geometry is evaluated.

@@ -1,5 +1,5 @@
-function [cost, details] = bonePoseCostIntensityPointCloudV1(poseVector, data, config)
-%BONEPOSECOSTINTENSITYPOINTCLOUDV1 Combine image and 3D surface agreement.
+function [cost, details] = cost_intensityICP_v01(poseVector, data, config)
+%COST_INTENSITYICP_V01 Combine image and 3D surface agreement.
 % This model evaluates the existing intensity-coverage and 3D point-cloud
 % costs at the same candidate pose. It converts the point-cloud RMSE from
 % millimetres to a dimensionless value, then blends both costs with one
@@ -22,8 +22,8 @@ function [cost, details] = bonePoseCostIntensityPointCloudV1(poseVector, data, c
 
 % Use the same pose, data, and scalar settings so both terms describe one
 % candidate bone pose under identical experiment conditions.
-[intensityCoverageCost, intensityCoverageDetails] = bonePoseCostIntensityCoverageV1(poseVector, data, config);
-[pointCloudCostMm, pointCloudDetails] = bonePoseCost3DPointCloudV1(poseVector, data, config);
+[intensityCoverageCost, intensityCoverageDetails] = cost_intensityCov_v01(poseVector, data, config);
+[pointCloudCostMm, pointCloudDetails] = cost_ICPLike_v01(poseVector, data, config);
 
 %% NORMALIZE AND COMBINE THE COSTS
 

@@ -21,28 +21,28 @@ testFilePath = mfilename('fullpath');
 projectRoot = fileparts(fileparts(fileparts(fileparts(testFilePath))));
 addpath(genpath(fullfile(projectRoot, 'functions')));
 
-% Parse the active sweep and sanity configurations used by the main scripts.
+% Parse the active multi-sweep and one-sweep configurations used by the main scripts.
 sweepConfigPath = fullfile(projectRoot, 'config', ...
     'bonePoseOptimization_hyperparamSweepConfig.json');
-sanityConfigPath = fullfile(projectRoot, 'config', ...
-    'bonePoseOptimization_sanityCheckConfig_intensityCoverageCost.json');
-pointCloudSanityConfigPath = fullfile(projectRoot, 'config', ...
-    'bonePoseOptimization_sanityCheckConfig_pointCloudCost.json');
-combinedSanityConfigPath = fullfile(projectRoot, 'config', ...
-    'bonePoseOptimization_sanityCheckConfig_intensityPointCloudCost.json');
+oneSweepConfigPath = fullfile(projectRoot, 'config', ...
+    'optconfig_oneSweep_intensityCov.json');
+ICPLikeOneSweepConfigPath = fullfile(projectRoot, 'config', ...
+    'optconfig_oneSweep_ICPLike.json');
+combinedOneSweepConfigPath = fullfile(projectRoot, 'config', ...
+    'optconfig_oneSweep_intensityICP.json');
 testCase.TestData.projectRoot = projectRoot;
 testCase.TestData.sweepConfigPath = sweepConfigPath;
-testCase.TestData.sanityConfigPath = sanityConfigPath;
-testCase.TestData.pointCloudSanityConfigPath = pointCloudSanityConfigPath;
-testCase.TestData.combinedSanityConfigPath = combinedSanityConfigPath;
+testCase.TestData.oneSweepConfigPath = oneSweepConfigPath;
+testCase.TestData.ICPLikeOneSweepConfigPath = ICPLikeOneSweepConfigPath;
+testCase.TestData.combinedOneSweepConfigPath = combinedOneSweepConfigPath;
 testCase.TestData.sweepSpec = ...
     createBonePoseOptimizationExperimentConfig(sweepConfigPath);
-testCase.TestData.sanitySpec = ...
-    createBonePoseOptimizationExperimentConfig(sanityConfigPath);
-testCase.TestData.pointCloudSanitySpec = ...
-    createBonePoseOptimizationExperimentConfig(pointCloudSanityConfigPath);
-testCase.TestData.combinedSanitySpec = ...
-    createBonePoseOptimizationExperimentConfig(combinedSanityConfigPath);
+testCase.TestData.oneSweepSpec = ...
+    createBonePoseOptimizationExperimentConfig(oneSweepConfigPath);
+testCase.TestData.ICPLikeOneSweepSpec = ...
+    createBonePoseOptimizationExperimentConfig(ICPLikeOneSweepConfigPath);
+testCase.TestData.combinedOneSweepSpec = ...
+    createBonePoseOptimizationExperimentConfig(combinedOneSweepConfigPath);
 end
 
 
@@ -72,20 +72,20 @@ verifyEqual(testCase, fieldnames(spec.cost.hyperparameters).', ...
 end
 
 
-function testPointCloudSanityConfigurationDefinesOneReproducibleRun(testCase)
-%TESTPOINTCLOUDSANITYCONFIGURATIONDEFINESONEREPRODUCIBLERUN Check the 3D sanity setup.
+function testICPLikeOneSweepConfigurationDefinesOneReproducibleRun(testCase)
+%TESTICPLIKEONESWEEPCONFIGURATIONDEFINESONEREPRODUCIBLERUN Check the ICP-like setup.
 % testCase supplies the parsed point-cloud specification and verification
 % methods. This test keeps fixed settings separate from sweep parameters.
 
-spec = testCase.TestData.pointCloudSanitySpec;
+spec = testCase.TestData.ICPLikeOneSweepSpec;
 plan = createBonePoseOptimizationExperimentPlan(spec);
 runConfig = createBonePoseOptimizationRunConfig( ...
     spec, plan.combinations(1, :), plan.runs.seed(1));
 
-% The sanity file must select the 3D model and provide its required surface input.
+% The one-sweep file must select the 3D model and provide its required surface input.
 verifyEqual(testCase, spec.cost.model, 'pointCloud3D_v1');
 verifyTrue(testCase, isfile(spec.input.boneSurfaceMatFile));
-verifyEqual(testCase, spec.experiment.name, 'sanityCheck_pointCloud');
+verifyEqual(testCase, spec.experiment.name, 'oneSweep_ICPLike_v01');
 
 % K stays fixed, while the retained intersection tolerance creates only one plan row.
 verifyEqual(testCase, spec.cost.fixedParameters.nearestVertexCount, 20);
@@ -99,13 +99,13 @@ verifyEqual(testCase, runConfig.optimizer.seed, 1001);
 end
 
 
-function testCombinedSanityConfigurationDefinesOneReproducibleRun(testCase)
-%TESTCOMBINEDSANITYCONFIGURATIONDEFINESONEREPRODUCIBLERUN Check the blend setup.
+function testCombinedOneSweepConfigurationDefinesOneReproducibleRun(testCase)
+%TESTCOMBINEDONESWEEPCONFIGURATIONDEFINESONEREPRODUCIBLERUN Check the blend setup.
 % testCase supplies the parsed combined-model specification and verification
 % methods. This test confirms that every component and blend setting reaches
-% the one scalar runtime configuration used by the sanity check.
+% the one scalar runtime configuration used by the one-sweep workflow.
 
-spec = testCase.TestData.combinedSanitySpec;
+spec = testCase.TestData.combinedOneSweepSpec;
 plan = createBonePoseOptimizationExperimentPlan(spec);
 runConfig = createBonePoseOptimizationRunConfig( ...
     spec, plan.combinations(1, :), plan.runs.seed(1));
@@ -113,7 +113,7 @@ runConfig = createBonePoseOptimizationRunConfig( ...
 % The model needs both ultrasound images and the aligned 3D surface artifact.
 verifyEqual(testCase, spec.cost.model, 'intensityPointCloud_v1');
 verifyTrue(testCase, isfile(spec.input.boneSurfaceMatFile));
-verifyEqual(testCase, spec.experiment.name, 'sanityCheck_intensityPointCloud');
+verifyEqual(testCase, spec.experiment.name, 'oneSweep_intensityICP_v01');
 
 % Fixed settings define the two component models and point-cloud normalization.
 verifyEqual(testCase, fieldnames(spec.cost.fixedParameters).', ...
@@ -132,7 +132,7 @@ verifyEqual(testCase, plan.numberOfCombinations, 1);
 verifyEqual(testCase, plan.numberOfSeeds, 1);
 verifyEqual(testCase, plan.numberOfRuns, 1);
 
-% One sanity-check run uses the agreed point-cloud emphasis and no parfor.
+% One combined run uses the agreed point-cloud emphasis and no parfor.
 verifyEqual(testCase, runConfig.cost.parameters.weight, 0.25);
 verifyEqual(testCase, runConfig.cost.parameters.distanceReferenceMm, 5);
 verifyEqual(testCase, runConfig.optimizer.seed, 1001);
@@ -199,13 +199,13 @@ verifyTrue(testCase, all(cellfun(@isscalar, ...
 end
 
 
-function testSanityConfigurationCreatesOneSeededRun(testCase)
-%TESTSANITYCONFIGURATIONCREATESONESEEDEDRUN Check the interactive workflow contract.
-% testCase supplies the parsed sanity-check specification. This function has
+function testOneSweepConfigurationCreatesOneSeededRun(testCase)
+%TESTONESWEEPCONFIGURATIONCREATESONESEEDEDRUN Check the interactive workflow contract.
+% testCase supplies the parsed one-sweep specification. This function has
 % no output.
 
-% The sanity-check script requires one combination and one repeat seed.
-spec = testCase.TestData.sanitySpec;
+% The one-sweep script requires one combination and one repeat seed.
+spec = testCase.TestData.oneSweepSpec;
 plan = createBonePoseOptimizationExperimentPlan(spec);
 verifyEqual(testCase, plan.numberOfCombinations, 1);
 verifyEqual(testCase, plan.numberOfSeeds, 1);
@@ -255,7 +255,7 @@ rawConfig.cost.hyperparameters.lambdaMissing = [1 1];
 % Reject the duplicate while reporting that the candidate list is the problem.
 verifyError(testCase, ...
     @() createBonePoseOptimizationExperimentConfig(temporaryConfigPath), ...
-    'validateBonePoseCostIntensityCoverageV1Config:DuplicateCandidate');
+    'validate_cost_intensityCov_v01:DuplicateCandidate');
 clear temporaryConfigCleanup;
 end
 
@@ -397,7 +397,7 @@ rawConfig.cost.hyperparameters = rmfield( ...
     writeTemporaryJson(rawConfig); %#ok<ASGLU>
 verifyError(testCase, ...
     @() createBonePoseOptimizationExperimentConfig(temporaryConfigPath), ...
-    'validateBonePoseCostIntensityCoverageV1Config:MissingParameter');
+    'validate_cost_intensityCov_v01:MissingParameter');
 clear temporaryConfigCleanup;
 
 rawConfig = jsondecode(fileread(testCase.TestData.sweepConfigPath));
@@ -406,7 +406,7 @@ rawConfig.cost.hyperparameters.misspelledParameter = 1;
     writeTemporaryJson(rawConfig); %#ok<ASGLU>
 verifyError(testCase, ...
     @() createBonePoseOptimizationExperimentConfig(temporaryConfigPath), ...
-    'validateBonePoseCostIntensityCoverageV1Config:UnexpectedParameter');
+    'validate_cost_intensityCov_v01:UnexpectedParameter');
 clear temporaryConfigCleanup;
 end
 

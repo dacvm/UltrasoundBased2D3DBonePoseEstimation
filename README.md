@@ -8,7 +8,7 @@ For each candidate bone pose, the pipeline places the CT mesh in the experiment 
 
 The project currently provides two entry points:
 
-- `main_bonePoseOptimization_sanityCheck.m` runs one interactive configuration and displays the initial and optimized geometry. Use this first when checking a new dataset or cost-function change.
+- `main_bonePoseOptimization_oneSweep.m` runs one interactive configuration and displays the initial and optimized geometry. Use this first when checking a new dataset or cost-function change.
 - `main_bonePoseOptimization_hyperparamSweep.m` runs every configured cost-parameter combination for every configured random seed and saves an analysis-ready experiment summary.
 
 This repository is research and development code. The cost function, optimization settings, and validation strategy are expected to evolve while the capabilities and limitations of B-mode ultrasound for bone registration are investigated.
@@ -173,7 +173,7 @@ The optimizer represents a candidate as a local six-value perturbation `[vx; vy;
 | `useParfor` | Requests parallel candidate evaluation when the Parallel Computing Toolbox and a valid license are available. |
 | `parforWorkers` | Worker limit passed to the bundled parallel CMA-ES implementation. |
 
-The `experiment.seeds` array controls repeated stochastic runs. The sanity-check configuration must contain exactly one parameter combination and one seed. The sweep configuration can contain several values and seeds.
+The `experiment.seeds` array controls repeated stochastic runs. A one-sweep configuration must contain exactly one parameter combination and one seed. The sweep configuration can contain several values and seeds.
 
 ## Processing workflow
 
@@ -205,9 +205,9 @@ The external CMA-ES implementation used by this project is already stored under 
 
 Edit one of the following files:
 
-- `config/bonePoseOptimization_sanityCheckConfig_intensityCoverageCost.json` for an intensity-only interactive run.
-- `config/bonePoseOptimization_sanityCheckConfig_pointCloudCost.json` for a point-cloud-only interactive run.
-- `config/bonePoseOptimization_sanityCheckConfig_intensityPointCloudCost.json` for the combined interactive run selected by the sanity-check script.
+- `config/optconfig_oneSweep_intensityCov.json` for an intensity-only interactive run.
+- `config/optconfig_oneSweep_ICPLike.json` for an ICP-like point-cloud interactive run.
+- `config/optconfig_oneSweep_intensityICP.json` for the combined interactive run selected by the one-sweep script.
 - `config/bonePoseOptimization_hyperparamSweepConfig.json` for the current unattended multi-parameter, multi-seed experiment.
 
 The file under `config/legacy/` records the former schemaVersion02 layout for historical
@@ -223,13 +223,13 @@ Both main scripts build the configuration path from `pwd`. Change MATLAB's curre
 cd('D:/path/to/bmodeimage_3dspace')
 ```
 
-### 3. Run the sanity check first
+### 3. Run one sweep first
 
 ```matlab
-main_bonePoseOptimization_sanityCheck
+main_bonePoseOptimization_oneSweep
 ```
 
-The sanity check requires exactly one hyperparameter combination and one seed. It displays the initial setup and intersections, runs CMA-ES, leaves the numeric result in the MATLAB workspace, and displays the optimized estimate alongside the separately stored validation data.
+The one-sweep workflow requires exactly one hyperparameter combination and one seed. It displays the initial setup and intersections, runs CMA-ES, leaves the numeric result in the MATLAB workspace, and displays the optimized estimate alongside the separately stored validation data.
 
 Use this workflow to confirm that:
 
@@ -249,12 +249,12 @@ The sweep creates a new timestamped experiment on every invocation. It does not 
 
 ## Output structure
 
-### Sanity-check output
+### One-sweep output
 
-The sanity check stores raw CMA-ES files below the configured output folder. Its main `optimizationResult`, initial details, prepared data, and validation data remain in the MATLAB workspace unless the user saves them separately.
+The one-sweep workflow stores raw CMA-ES files below the configured output folder. Its main `optimizationResult`, initial details, prepared data, and validation data remain in the MATLAB workspace unless the user saves them separately.
 
 ```text
-output/bonePoseOptimization/sanityChecks/
+output/bonePoseOptimization/oneSweeps/
 +-- run_yyyyMMdd_HHmmss/
     +-- variablescmaes.mat
     +-- outcmaes*.dat

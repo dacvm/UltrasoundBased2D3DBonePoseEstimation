@@ -1,5 +1,5 @@
-function [cost, details] = bonePoseCostIntensityCoverageV1(poseVector, data, config)
-%BONEPOSECOSTINTENSITYCOVERAGEV1 Evaluate the version 1 intensity cost.
+function [cost, details] = cost_intensityCov_v01(poseVector, data, config)
+%COST_INTENSITYCOV_V01 Evaluate the version 1 intensity cost.
 % This function contains the original intensity-and-coverage objective so
 % its scientific behavior remains separate from the stable optimizer entry
 % point. It is needed so future cost models can be added without rewriting

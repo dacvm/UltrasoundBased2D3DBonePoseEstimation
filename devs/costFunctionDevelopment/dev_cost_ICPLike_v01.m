@@ -15,7 +15,7 @@ addpath(genpath(fullfile(projectRoot, 'functions')));
 % Stop early when the saved fixture does not contain the aligned 3D surface
 % measurements required by this development workflow.
 if ~isfield(data, 'hasBoneSurface') || ~data.hasBoneSurface || ~isfield(data, 'boneSurfaceMeasurements') || isempty(data.boneSurfaceMeasurements)
-    error('dev_bonePoseCost3DPointCloudV1:MissingBoneSurface', ...
+    error('dev_cost_ICPLike_v01:MissingBoneSurface', ...
           'The loaded optimization setup does not contain aligned bone-surface measurements.');
 end
 
@@ -36,7 +36,7 @@ boneSurfacePointsRef = vertcat(surfacePointCells{:});
 % An available artifact may still contain only empty surface records, which
 % would make the requested setup display misleading.
 if isempty(boneSurfacePointsRef)
-    error('dev_bonePoseCost3DPointCloudV1:EmptyBoneSurface', ...
+    error('dev_cost_ICPLike_v01:EmptyBoneSurface', ...
           'The loaded optimization setup contains no 3D bone-surface points.');
 end
 
@@ -153,7 +153,7 @@ drawnow;
 % correspondence search. The helper finds the nearest point anywhere on the
 % triangular surface instead of restricting the result to mesh vertices.
 if exist('distancePointMesh', 'file') ~= 2
-    error('dev_bonePoseCost3DPointCloudV1:MissingDistancePointMesh', ...
+    error('dev_cost_ICPLike_v01:MissingDistancePointMesh', ...
           'distancePointMesh is not available on the MATLAB path.');
 end
 
@@ -207,7 +207,7 @@ for measurementIndex = 1:numberOfMeasurements
     % Stop immediately if the external geometry helper returns an invalid
     % result, because silently continuing would corrupt the future cost.
     if any(~isfinite(currentDistancesMm)) || any(currentDistancesMm < 0) || any(~isfinite(currentClosestBonePointsRef), 'all')
-        error('dev_bonePoseCost3DPointCloudV1:InvalidCorrespondence', ...
+        error('dev_cost_ICPLike_v01:InvalidCorrespondence', ...
               'Measurement %d produced an invalid point-to-surface correspondence.', ...
               measurementIndex);
     end
@@ -235,7 +235,7 @@ pointToSurfaceDistancesMm = vertcat(pointToSurfaceDistanceMmCells{:});
 
 % Verify that flattening did not break the point-to-correspondence alignment.
 if size(closestBonePointsRef, 1) ~= size(boneSurfacePointsRef, 1) || numel(pointToSurfaceDistancesMm) ~= size(boneSurfacePointsRef, 1)
-    error('dev_bonePoseCost3DPointCloudV1:CorrespondenceCountMismatch', ...
+    error('dev_cost_ICPLike_v01:CorrespondenceCountMismatch', ...
           'The flattened correspondence count does not match the measured point count.');
 end
 
@@ -244,7 +244,7 @@ end
 reconstructedDistancesMm = vecnorm( boneSurfacePointsRef - closestBonePointsRef, 2, 2);
 distanceAgreementToleranceMm = 1e-9;
 if any(abs(reconstructedDistancesMm - pointToSurfaceDistancesMm) > distanceAgreementToleranceMm)
-    error('dev_bonePoseCost3DPointCloudV1:DistanceMismatch', ...
+    error('dev_cost_ICPLike_v01:DistanceMismatch', ...
           'A reported distance does not match its measured-to-closest-point pair.');
 end
 
@@ -391,7 +391,7 @@ for pointIndex = 1:numberOfMeasuredSurfacePoints
     currentCandidateFaceIndices = unique([currentAttachmentCells{:}]);
 
     if isempty(currentCandidateFaceIndices)
-        error('dev_bonePoseCost3DPointCloudV1:EmptyKnnCandidateFaces', ...
+        error('dev_cost_ICPLike_v01:EmptyKnnCandidateFaces', ...
               'Measured point %d has no candidate faces.', pointIndex);
     end
 
@@ -488,7 +488,7 @@ knnMatchToleranceMm    = 1e-6;
 % A local subset cannot produce a meaningfully shorter distance than the
 % global all-face search. A violation indicates an implementation problem.
 if any(knnDistanceErrorMm < -knnMatchToleranceMm)
-    error('dev_bonePoseCost3DPointCloudV1:KnnDistanceBelowReference', ...
+    error('dev_cost_ICPLike_v01:KnnDistanceBelowReference', ...
           'A KNN candidate-face distance is smaller than the all-face reference.');
 end
 

@@ -41,20 +41,20 @@ end
 switch modelName
     case 'intensityCoverage_v1'
         definition.modelName                    = 'intensityCoverage_v1';
-        definition.evaluateFcn                  = @bonePoseCostIntensityCoverageV1;
-        definition.validateExperimentConfigFcn  = @validateBonePoseCostIntensityCoverageV1Config;
+        definition.evaluateFcn                  = @cost_intensityCov_v01;
+        definition.validateExperimentConfigFcn  = @validate_cost_intensityCov_v01;
         definition.requiresBoneSurface          = false;
 
     case 'pointCloud3D_v1'
         definition.modelName                    = 'pointCloud3D_v1';
-        definition.evaluateFcn                  = @bonePoseCost3DPointCloudV1;
-        definition.validateExperimentConfigFcn  = @validateBonePoseCost3DPointCloudV1Config;
+        definition.evaluateFcn                  = @cost_ICPLike_v01;
+        definition.validateExperimentConfigFcn  = @validate_cost_ICPLike_v01;
         definition.requiresBoneSurface          = true;
 
     case 'intensityPointCloud_v1'
         definition.modelName                    = 'intensityPointCloud_v1';
-        definition.evaluateFcn                  = @bonePoseCostIntensityPointCloudV1;
-        definition.validateExperimentConfigFcn  = @validateBonePoseCostIntensityPointCloudV1Config;
+        definition.evaluateFcn                  = @cost_intensityICP_v01;
+        definition.validateExperimentConfigFcn  = @validate_cost_intensityICP_v01;
         definition.requiresBoneSurface          = true;
 
     otherwise
