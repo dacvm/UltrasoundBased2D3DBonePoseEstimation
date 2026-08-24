@@ -26,7 +26,7 @@ addpath(genpath(fullfile(projectRoot, 'functions')));
 
 % Prepare the current standardized tibia inputs only once because intersection work is slow.
 configPath = fullfile(projectRoot, 'config', ...
-    'bonePoseOptimizationSanityCheckConfig.json');
+    'bonePoseOptimization_sanityCheckConfig_intensityCoverageCost.json');
 experimentSpec = createBonePoseOptimizationExperimentConfig(configPath);
 experimentPlan = createBonePoseOptimizationExperimentPlan(experimentSpec);
 config = createBonePoseOptimizationRunConfig( ...

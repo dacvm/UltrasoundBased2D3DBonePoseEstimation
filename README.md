@@ -106,26 +106,34 @@ one experiment run. Supporting functions are grouped one level below:
 
 ### Cost-function parameters
 
-The cost function rewards bright, well-covered probe-facing mesh intersections and penalizes active ultrasound planes that have too few current intersection pixels.
-
-The two active JSON files use `schemaVersion: 4`. Each experiment selects one
+The active JSON files use `schemaVersion: 4`. Each experiment selects one
 cost model explicitly and separates fixed settings from values that participate
 in the hyperparameter sweep.
 
 | Setting | Meaning |
 | --- | --- |
 | `intersection.normalFacingToleranceDeg` | Maximum angular difference used when deciding whether an intersected mesh face points toward the ultrasound probe. In a sweep configuration this may contain several candidate values. |
-| `cost.model` | Versioned cost-model name. The current model is `intensityCoverage_v1`. |
+| `cost.model` | Versioned cost-model name: `intensityCoverage_v1`, `pointCloud3D_v1`, or `intensityPointCloud_v1`. |
 | `cost.fixedParameters.intensityMax` | Intensity used to normalize sampled ultrasound brightness, for example `255` for an 8-bit image. This remains fixed during the complete experiment. |
+| `cost.fixedParameters.nearestVertexCount` | Number of nearby CT mesh vertices used by the 3D point-cloud cost. |
+| `cost.fixedParameters.distanceReferenceMm` | Reference distance used to make the point-cloud RMSE dimensionless in the combined model. |
 | `cost.hyperparameters.minReferencePixels` | Minimum number of probe-facing pixels at the coarse initial pose for an image plane to participate in the final cost average. |
 | `cost.hyperparameters.nMinPixels` | Minimum number of probe-facing pixels required at the current candidate pose before an active plane is marked as missing. |
 | `cost.hyperparameters.lambdaMissing` | Weight applied to the fraction of active planes marked as missing. A larger value discourages candidate poses that explain only a small subset of the images. |
+| `cost.hyperparameters.weight` | Combined-model blend: `1` uses only intensity coverage, while `0` uses only normalized point-cloud distance. |
 
 The minimized scalar objective has the high-level form:
 
 ```text
 cost = negative mean intensity-and-coverage score
        + lambdaMissing * mean missing-plane penalty
+```
+
+The combined model evaluates both existing costs and minimizes:
+
+```text
+combinedCost = weight * intensityCoverageCost
+             + (1 - weight) * (pointCloudCostMm / distanceReferenceMm)
 ```
 
 `normalFacingToleranceDeg` and the fields under `cost.hyperparameters` may be
@@ -136,10 +144,9 @@ value is scalar.
 
 `bonePoseCostFunction` is the stable function called by scripts and CMA-ES.
 It resolves `cost.model` through `getBonePoseCostDefinition` and forwards the
-evaluation to the approved versioned implementation. The current
-`bonePoseCostIntensityCoverageV1` function owns the original calculation and
-its local helpers. New models can therefore be registered without changing
-scripts or optimizer code.
+evaluation to the approved versioned implementation. Each versioned function
+owns one calculation and its local helpers. New models can therefore be
+registered without changing scripts or optimizer code.
 
 Each model-specific validator checks its fixed and swept settings, then returns
 those parameter groups in a documented field order. The planner reads these
@@ -198,8 +205,10 @@ The external CMA-ES implementation used by this project is already stored under 
 
 Edit one of the following files:
 
-- `config/bonePoseOptimizationSanityCheckConfig.json` for one interactive test run.
-- `config/bonePoseOptimizationHyperparamSweepConfig.json` for an unattended multi-parameter, multi-seed experiment.
+- `config/bonePoseOptimization_sanityCheckConfig_intensityCoverageCost.json` for an intensity-only interactive run.
+- `config/bonePoseOptimization_sanityCheckConfig_pointCloudCost.json` for a point-cloud-only interactive run.
+- `config/bonePoseOptimization_sanityCheckConfig_intensityPointCloudCost.json` for the combined interactive run selected by the sanity-check script.
+- `config/bonePoseOptimization_hyperparamSweepConfig.json` for the current unattended multi-parameter, multi-seed experiment.
 
 The file under `config/legacy/` records the former schemaVersion02 layout for historical
 reference only. Active readers do not execute schema-less legacy configs.

@@ -23,21 +23,26 @@ addpath(genpath(fullfile(projectRoot, 'functions')));
 
 % Parse the active sweep and sanity configurations used by the main scripts.
 sweepConfigPath = fullfile(projectRoot, 'config', ...
-    'bonePoseOptimizationHyperparamSweepConfig.json');
+    'bonePoseOptimization_hyperparamSweepConfig.json');
 sanityConfigPath = fullfile(projectRoot, 'config', ...
-    'bonePoseOptimizationSanityCheckConfig.json');
+    'bonePoseOptimization_sanityCheckConfig_intensityCoverageCost.json');
 pointCloudSanityConfigPath = fullfile(projectRoot, 'config', ...
-    'bonePoseOptimizationPointCloud3DSanityCheckConfig.json');
+    'bonePoseOptimization_sanityCheckConfig_pointCloudCost.json');
+combinedSanityConfigPath = fullfile(projectRoot, 'config', ...
+    'bonePoseOptimization_sanityCheckConfig_intensityPointCloudCost.json');
 testCase.TestData.projectRoot = projectRoot;
 testCase.TestData.sweepConfigPath = sweepConfigPath;
 testCase.TestData.sanityConfigPath = sanityConfigPath;
 testCase.TestData.pointCloudSanityConfigPath = pointCloudSanityConfigPath;
+testCase.TestData.combinedSanityConfigPath = combinedSanityConfigPath;
 testCase.TestData.sweepSpec = ...
     createBonePoseOptimizationExperimentConfig(sweepConfigPath);
 testCase.TestData.sanitySpec = ...
     createBonePoseOptimizationExperimentConfig(sanityConfigPath);
 testCase.TestData.pointCloudSanitySpec = ...
     createBonePoseOptimizationExperimentConfig(pointCloudSanityConfigPath);
+testCase.TestData.combinedSanitySpec = ...
+    createBonePoseOptimizationExperimentConfig(combinedSanityConfigPath);
 end
 
 
@@ -80,7 +85,7 @@ runConfig = createBonePoseOptimizationRunConfig( ...
 % The sanity file must select the 3D model and provide its required surface input.
 verifyEqual(testCase, spec.cost.model, 'pointCloud3D_v1');
 verifyTrue(testCase, isfile(spec.input.boneSurfaceMatFile));
-verifyEqual(testCase, spec.experiment.name, 'pointCloud3D_v1_sanity');
+verifyEqual(testCase, spec.experiment.name, 'sanityCheck_pointCloud');
 
 % K stays fixed, while the retained intersection tolerance creates only one plan row.
 verifyEqual(testCase, spec.cost.fixedParameters.nearestVertexCount, 20);
@@ -91,6 +96,47 @@ verifyEqual(testCase, plan.numberOfSeeds, 1);
 verifyEqual(testCase, plan.numberOfRuns, 1);
 verifyEqual(testCase, runConfig.cost.parameters.nearestVertexCount, 20);
 verifyEqual(testCase, runConfig.optimizer.seed, 1001);
+end
+
+
+function testCombinedSanityConfigurationDefinesOneReproducibleRun(testCase)
+%TESTCOMBINEDSANITYCONFIGURATIONDEFINESONEREPRODUCIBLERUN Check the blend setup.
+% testCase supplies the parsed combined-model specification and verification
+% methods. This test confirms that every component and blend setting reaches
+% the one scalar runtime configuration used by the sanity check.
+
+spec = testCase.TestData.combinedSanitySpec;
+plan = createBonePoseOptimizationExperimentPlan(spec);
+runConfig = createBonePoseOptimizationRunConfig( ...
+    spec, plan.combinations(1, :), plan.runs.seed(1));
+
+% The model needs both ultrasound images and the aligned 3D surface artifact.
+verifyEqual(testCase, spec.cost.model, 'intensityPointCloud_v1');
+verifyTrue(testCase, isfile(spec.input.boneSurfaceMatFile));
+verifyEqual(testCase, spec.experiment.name, 'sanityCheck_intensityPointCloud');
+
+% Fixed settings define the two component models and point-cloud normalization.
+verifyEqual(testCase, fieldnames(spec.cost.fixedParameters).', ...
+    {'intensityMax', 'nearestVertexCount', 'distanceReferenceMm'});
+verifyEqual(testCase, spec.cost.fixedParameters.intensityMax, 255);
+verifyEqual(testCase, spec.cost.fixedParameters.nearestVertexCount, 20);
+verifyEqual(testCase, spec.cost.fixedParameters.distanceReferenceMm, 5);
+
+% The generic planner must retain the component parameters followed by weight.
+expectedParameterNames = {'normalFacingToleranceDeg', ...
+    'minReferencePixels', 'nMinPixels', 'lambdaMissing', 'weight'};
+verifyEqual(testCase, fieldnames(spec.cost.hyperparameters).', ...
+    {'minReferencePixels', 'nMinPixels', 'lambdaMissing', 'weight'});
+verifyEqual(testCase, plan.parameterNames, expectedParameterNames);
+verifyEqual(testCase, plan.numberOfCombinations, 1);
+verifyEqual(testCase, plan.numberOfSeeds, 1);
+verifyEqual(testCase, plan.numberOfRuns, 1);
+
+% One sanity-check run uses the agreed point-cloud emphasis and no parfor.
+verifyEqual(testCase, runConfig.cost.parameters.weight, 0.25);
+verifyEqual(testCase, runConfig.cost.parameters.distanceReferenceMm, 5);
+verifyEqual(testCase, runConfig.optimizer.seed, 1001);
+verifyFalse(testCase, runConfig.optimizer.useParfor);
 end
 
 

@@ -22,15 +22,28 @@ addpath(genpath(fullfile(projectRoot, 'functions')));
 
 % Use the maintained sanity-check configuration rather than legacy inputs.
 configPath = fullfile(projectRoot, 'config', ...
-    'bonePoseOptimizationSanityCheckConfig.json');
+    'bonePoseOptimization_sanityCheckConfig_intensityCoverageCost.json');
 experimentSpec = createBonePoseOptimizationExperimentConfig(configPath);
 experimentPlan = createBonePoseOptimizationExperimentPlan(experimentSpec);
 config = createBonePoseOptimizationRunConfig( ...
     experimentSpec, experimentPlan.combinations(1, :));
 data = prepareBonePoseOptimizationInputs(config);
 
+% Resolve the combined scalar settings separately while reusing the same
+% prepared measurements, because both sanity files select identical inputs.
+combinedConfigPath = fullfile(projectRoot, 'config', ...
+    'bonePoseOptimization_sanityCheckConfig_intensityPointCloudCost.json');
+combinedSpec = createBonePoseOptimizationExperimentConfig(combinedConfigPath);
+combinedPlan = createBonePoseOptimizationExperimentPlan(combinedSpec);
+combinedConfig = createBonePoseOptimizationRunConfig( ...
+    combinedSpec, combinedPlan.combinations(1, :));
+combinedData = data;
+combinedData.config = combinedConfig;
+
 testCase.TestData.config = config;
 testCase.TestData.data = data;
+testCase.TestData.combinedConfig = combinedConfig;
+testCase.TestData.combinedData = combinedData;
 end
 
 
@@ -75,6 +88,76 @@ verifyEqual(testCase, definition.evaluateFcn, @bonePoseCost3DPointCloudV1);
 verifyEqual(testCase, definition.validateExperimentConfigFcn, ...
     @validateBonePoseCost3DPointCloudV1Config);
 verifyTrue(testCase, definition.requiresBoneSurface);
+end
+
+
+function testCombinedModelIsRegistered(testCase)
+%TESTCOMBINEDMODELISREGISTERED Check the combined registry connection.
+% testCase provides MATLAB verification methods. This test ensures config
+% loading and the public dispatcher resolve the same combined implementation.
+
+definition = getBonePoseCostDefinition('intensityPointCloud_v1');
+
+verifyEqual(testCase, definition.modelName, 'intensityPointCloud_v1');
+verifyEqual(testCase, definition.evaluateFcn, ...
+    @bonePoseCostIntensityPointCloudV1);
+verifyEqual(testCase, definition.validateExperimentConfigFcn, ...
+    @validateBonePoseCostIntensityPointCloudV1Config);
+verifyTrue(testCase, definition.requiresBoneSurface);
+end
+
+
+function testCombinedCostUsesNormalizedWeightedComponents(testCase)
+%TESTCOMBINEDCOSTUSESNORMALIZEDWEIGHTEDCOMPONENTS Check the blend equation.
+% testCase supplies prepared real measurements and scalar settings. This
+% test compares the combined diagnostics with direct calls to both component
+% models at one fixed pose, then checks both endpoints of the weight range.
+
+data       = testCase.TestData.combinedData;
+config     = testCase.TestData.combinedConfig;
+poseVector = zeros(6, 1);
+
+% Calculate each established term independently before evaluating the blend.
+[intensityCost, intensityDetails] = ...
+    bonePoseCostIntensityCoverageV1(poseVector, data, config);
+[pointCloudCostMm, pointCloudDetails] = ...
+    bonePoseCost3DPointCloudV1(poseVector, data, config);
+[combinedCost, combinedDetails] = ...
+    bonePoseCostFunction(poseVector, data, config);
+
+expectedPointCloudNormalized = pointCloudCostMm / 5;
+expectedCombinedCost = 0.25 * intensityCost + ...
+    0.75 * expectedPointCloudNormalized;
+
+% The saved terms must show the complete calculation without hidden scaling.
+verifyEqual(testCase, combinedDetails.costTerms.intensityCoverageRaw, intensityCost);
+verifyEqual(testCase, combinedDetails.costTerms.pointCloud3DRawMm, pointCloudCostMm);
+verifyEqual(testCase, combinedDetails.costTerms.pointCloud3DNormalized, ...
+    expectedPointCloudNormalized);
+verifyEqual(testCase, combinedDetails.costTerms.combined, expectedCombinedCost);
+verifyEqual(testCase, combinedCost, expectedCombinedCost);
+verifyEqual(testCase, combinedDetails.costModel, 'intensityPointCloud_v1');
+
+% Both component functions must describe exactly the same candidate geometry.
+verifyEqual(testCase, intensityDetails.T_CT_ref_candidate, ...
+    pointCloudDetails.T_CT_ref_candidate);
+verifyEqual(testCase, intensityDetails.boneMeshRefCandidate.ConnectivityList, ...
+    pointCloudDetails.boneMeshRefCandidate.ConnectivityList);
+verifyEqual(testCase, intensityDetails.boneMeshRefCandidate.Points, ...
+    pointCloudDetails.boneMeshRefCandidate.Points);
+
+% Weight endpoints retain their simple mathematical meaning.
+firstOnlyConfig = config;
+firstOnlyConfig.cost.parameters.weight = 1;
+firstOnlyCost = bonePoseCostIntensityPointCloudV1( ...
+    poseVector, data, firstOnlyConfig);
+verifyEqual(testCase, firstOnlyCost, intensityCost);
+
+secondOnlyConfig = config;
+secondOnlyConfig.cost.parameters.weight = 0;
+secondOnlyCost = bonePoseCostIntensityPointCloudV1( ...
+    poseVector, data, secondOnlyConfig);
+verifyEqual(testCase, secondOnlyCost, expectedPointCloudNormalized);
 end
 
 
