@@ -6,7 +6,7 @@ addpath(genpath('functions'));
 %% CREATE CONFIGURATION
 
 % Use the same active configuration schema as the unattended experiment workflow.
-configFilePath = fullfile(pwd, 'config', 'bonePoseOptimizationSanityCheckConfig_pointCloudCost.json');
+configFilePath = fullfile(pwd, 'config', 'bonePoseOptimization_sanityCheckConfig_intensityCoverageCost.json');
 % Read the candidate values and explicit repeat seed from the sanity-check file.
 experimentSpec = createBonePoseOptimizationExperimentConfig(configFilePath);
 % Expand the specification through the same plan builder used by the experiment.
