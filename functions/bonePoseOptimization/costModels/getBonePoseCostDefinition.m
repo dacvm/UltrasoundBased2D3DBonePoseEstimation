@@ -39,20 +39,20 @@ end
 
 % Keep the supported models together so a new developer can find the extension point.
 switch modelName
-    case 'intensityCoverage_v1'
-        definition.modelName                    = 'intensityCoverage_v1';
+    case 'intensityCov_v1'
+        definition.modelName                    = 'intensityCov_v1';
         definition.evaluateFcn                  = @cost_intensityCov_v01;
         definition.validateExperimentConfigFcn  = @validate_cost_intensityCov_v01;
         definition.requiresBoneSurface          = false;
 
-    case 'pointCloud3D_v1'
-        definition.modelName                    = 'pointCloud3D_v1';
+    case 'ICPLike_v1'
+        definition.modelName                    = 'ICPLike_v1';
         definition.evaluateFcn                  = @cost_ICPLike_v01;
         definition.validateExperimentConfigFcn  = @validate_cost_ICPLike_v01;
         definition.requiresBoneSurface          = true;
 
-    case 'intensityPointCloud_v1'
-        definition.modelName                    = 'intensityPointCloud_v1';
+    case 'intensityICP_v1'
+        definition.modelName                    = 'intensityICP_v1';
         definition.evaluateFcn                  = @cost_intensityICP_v01;
         definition.validateExperimentConfigFcn  = @validate_cost_intensityICP_v01;
         definition.requiresBoneSurface          = true;

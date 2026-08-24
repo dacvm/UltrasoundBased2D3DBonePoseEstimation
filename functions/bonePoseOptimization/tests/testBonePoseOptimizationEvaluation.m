@@ -106,7 +106,7 @@ verifyEqual(testCase, ...
     perCombinationTable.Properties.VariableNames(1:numel(expectedLeadingColumns)), ...
     expectedLeadingColumns);
 verifyEqual(testCase, perCombinationTable.costModel, ...
-    repmat("intensityCoverage_v1", 2, 1));
+    repmat("intensityCov_v1", 2, 1));
 end
 
 
@@ -290,7 +290,7 @@ runNumber = (1:5).';
 runId = compose("run_%06d", runNumber);
 combinationNumber = [1; 1; 1; 2; 2];
 combinationId = compose("combination_%04d", combinationNumber);
-costModel = repmat("intensityCoverage_v1", 5, 1);
+costModel = repmat("intensityCov_v1", 5, 1);
 seed = [1001; 1002; 1003; 1001; 1002];
 normalFacingToleranceDeg = 30 * ones(5, 1);
 minReferencePixels = [50; 50; 50; 100; 100];

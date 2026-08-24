@@ -113,7 +113,7 @@ in the hyperparameter sweep.
 | Setting | Meaning |
 | --- | --- |
 | `intersection.normalFacingToleranceDeg` | Maximum angular difference used when deciding whether an intersected mesh face points toward the ultrasound probe. In a sweep configuration this may contain several candidate values. |
-| `cost.model` | Versioned cost-model name: `intensityCoverage_v1`, `pointCloud3D_v1`, or `intensityPointCloud_v1`. |
+| `cost.model` | Versioned cost-model name: `intensityCov_v1`, `ICPLike_v1`, or `intensityICP_v1`. |
 | `cost.fixedParameters.intensityMax` | Intensity used to normalize sampled ultrasound brightness, for example `255` for an 8-bit image. This remains fixed during the complete experiment. |
 | `cost.fixedParameters.nearestVertexCount` | Number of nearby CT mesh vertices used by the 3D point-cloud cost. |
 | `cost.fixedParameters.distanceReferenceMm` | Reference distance used to make the point-cloud RMSE dimensionless in the combined model. |
@@ -208,7 +208,7 @@ Edit one of the following files:
 - `config/optconfig_oneSweep_intensityCov.json` for an intensity-only interactive run.
 - `config/optconfig_oneSweep_ICPLike.json` for an ICP-like point-cloud interactive run.
 - `config/optconfig_oneSweep_intensityICP.json` for the combined interactive run selected by the one-sweep script.
-- `config/bonePoseOptimization_hyperparamSweepConfig.json` for the current unattended multi-parameter, multi-seed experiment.
+- `config/optconfig_hyperparamSweep_intensityCov.json` for the current unattended multi-parameter, multi-seed experiment.
 
 The file under `config/legacy/` records the former schemaVersion02 layout for historical
 reference only. Active readers do not execute schema-less legacy configs.

@@ -23,7 +23,7 @@ addpath(genpath(fullfile(projectRoot, 'functions')));
 
 % Parse the active multi-sweep and one-sweep configurations used by the main scripts.
 sweepConfigPath = fullfile(projectRoot, 'config', ...
-    'bonePoseOptimization_hyperparamSweepConfig.json');
+    'optconfig_hyperparamSweep_intensityCov.json');
 oneSweepConfigPath = fullfile(projectRoot, 'config', ...
     'optconfig_oneSweep_intensityCov.json');
 ICPLikeOneSweepConfigPath = fullfile(projectRoot, 'config', ...
@@ -53,7 +53,7 @@ function testActiveConfigurationKeepsModelCandidatesAndSeeds(testCase)
 % Validate the experiment schema without depending on the user's current sweep values.
 spec = testCase.TestData.sweepSpec;
 verifyEqual(testCase, spec.schemaVersion, 4);
-verifyEqual(testCase, spec.cost.model, 'intensityCoverage_v1');
+verifyEqual(testCase, spec.cost.model, 'intensityCov_v1');
 verifyTrue(testCase, all(spec.intersection.normalFacingToleranceDeg > 0));
 verifyTrue(testCase, all(spec.cost.hyperparameters.minReferencePixels > 0));
 verifyTrue(testCase, all(spec.cost.hyperparameters.nMinPixels > 0));
@@ -83,7 +83,7 @@ runConfig = createBonePoseOptimizationRunConfig( ...
     spec, plan.combinations(1, :), plan.runs.seed(1));
 
 % The one-sweep file must select the 3D model and provide its required surface input.
-verifyEqual(testCase, spec.cost.model, 'pointCloud3D_v1');
+verifyEqual(testCase, spec.cost.model, 'ICPLike_v1');
 verifyTrue(testCase, isfile(spec.input.boneSurfaceMatFile));
 verifyEqual(testCase, spec.experiment.name, 'oneSweep_ICPLike_v01');
 
@@ -111,7 +111,7 @@ runConfig = createBonePoseOptimizationRunConfig( ...
     spec, plan.combinations(1, :), plan.runs.seed(1));
 
 % The model needs both ultrasound images and the aligned 3D surface artifact.
-verifyEqual(testCase, spec.cost.model, 'intensityPointCloud_v1');
+verifyEqual(testCase, spec.cost.model, 'intensityICP_v1');
 verifyTrue(testCase, isfile(spec.input.boneSurfaceMatFile));
 verifyEqual(testCase, spec.experiment.name, 'oneSweep_intensityICP_v01');
 
@@ -188,7 +188,7 @@ for combinationNumber = 1:plan.numberOfCombinations
     selectedRows = plan.runs.combinationNumber == combinationNumber;
     verifyEqual(testCase, plan.runs.seed(selectedRows), [7; 8; 9]);
     verifyEqual(testCase, unique(plan.runs.costModel(selectedRows)), ...
-        "intensityCoverage_v1");
+        "intensityCov_v1");
 end
 
 % Every plan row stores scalar values that can be copied into a runtime config.
@@ -215,7 +215,7 @@ verifyEqual(testCase, plan.numberOfRuns, 1);
 runConfig = createBonePoseOptimizationRunConfig( ...
     spec, plan.combinations(1, :), plan.runs.seed(1));
 verifyTrue(testCase, isscalar(runConfig.intersection.normalFacingToleranceDeg));
-verifyEqual(testCase, runConfig.cost.model, 'intensityCoverage_v1');
+verifyEqual(testCase, runConfig.cost.model, 'intensityCov_v1');
 verifyTrue(testCase, isscalar(runConfig.cost.parameters.intensityMax));
 verifyTrue(testCase, isscalar(runConfig.cost.parameters.minReferencePixels));
 verifyTrue(testCase, isscalar(runConfig.cost.parameters.nMinPixels));
@@ -438,7 +438,7 @@ experimentResult = runBonePoseOptimizationExperiment(spec);
 verifyEqual(testCase, experimentResult.summaryTable.status, ...
     ["failed"; "failed"]);
 verifyEqual(testCase, experimentResult.summaryTable.costModel, ...
-    repmat("intensityCoverage_v1", 2, 1));
+    repmat("intensityCov_v1", 2, 1));
 verifyTrue(testCase, all(isfile(experimentResult.summaryTable.resultFilePath)));
 verifyTrue(testCase, isfile(fullfile( ...
     experimentResult.experimentFolder, 'summary.csv')));
@@ -454,7 +454,7 @@ verifyEqual(testCase, ...
 % Failed runs still record the exact scalar cost configuration that was attempted.
 savedRun = load(char(experimentResult.summaryTable.resultFilePath(1)), 'runResult');
 verifyEqual(testCase, savedRun.runResult.configuration.cost.model, ...
-    'intensityCoverage_v1');
+    'intensityCov_v1');
 verifyTrue(testCase, isscalar( ...
     savedRun.runResult.configuration.cost.parameters.lambdaMissing));
 

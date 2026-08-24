@@ -80,10 +80,10 @@ function testPointCloud3DModelIsRegistered(testCase)
 % testCase provides MATLAB verification methods. This test confirms that
 % configuration loading and cost dispatch resolve the intended functions.
 
-definition = getBonePoseCostDefinition('pointCloud3D_v1');
+definition = getBonePoseCostDefinition('ICPLike_v1');
 
 % Check every registry field because each one serves a different pipeline stage.
-verifyEqual(testCase, definition.modelName, 'pointCloud3D_v1');
+verifyEqual(testCase, definition.modelName, 'ICPLike_v1');
 verifyEqual(testCase, definition.evaluateFcn, @cost_ICPLike_v01);
 verifyEqual(testCase, definition.validateExperimentConfigFcn, ...
     @validate_cost_ICPLike_v01);
@@ -96,9 +96,9 @@ function testCombinedModelIsRegistered(testCase)
 % testCase provides MATLAB verification methods. This test ensures config
 % loading and the public dispatcher resolve the same combined implementation.
 
-definition = getBonePoseCostDefinition('intensityPointCloud_v1');
+definition = getBonePoseCostDefinition('intensityICP_v1');
 
-verifyEqual(testCase, definition.modelName, 'intensityPointCloud_v1');
+verifyEqual(testCase, definition.modelName, 'intensityICP_v1');
 verifyEqual(testCase, definition.evaluateFcn, ...
     @cost_intensityICP_v01);
 verifyEqual(testCase, definition.validateExperimentConfigFcn, ...
@@ -136,7 +136,7 @@ verifyEqual(testCase, combinedDetails.costTerms.pointCloud3DNormalized, ...
     expectedPointCloudNormalized);
 verifyEqual(testCase, combinedDetails.costTerms.combined, expectedCombinedCost);
 verifyEqual(testCase, combinedCost, expectedCombinedCost);
-verifyEqual(testCase, combinedDetails.costModel, 'intensityPointCloud_v1');
+verifyEqual(testCase, combinedDetails.costModel, 'intensityICP_v1');
 
 % Both component functions must describe exactly the same candidate geometry.
 verifyEqual(testCase, intensityDetails.T_CT_ref_candidate, ...
@@ -212,7 +212,7 @@ function verifyCostEvaluationEqual(testCase, actualCost, actualDetails, expected
 
 % The dispatcher performs no calculation, so both scalar values should be identical.
 verifyEqual(testCase, actualCost, expectedCost);
-verifyEqual(testCase, actualDetails.costModel, 'intensityCoverage_v1');
+verifyEqual(testCase, actualDetails.costModel, 'intensityCov_v1');
 
 % Compare the triangulation explicitly so mesh geometry remains easy to diagnose.
 verifyEqual(testCase, actualDetails.boneMeshRefCandidate.ConnectivityList, ...

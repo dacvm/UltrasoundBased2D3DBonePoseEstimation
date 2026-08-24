@@ -15,7 +15,7 @@
     "normalFacingToleranceDeg": [30]
   },
   "cost": {
-    "model": "pointCloud3D_v1",
+    "model": "ICPLike_v1",
     "fixedParameters": {
       "nearestVertexCount": 20
     },

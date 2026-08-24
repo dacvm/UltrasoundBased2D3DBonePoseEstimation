@@ -18,12 +18,8 @@ function [fixedParameters, hyperparameters] = validate_cost_intensityICP_v01(fix
 
 % Require the complete combined-model schema so spelling mistakes are
 % reported before data preparation or optimization begins.
-validateFieldNames(fixedParameters, ...
-    {'intensityMax', 'nearestVertexCount', 'distanceReferenceMm'}, ...
-    'cost.fixedParameters');
-validateFieldNames(hyperparameters, ...
-    {'minReferencePixels', 'nMinPixels', 'lambdaMissing', 'weight'}, ...
-    'cost.hyperparameters');
+validateFieldNames(fixedParameters, {'intensityMax', 'nearestVertexCount', 'distanceReferenceMm'}, 'cost.fixedParameters');
+validateFieldNames(hyperparameters, {'minReferencePixels', 'nMinPixels', 'lambdaMissing', 'weight'}, 'cost.hyperparameters');
 
 % Reuse each component validator on the settings that belong to that model.
 intensityFixed = struct('intensityMax', fixedParameters.intensityMax);
@@ -38,9 +34,7 @@ pointCloudFixed = struct('nearestVertexCount', fixedParameters.nearestVertexCoun
 
 % The reference distance removes the millimetre unit from the point-cloud RMSE.
 distanceReferenceMm = fixedParameters.distanceReferenceMm;
-validateattributes(distanceReferenceMm, {'numeric'}, ...
-    {'scalar', 'real', 'positive', 'finite'}, mfilename, ...
-    'cost.fixedParameters.distanceReferenceMm');
+validateattributes(distanceReferenceMm, {'numeric'}, {'scalar', 'real', 'positive', 'finite'}, mfilename, 'cost.fixedParameters.distanceReferenceMm');
 
 % Weight is a sweep candidate and must remain a valid convex blend coefficient.
 weight = normalizeWeightCandidates(hyperparameters.weight);

@@ -15,7 +15,7 @@
     "normalFacingToleranceDeg": [30]
   },
   "cost": {
-    "model": "intensityCoverage_v1",
+    "model": "intensityCov_v1",
     "fixedParameters": {
       "intensityMax": 255
     },

@@ -15,7 +15,7 @@
     "normalFacingToleranceDeg": [30]
   },
   "cost": {
-    "model": "intensityPointCloud_v1",
+    "model": "intensityICP_v1",
     "fixedParameters": {
       "intensityMax": 255,
       "nearestVertexCount": 20,
