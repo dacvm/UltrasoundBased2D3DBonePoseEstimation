@@ -1,12 +1,11 @@
 function experimentSpec = createBonePoseOptimizationExperimentConfig(configFilePath)
-%CREATEBONEPOSEOPTIMIZATIONEXPERIMENTCONFIG Read a v03 experiment JSON file.
-% This function loads the shared bone-pose settings, validates the four
-% hyperparameter candidate lists and the repeat seeds, and resolves the
-% experiment output folder. A separate reader is needed so the existing v02
-% reader can keep representing one scalar optimization configuration.
+%CREATEBONEPOSEOPTIMIZATIONEXPERIMENTCONFIG Read an active experiment JSON file.
+% This function loads the shared schemaVersion04 settings, validates the
+% intersection candidates and repeat seeds, and resolves the experiment
+% output folder. Cost-model parameters are checked by their model validator.
 %
 % Input:
-%   configFilePath - Path to the v03 JSON experiment configuration.
+%   configFilePath - Path to a schemaVersion04 experiment configuration.
 %
 % Output:
 %   experimentSpec - Resolved experiment specification containing fixed
@@ -14,26 +13,19 @@ function experimentSpec = createBonePoseOptimizationExperimentConfig(configFileP
 
 %% LOAD THE SHARED CONFIGURATION FIELDS
 
-% Reuse the established path and input parsing used by the v02 workflow.
+% Reuse the shared schema, path, and cost-model parsing.
 experimentSpec  = createBonePoseOptimizationConfig(configFilePath);
-% Read the raw JSON once more because the v02 reader does not know the experiment section.
-rawConfig       = jsondecode(fileread(configFilePath));
 
-%% NORMALIZE THE HYPERPARAMETER CANDIDATES
-
-% Treat a scalar as a one-value candidate list and a vector as several candidates.
-experimentSpec.intersection.normalFacingToleranceDeg = normalizeCandidates(experimentSpec.intersection.normalFacingToleranceDeg, 'intersection.normalFacingToleranceDeg', true);
-experimentSpec.cost.minReferencePixels               = normalizeCandidates(experimentSpec.cost.minReferencePixels, 'cost.minReferencePixels', true);
-experimentSpec.cost.nMinPixels                       = normalizeCandidates(experimentSpec.cost.nMinPixels, 'cost.nMinPixels', true);
-experimentSpec.cost.lambdaMissing                    = normalizeCandidates(experimentSpec.cost.lambdaMissing, 'cost.lambdaMissing', false);
-
-% Keep intensity normalization fixed because it is not part of this sweep.
-validateattributes(experimentSpec.cost.intensityMax, {'numeric'}, {'scalar', 'positive', 'finite'}, mfilename, 'cost.intensityMax');
+% The intersection tolerance remains one explicit non-cost sweep setting.
+experimentSpec.intersection.normalFacingToleranceDeg = normalizePositiveCandidates( ...
+    experimentSpec.intersection.normalFacingToleranceDeg, 'intersection.normalFacingToleranceDeg');
 
 %% READ THE EXPERIMENT SETTINGS
 
+% Read the raw JSON once more because the shared reader does not own experiment settings.
+rawConfig        = jsondecode(fileread(configFilePath));
 % Require one experiment section because it identifies and repeats the complete sweep.
-experimentConfig                = getRequiredField(rawConfig, 'experiment', 'experiment');
+experimentConfig = getRequiredField(rawConfig, 'experiment', 'experiment');
 
 % Use a readable name in folder names and saved metadata.
 experimentSpec.experiment.name  = ensureSafeExperimentName(getRequiredField(experimentConfig, 'name', 'experiment.name'));
@@ -46,7 +38,7 @@ experimentSpec.experiment.outputFolder = makeAbsolutePath(configuredOutputFolder
 
 %% CHECK FIXED OPTIMIZER SETTINGS
 
-% These settings stay scalar because optimizer tuning is outside the v03 sweep.
+% These settings stay scalar because optimizer tuning is outside this sweep.
 validatePositiveScalar(experimentSpec.optimizer.translationBoundMm,     'optimizer.translationBoundMm',     false);
 validatePositiveScalar(experimentSpec.optimizer.rotationBoundDeg,       'optimizer.rotationBoundDeg',       false);
 validatePositiveScalar(experimentSpec.optimizer.translationSigmaMm,     'optimizer.translationSigmaMm',     false);
@@ -64,22 +56,18 @@ end
 
 
 
-function candidates = normalizeCandidates(rawCandidates, displayName, requirePositive)
-%NORMALIZECANDIDATES Validate and reshape one hyperparameter candidate list.
+function candidates = normalizePositiveCandidates(rawCandidates, displayName)
+%NORMALIZEPOSITIVECANDIDATES Validate and reshape one positive candidate list.
 % rawCandidates contains one or more numeric values, displayName identifies
-% the JSON field, requirePositive selects positive or nonnegative validation,
-% and candidates is the resulting row vector.
+% the JSON field, and candidates is the resulting row vector.
 
 % Candidate collections must be simple numeric vectors so their Cartesian product is clear.
 validateattributes(rawCandidates, {'numeric'}, {'vector', 'nonempty', 'real', 'finite'}, mfilename, displayName);
 
-% Positive thresholds cannot use zero, while a missing-penalty weight may be zero.
-if requirePositive && any(rawCandidates <= 0)
+% The geometric tolerance must be greater than zero.
+if any(rawCandidates <= 0)
     error('createBonePoseOptimizationExperimentConfig:NonpositiveCandidate', ...
           '%s values must be positive.', displayName);
-elseif ~requirePositive && any(rawCandidates < 0)
-    error('createBonePoseOptimizationExperimentConfig:NegativeCandidate', ...
-          '%s values must be nonnegative.', displayName);
 end
 
 % Duplicate values would create duplicate optimization runs without adding information.
@@ -149,7 +137,7 @@ function value = getRequiredField(sourceStruct, fieldName, displayName)
 % sourceStruct is the parent struct, fieldName is its MATLAB field, displayName
 % is used in errors, and value is the stored field value.
 
-% Stop at the missing field so the user can correct the v03 JSON directly.
+% Stop at the missing field so the user can correct the active JSON directly.
 if ~isstruct(sourceStruct) || ~isfield(sourceStruct, fieldName)
     error('createBonePoseOptimizationExperimentConfig:MissingField', ...
           'Missing required configuration field: %s', displayName);

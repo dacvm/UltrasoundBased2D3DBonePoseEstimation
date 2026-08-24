@@ -1,0 +1,92 @@
+function [fixedParameters, hyperparameters] = validate_cost_intensityCov_v01(fixedParameters, hyperparameters)
+%VALIDATE_COST_INTENSITYCOV_V01 Validate V1 experiment settings.
+% This function checks the fixed and sweepable parameters owned by the
+% intensity-and-coverage V1 cost model. It is needed so the shared config
+% reader does not need to know the meaning of each model-specific setting.
+%
+% Inputs:
+%   fixedParameters - Struct containing the fixed intensity normalization.
+%   hyperparameters - Struct containing candidate arrays for the V1 sweep.
+%
+% Outputs:
+%   fixedParameters - Validated fixed settings with numeric values as double.
+%   hyperparameters - Validated candidate settings stored as row vectors.
+
+% Require the small, documented V1 parameter set so JSON spelling mistakes fail early.
+validateFieldNames(fixedParameters, {'intensityMax'}, 'cost.fixedParameters');
+validateFieldNames(hyperparameters, {'minReferencePixels', 'nMinPixels', 'lambdaMissing'}, 'cost.hyperparameters');
+
+% Read and validate the fixed value before rebuilding the output structure.
+intensityMax = fixedParameters.intensityMax;
+validateattributes(intensityMax, {'numeric'}, {'scalar', 'real', 'positive', 'finite'}, mfilename, 'cost.fixedParameters.intensityMax');
+
+% Normalize candidate arrays before rebuilding the output structure.
+minReferencePixels  = normalizeCandidates(hyperparameters.minReferencePixels, 'cost.hyperparameters.minReferencePixels', true);
+nMinPixels          = normalizeCandidates(hyperparameters.nMinPixels, 'cost.hyperparameters.nMinPixels', true);
+lambdaMissing       = normalizeCandidates(hyperparameters.lambdaMissing, 'cost.hyperparameters.lambdaMissing', false);
+
+% Build the validated groups in one documented order. The generic planner
+% uses this field order for stable table columns and combination numbers.
+fixedParameters = struct();
+fixedParameters.intensityMax = double(intensityMax);
+
+hyperparameters = struct();
+hyperparameters.minReferencePixels = minReferencePixels;
+hyperparameters.nMinPixels         = nMinPixels;
+hyperparameters.lambdaMissing      = lambdaMissing;
+end
+
+
+
+%%
+function validateFieldNames(sourceStruct, expectedNames, displayName)
+%VALIDATEFIELDNAMES Require exactly the documented fields in one config group.
+% sourceStruct is the JSON-derived parameter struct, expectedNames lists the
+% accepted fields, and displayName identifies the group in error messages.
+
+if ~isstruct(sourceStruct) || ~isscalar(sourceStruct)
+    error('validate_cost_intensityCov_v01:InvalidParameterGroup', ...
+        '%s must be a JSON object.', displayName);
+end
+
+actualNames     = fieldnames(sourceStruct).';
+missingNames    = setdiff(expectedNames, actualNames, 'stable');
+unexpectedNames = setdiff(actualNames, expectedNames, 'stable');
+
+if ~isempty(missingNames)
+    error('validate_cost_intensityCov_v01:MissingParameter', ...
+          '%s is missing: %s.', displayName, strjoin(missingNames, ', '));
+end
+
+if ~isempty(unexpectedNames)
+    error('validate_cost_intensityCov_v01:UnexpectedParameter', ...
+          '%s contains an unsupported field: %s.', displayName, strjoin(unexpectedNames, ', '));
+end
+end
+
+
+
+%%
+function candidates = normalizeCandidates(rawCandidates, displayName, requirePositive)
+%NORMALIZECANDIDATES Validate one V1 hyperparameter candidate list.
+% rawCandidates contains configured values, displayName labels errors,
+% requirePositive selects the lower-bound rule, and candidates is a row vector.
+
+validateattributes(rawCandidates, {'numeric'}, ...
+    {'vector', 'nonempty', 'real', 'finite'}, mfilename, displayName);
+
+if requirePositive && any(rawCandidates <= 0)
+    error('validate_cost_intensityCov_v01:NonpositiveCandidate', ...
+          '%s values must be positive.', displayName);
+elseif ~requirePositive && any(rawCandidates < 0)
+    error('validate_cost_intensityCov_v01:NegativeCandidate', ...
+          '%s values must be nonnegative.', displayName);
+end
+
+if numel(unique(rawCandidates)) ~= numel(rawCandidates)
+    error('validate_cost_intensityCov_v01:DuplicateCandidate', ...
+        '%s must not contain duplicate values.', displayName);
+end
+
+candidates = double(rawCandidates(:).');
+end

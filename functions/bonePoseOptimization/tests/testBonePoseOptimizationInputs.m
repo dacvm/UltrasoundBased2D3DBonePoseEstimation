@@ -1,6 +1,6 @@
-function tests = testBonePoseOptimizationV02
-%TESTBONEPOSEOPTIMIZATIONV02 Test the standardized v02 input boundary.
-% This test suite checks the real standardized tibia artifacts, transform
+function tests = testBonePoseOptimizationInputs
+%TESTBONEPOSEOPTIMIZATIONINPUTS Test the standardized input boundary.
+% This suite checks the real standardized tibia artifacts, transform
 % conventions, initial cost evaluation, and separation of validation ground
 % truth from estimation data.
 %
@@ -21,12 +21,17 @@ function setupOnce(testCase)
 testFilePath = mfilename('fullpath');
 projectRoot = fileparts(fileparts(fileparts(fileparts(testFilePath))));
 
-% Add project helpers exactly as the v02 main script does.
+% Add reusable project functions before reading the active configuration.
 addpath(genpath(fullfile(projectRoot, 'functions')));
 
 % Prepare the current standardized tibia inputs only once because intersection work is slow.
-configPath = fullfile(projectRoot, 'config', 'bonePoseOptimizationConfig_v02.json');
-config = createBonePoseOptimizationConfig(configPath);
+configPath = fullfile(projectRoot, 'config', ...
+    'optconfig_oneSweep_intensityCov.json');
+experimentSpec = createBonePoseOptimizationExperimentConfig(configPath);
+experimentPlan = createBonePoseOptimizationExperimentPlan(experimentSpec);
+config = createBonePoseOptimizationRunConfig( ...
+    experimentSpec, experimentPlan.combinations(1, :), ...
+    experimentPlan.runs.seed(1));
 [data, validationData] = prepareBonePoseOptimizationInputs(config);
 [initialCost, initialDetails] = bonePoseCostFunction(zeros(6, 1), data, config);
 
@@ -41,7 +46,7 @@ end
 
 
 function testConfigurationUsesStandardizedInputs(testCase)
-%TESTCONFIGURATIONUSESSTANDARDIZEDINPUTS Check the v02 target and resolved paths.
+%TESTCONFIGURATIONUSESSTANDARDIZEDINPUTS Check the target and resolved paths.
 % testCase supplies the parsed configuration. This function has no output.
 
 % The current standardized experiment targets the tibia.
@@ -50,6 +55,7 @@ verifyEqual(testCase, config.input.bone, 'T');
 
 % Every configured input should resolve to an existing tool output.
 verifyTrue(testCase, isfile(config.input.validSnapshotsMatFile));
+verifyTrue(testCase, isfile(config.input.boneSurfaceMatFile));
 verifyTrue(testCase, isfile(config.input.ctPostProcessedMatFile));
 verifyTrue(testCase, isfile(config.input.coarseRegistrationMatFile));
 end
@@ -81,6 +87,154 @@ verifyEqual(testCase, sourceNames, expectedNames);
 end
 
 
+function testBoneSurfacesAlignWithPreparedImages(testCase)
+%TESTBONESURFACESALIGNWITHPREPAREDIMAGES Check the real Stage 6 input boundary.
+% testCase supplies the prepared images, surfaces, and source identities. This
+% function has no output.
+
+data = testCase.TestData.data;
+snapshotSources = testCase.TestData.validationData.snapshotSources;
+boneSurfaceMeasurements = data.boneSurfaceMeasurements;
+
+% The configured artifact should provide one surface measurement per image.
+verifyTrue(testCase, data.hasBoneSurface);
+verifyEqual(testCase, numel(boneSurfaceMeasurements), ...
+    numel(data.imagePlanesRef));
+
+% Group identity and sourceIndex show that flattening preserved correspondence.
+verifyEqual(testCase, string({boneSurfaceMeasurements.groupName}), ...
+    string({snapshotSources.groupName}));
+verifyEqual(testCase, [boneSurfaceMeasurements.sourceIndex], ...
+    [snapshotSources.sourceIndex]);
+verifyEqual(testCase, unique(string({boneSurfaceMeasurements.status})), ...
+    "extracted");
+
+% The structured metadata removes ambiguity about image coordinates and beam direction.
+metadata = data.boneSurfaceMetadata;
+verifyEqual(testCase, metadata.coordinateConvention.indexBase, 1);
+verifyEqual(testCase, metadata.coordinateConvention.coordinateOrder, ["x", "y"]);
+verifyEqual(testCase, metadata.coordinateConvention.imageAxisByCoordinate, ...
+    ["column", "row"]);
+verifyEqual(testCase, metadata.coordinateConvention.origin, "topLeftPixelCenter");
+verifyEqual(testCase, metadata.beamAxis.name, "row");
+verifyEqual(testCase, metadata.beamAxis.matlabDimension, 1);
+verifyEqual(testCase, metadata.beamDirection.name, "increasingRowIndex");
+verifyEqual(testCase, metadata.beamDirection.rowIndexStep, 1);
+end
+
+
+function testRecoveredSurfacePointsMatchTheirImageCoordinates(testCase)
+%TESTRECOVEREDSURFACEPOINTSMATCHTHEIRIMAGECOORDINATES Check 3D recovery once.
+% testCase supplies aligned measurements and image planes. This function has
+% no output.
+
+data = testCase.TestData.data;
+maximumPointErrorMm = 0;
+
+for imageIndex = 1:numel(data.imagePlanesRef)
+    measurement = data.boneSurfaceMeasurements(imageIndex);
+    plane = data.imagePlanesRef(imageIndex);
+    surfaceCoordinatesXY = double(measurement.surfaceCoordinatesXY);
+
+    % Convert one-based image coordinates to millimetres on the local plane.
+    pixelSpacingXYMm = [ ...
+        double(plane.W) / (double(plane.nCols) - 1), ...
+        double(plane.H) / (double(plane.nRows) - 1)];
+    surfacePointsImage = [ ...
+        (surfaceCoordinatesXY(:, 1) - 1) * pixelSpacingXYMm(1), ...
+        (surfaceCoordinatesXY(:, 2) - 1) * pixelSpacingXYMm(2), ...
+        zeros(size(surfaceCoordinatesXY, 1), 1)];
+
+    % Recreate the reference-frame points independently from the saved 3D field.
+    expectedSurfacePointsRef = applyRigidTransform( ...
+        surfacePointsImage, plane.T_image_ref);
+    pointErrorMm = max(abs(expectedSurfacePointsRef - ...
+        double(measurement.surfaceCoordinatesXYZRef)), [], 'all');
+    maximumPointErrorMm = max(maximumPointErrorMm, pointErrorMm);
+end
+
+verifyLessThanOrEqual(testCase, maximumPointErrorMm, 1e-8);
+end
+
+
+function testSurfaceRecordsCanBeReorderedBeforeMatching(testCase)
+%TESTSURFACERECORDSCANBEREORDEREDBEFOREMATCHING Check identity-based matching.
+% testCase supplies the real surface input and aligned snapshot sources. This
+% function has no output.
+
+config = testCase.TestData.config;
+surfaceOutput = load(config.input.boneSurfaceMatFile, ...
+    'surfaceResults', 'extractionMetadata');
+
+% Reverse both group and record order to ensure array position is never identity.
+surfaceOutput.surfaceResults = surfaceOutput.surfaceResults(end:-1:1);
+for groupIndex = 1:numel(surfaceOutput.surfaceResults)
+    surfaceOutput.surfaceResults(groupIndex).data = ...
+        surfaceOutput.surfaceResults(groupIndex).data(end:-1:1);
+end
+
+collectedBoneSurface = collectBoneSurfaceMeasurements( ...
+    surfaceOutput, config.input.bone);
+boneSurface = alignBoneSurfacesToSnapshots( ...
+    collectedBoneSurface, ...
+    testCase.TestData.validationData.snapshotSources, ...
+    config.input.validSnapshotsMatFile);
+
+verifyEqual(testCase, [boneSurface.measurements.sourceIndex], ...
+    [testCase.TestData.validationData.snapshotSources.sourceIndex]);
+end
+
+
+function testSurfaceProvenanceMustMatchSnapshots(testCase)
+%TESTSURFACEPROVENANCEMUSTMATCHSNAPSHOTS Check the artifact-level relationship.
+% testCase supplies the real surface and snapshot inputs. This function has
+% no output.
+
+config = testCase.TestData.config;
+surfaceOutput = load(config.input.boneSurfaceMatFile, ...
+    'surfaceResults', 'extractionMetadata');
+
+% Change only the recorded source artifact so collection still succeeds and
+% the explicit alignment boundary is responsible for rejecting the mismatch.
+surfaceOutput.extractionMetadata.sourceUltrasoundFile = ...
+    fullfile(tempdir, 'differentValidSnapshots.mat');
+collectedBoneSurface = collectBoneSurfaceMeasurements( ...
+    surfaceOutput, config.input.bone);
+
+verifyError(testCase, @() alignBoneSurfacesToSnapshots( ...
+    collectedBoneSurface, ...
+    testCase.TestData.validationData.snapshotSources, ...
+    config.input.validSnapshotsMatFile), ...
+    'alignBoneSurfacesToSnapshots:SurfaceSourceMismatch');
+end
+
+
+function testIntensityCostDoesNotDependOnPreparedSurfaces(testCase)
+%TESTINTENSITYCOSTDOESNOTDEPENDONPREPAREDSURFACES Protect the v1 objective.
+% testCase supplies the configured Stage 6 data and its initial cost. This
+% function has no output.
+
+% Prepare the same inputs again after removing only the optional surface path.
+configWithoutSurface = testCase.TestData.config;
+configWithoutSurface.input.boneSurfaceMatFile = '';
+[dataWithoutSurface, ~] = prepareBonePoseOptimizationInputs(configWithoutSurface);
+[costWithoutSurface, detailsWithoutSurface] = bonePoseCostFunction( ...
+    zeros(6, 1), dataWithoutSurface, configWithoutSurface);
+
+verifyFalse(testCase, dataWithoutSurface.hasBoneSurface);
+verifyEmpty(testCase, dataWithoutSurface.boneSurfaceMeasurements);
+verifyEmpty(testCase, fieldnames(dataWithoutSurface.boneSurfaceMetadata));
+verifyEqual(testCase, costWithoutSurface, testCase.TestData.initialCost, ...
+    'AbsTol', 1e-12);
+verifyEqual(testCase, detailsWithoutSurface.intensityCoverageCost, ...
+    testCase.TestData.initialDetails.intensityCoverageCost, 'AbsTol', 1e-12);
+verifyEqual(testCase, detailsWithoutSurface.missingPenaltyCost, ...
+    testCase.TestData.initialDetails.missingPenaltyCost, 'AbsTol', 1e-12);
+verifyEqual(testCase, detailsWithoutSurface.activePlaneMask, ...
+    testCase.TestData.initialDetails.activePlaneMask);
+end
+
+
 function testGroundTruthBonePoseIsPreparedForValidation(testCase)
 %TESTGROUNDTRUTHBONEPOSEISPREPAREDFORVALIDATION Check the selected saved pose.
 % testCase supplies the CT model and validation-only pose. This function has
@@ -106,7 +260,8 @@ function testInitialPoseProducesUsableCoverage(testCase)
 
 data = testCase.TestData.data;
 details = testCase.TestData.initialDetails;
-minimumPixels = testCase.TestData.config.cost.minReferencePixels;
+minimumPixels = ...
+    testCase.TestData.config.cost.parameters.minReferencePixels;
 
 % Preparation must create one finite nonnegative reference count per plane.
 verifyEqual(testCase, numel(data.nInitialIntersectionPixels), ...

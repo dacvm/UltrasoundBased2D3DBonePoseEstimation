@@ -73,7 +73,7 @@ The script locates the project `functions` directory from its own path, so it do
 
 ## Output Structure
 
-The exported MATLAB v7.3 MAT-file contains one variable named `segmentationResults`. It preserves the source-directory grouping and acquisition order of the input:
+The exported MATLAB v7.3 MAT-file contains `segmentationResults` and the small provenance structure `segmentationMetadata`. The results preserve the source-directory grouping and acquisition order of the input:
 
 ```text
 segmentationResults(1..G)
@@ -89,6 +89,12 @@ segmentationResults(1..G)
     +-- usesCustomSegmentationArea
     +-- processingParameters
     +-- status
+
+segmentationMetadata
++-- createdAt
++-- sourceUltrasoundFile
++-- sourceVariable
++-- numberOfFrames
 ```
 
 | Field | Explanation |
@@ -103,11 +109,23 @@ segmentationResults(1..G)
 | `processingParameters` | Exact settings used to create this image's result. `brightness` and `contrast` modify intensity before segmentation; `threshold` separates foreground from background; `openingRadius` removes small bright details; `closingRadius` joins nearby regions; `minimumRegionArea` removes smaller connected regions; and `fillHoles` records the always-enabled hole-filling step. |
 | `status` | `processed` means a result was committed for the image, even if the final mask is empty. `unprocessed` means the image had not been accepted or batch-processed when export occurred, so its coordinates are empty and its masks contain safe default values. |
 
+The metadata fields are intentionally simple:
+
+| Metadata field | Explanation |
+| --- | --- |
+| `createdAt` | Date and time when the segmentation was exported. |
+| `sourceUltrasoundFile` | Full path of the ultrasound MAT-file used as input. |
+| `sourceVariable` | Name of the loaded input variable, currently `validSnapshots`. |
+| `numberOfFrames` | Total number of exported image records, including processed and unprocessed records. |
+
 Load the result with:
 
 ```matlab
-loadedSegmentation = load('boneSegmentation_yyyyMMdd_HHmmss.mat', 'segmentationResults');
+loadedSegmentation = load( ...
+    'boneSegmentation_yyyyMMdd_HHmmss.mat', ...
+    'segmentationResults', 'segmentationMetadata');
 segmentationResults = loadedSegmentation.segmentationResults;
+segmentationMetadata = loadedSegmentation.segmentationMetadata;
 ```
 
 ## Common Input Problems
@@ -206,11 +224,17 @@ surfaceResults(1..G)
     +-- meanConfidence, numberOfSegments
 
 extractionMetadata
-+-- algorithm name, version, and creation time
-+-- coordinate and candidate conventions
-+-- resolvedConfiguration
-+-- status counts and frame totals
-+-- source and output file paths
++-- createdAt
++-- algorithmVersion
++-- numberOfFrames
++-- coordinateConvention
++-- beamAxis
++-- beamDirection
++-- sourceSegmentationFile
++-- sourceSegmentationVariable
++-- sourceUltrasoundFile
++-- sourceUltrasoundVariable
++-- configurationFile
 ```
 
 Important result fields are:
@@ -241,7 +265,21 @@ Important result fields are:
 | `numberOfSegments` | Number of separate continuous surface pieces retained in the image. A value greater than one means the extractor found disconnected pieces rather than one uninterrupted curve. |
 | `status` | `extracted` means at least one surface segment passed the configured checks. `noSurface` means the image was processed but no usable surface remained. `skippedUnprocessed` means the matching Bone Segmentation (from Part 1) record was not processed, so absence of a surface was not inferred. |
 
-`extractionMetadata` records the resolved algorithm settings, coordinate conventions, input provenance, output filename, processing counts, and creation time so the extraction can be reproduced.
+The extraction metadata remains small and records both input provenance and the conventions needed to interpret the surface coordinates:
+
+| Metadata field | Explanation |
+| --- | --- |
+| `createdAt` | Date and time when the surface extraction was performed. |
+| `algorithmVersion` | Version of the surface-extraction algorithm. |
+| `numberOfFrames` | Total number of input records, including extracted, no-surface, and skipped records. |
+| `coordinateConvention` | Structured image-coordinate description. `indexBase` is `1`, `coordinateOrder` is `["x", "y"]`, `imageAxisByCoordinate` is `["column", "row"]`, and `origin` is `"topLeftPixelCenter"`. |
+| `beamAxis` | Structured beam-axis description. `name` is `"row"` and `matlabDimension` is `1`. |
+| `beamDirection` | Structured beam-direction description. `name` is `"increasingRowIndex"` and `rowIndexStep` is `1`, meaning depth increases toward larger row indices. |
+| `sourceSegmentationFile` | Full path of the Part 1 segmentation MAT-file. |
+| `sourceSegmentationVariable` | Name of the loaded segmentation variable, currently `segmentationResults`. |
+| `sourceUltrasoundFile` | Full path of the matching ultrasound MAT-file. |
+| `sourceUltrasoundVariable` | Name of the loaded ultrasound variable, currently `validSnapshots`. |
+| `configurationFile` | Full path of the extraction algorithm JSON file used for the run. The JSON contents are not copied into the metadata. |
 
 Load the result with:
 

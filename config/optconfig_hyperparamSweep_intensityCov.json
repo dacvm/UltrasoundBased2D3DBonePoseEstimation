@@ -1,4 +1,5 @@
 {
+  "schemaVersion": 4,
   "project": {
     "root": "..",
     "functionsFolderName": "functions"
@@ -6,17 +7,23 @@
   "input": {
     "bone": "T",
     "validSnapshotsMatFile": "tools/ultrasoundSpatialProcessing/outputs/validSnapshots_20260812_160247.mat",
+    "boneSurfaceMatFile": "tools/boneSegmentationProcess/outputs/boneSurface_20260819_205405.mat",
     "ctPostProcessedMatFile": "tools/ctkneePostProcess/outputs/kneephantom/kneephantom_bones_and_bonepins.mat",
-    "coarseRegistrationMatFile": "tools/bonePreRegistration/outputs/coarseRegistration_20260812_200530.mat"
+    "coarseRegistrationMatFile": "tools/bonePreRegistration/outputs/coarseRegistration_20260819_205443.mat"
   },
   "intersection": {
     "normalFacingToleranceDeg": [30]
   },
   "cost": {
-    "intensityMax": 255,
-    "minReferencePixels": [50, 100],
-    "nMinPixels": [100, 200],
-    "lambdaMissing": [1.0, 1.5]
+    "model": "intensityCov_v1",
+    "fixedParameters": {
+      "intensityMax": 255
+    },
+    "hyperparameters": {
+      "minReferencePixels": [50, 100],
+      "nMinPixels": [100, 200],
+      "lambdaMissing": [1.0, 1.5]
+    }
   },
   "logging": {
     "printPreparationProgress": false,
@@ -33,7 +40,7 @@
     "parforWorkers": 6
   },
   "experiment": {
-    "name": "costFunction_v01",
+    "name": "intensityICP_v01",
     "seeds": [1001, 1002, 1003],
     "outputFolder": "output/bonePoseOptimization/experiments"
   }

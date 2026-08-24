@@ -8,7 +8,7 @@ For each candidate bone pose, the pipeline places the CT mesh in the experiment 
 
 The project currently provides two entry points:
 
-- `main_bonePoseOptimization_sanityCheck.m` runs one interactive configuration and displays the initial and optimized geometry. Use this first when checking a new dataset or cost-function change.
+- `main_bonePoseOptimization_oneSweep.m` runs one interactive configuration and displays the initial and optimized geometry. Use this first when checking a new dataset or cost-function change.
 - `main_bonePoseOptimization_hyperparamSweep.m` runs every configured cost-parameter combination for every configured random seed and saves an analysis-ready experiment summary.
 
 This repository is research and development code. The cost function, optimization settings, and validation strategy are expected to evolve while the capabilities and limitations of B-mode ultrasound for bone registration are investigated.
@@ -80,27 +80,47 @@ Raw B-mode ultrasound and motion-capture data can be recorded with the acquisiti
 3. [`tools/boneSegmentationProcess/`](tools/boneSegmentationProcess/README.md) extracts candidate bone-surface responses from the selected ultrasound images.
 4. [`tools/bonePreRegistration/`](tools/bonePreRegistration/README.md) estimates the coarse CT-to-reference pose used as the center of the optimization search.
 
-The optimization configuration points to three prepared MAT files:
+The optimization configuration points to three required MAT files and one optional bone-surface file:
 
 | Configuration field | High-level purpose |
 | --- | --- |
 | `validSnapshotsMatFile` | MAT file exported by the ultrasound spatial-processing review. It contains accepted, tracked B-mode image planes and separate ground-truth bone poses and intersections. The optimizer uses the image planes but does not use the ground-truth intersections in its cost. |
+| `boneSurfaceMatFile` | Optional MAT file produced by bone-surface extraction and 3D recovery. Input preparation aligns its 2D and 3D measurements with the selected ultrasound snapshots. A cost model only requires this file when its definition sets `requiresBoneSurface` to `true`. |
 | `ctPostProcessedMatFile` | MAT file produced by CT knee post-processing. It contains the CT bone meshes, anatomical coordinate systems, and the rigid relationship between each bone and its selected pin. |
 | `coarseRegistrationMatFile` | MAT file produced by bone pre-registration. It contains the approximate CT-to-reference transform that initializes the optimizer and the matching coarse bone mesh in the reference frame. |
 
-All three files must describe the same specimen, bone, pin selection, marker geometry, units, and coordinate-frame conventions. The `input.bone` setting selects the target bone code, such as `F` for femur or `T` for tibia.
+The prepared files must describe the same specimen, bone, pin selection, marker geometry, units, and coordinate-frame conventions. The `input.bone` setting selects the target bone code, such as `F` for femur or `T` for tibia.
+
+### Optimization code organization
+
+The three stable workflow entry points remain directly under
+`functions/bonePoseOptimization/`: cost evaluation, one optimization run, and
+one experiment run. Supporting functions are grouped one level below:
+
+- `configuration/` reads JSON and builds experiment and scalar run settings.
+- `costModels/` contains model registration, versioned cost functions, and validators.
+- `inputPreparation/` loads and prepares reusable optimization inputs.
+- `poseEvaluation/` converts optimizer states and evaluates candidate-pose geometry.
+- `evaluationMetric/` and `evaluationPlot/` analyze saved results.
+- `tests/` verifies the active pipeline, while `legacy/` stores inactive historical code.
 
 ### Cost-function parameters
 
-The cost function rewards bright, well-covered probe-facing mesh intersections and penalizes active ultrasound planes that have too few current intersection pixels.
+The active JSON files use `schemaVersion: 4`. Each experiment selects one
+cost model explicitly and separates fixed settings from values that participate
+in the hyperparameter sweep.
 
 | Setting | Meaning |
 | --- | --- |
 | `intersection.normalFacingToleranceDeg` | Maximum angular difference used when deciding whether an intersected mesh face points toward the ultrasound probe. In a sweep configuration this may contain several candidate values. |
-| `cost.intensityMax` | Intensity used to normalize sampled ultrasound brightness, for example `255` for an 8-bit image. This remains fixed during the current sweep. |
-| `cost.minReferencePixels` | Minimum number of probe-facing pixels at the coarse initial pose for an image plane to participate in the final cost average. |
-| `cost.nMinPixels` | Minimum number of probe-facing pixels required at the current candidate pose before an active plane is marked as missing. |
-| `cost.lambdaMissing` | Weight applied to the fraction of active planes marked as missing. A larger value discourages candidate poses that explain only a small subset of the images. |
+| `cost.model` | Versioned cost-model name: `intensityCov_v1`, `ICPLike_v1`, or `intensityICP_v1`. |
+| `cost.fixedParameters.intensityMax` | Intensity used to normalize sampled ultrasound brightness, for example `255` for an 8-bit image. This remains fixed during the complete experiment. |
+| `cost.fixedParameters.nearestVertexCount` | Number of nearby CT mesh vertices used by the 3D point-cloud cost. |
+| `cost.fixedParameters.distanceReferenceMm` | Reference distance used to make the point-cloud RMSE dimensionless in the combined model. |
+| `cost.hyperparameters.minReferencePixels` | Minimum number of probe-facing pixels at the coarse initial pose for an image plane to participate in the final cost average. |
+| `cost.hyperparameters.nMinPixels` | Minimum number of probe-facing pixels required at the current candidate pose before an active plane is marked as missing. |
+| `cost.hyperparameters.lambdaMissing` | Weight applied to the fraction of active planes marked as missing. A larger value discourages candidate poses that explain only a small subset of the images. |
+| `cost.hyperparameters.weight` | Combined-model blend: `1` uses only intensity coverage, while `0` uses only normalized point-cloud distance. |
 
 The minimized scalar objective has the high-level form:
 
@@ -109,7 +129,34 @@ cost = negative mean intensity-and-coverage score
        + lambdaMissing * mean missing-plane penalty
 ```
 
-`normalFacingToleranceDeg`, `minReferencePixels`, `nMinPixels`, and `lambdaMissing` may be arrays in the hyperparameter-sweep configuration. The experiment runner evaluates their complete Cartesian product.
+The combined model evaluates both existing costs and minimizes:
+
+```text
+combinedCost = weight * intensityCoverageCost
+             + (1 - weight) * (pointCloudCostMm / distanceReferenceMm)
+```
+
+`normalFacingToleranceDeg` and the fields under `cost.hyperparameters` may be
+arrays in the sweep configuration. The experiment specification retains these
+candidate arrays. Before preparation or optimization, the selected values are
+merged with the fixed settings under `runConfig.cost.parameters`, where every
+value is scalar.
+
+`bonePoseCostFunction` is the stable function called by scripts and CMA-ES.
+It resolves `cost.model` through `getBonePoseCostDefinition` and forwards the
+evaluation to the approved versioned implementation. Each versioned function
+owns one calculation and its local helpers. New models can therefore be
+registered without changing scripts or optimizer code.
+
+Each model-specific validator checks its fixed and swept settings, then returns
+those parameter groups in a documented field order. The planner reads these
+validated fields to create sweep columns, and the runtime-config builder merges
+the selected scalar values without model-specific edits. To add a model, create
+its evaluator and validator, add one registry case, and update the active JSON.
+Combination-level evaluation reads the validator-ordered parameter names from
+the saved experiment plan. This lets new numeric cost hyperparameters flow into
+the evaluation tables without adding model-specific table columns. Heatmap
+choices remain explicit until their later refactoring stage.
 
 ### Optimizer parameters
 
@@ -126,7 +173,7 @@ The optimizer represents a candidate as a local six-value perturbation `[vx; vy;
 | `useParfor` | Requests parallel candidate evaluation when the Parallel Computing Toolbox and a valid license are available. |
 | `parforWorkers` | Worker limit passed to the bundled parallel CMA-ES implementation. |
 
-The `experiment.seeds` array controls repeated stochastic runs. The sanity-check configuration must contain exactly one parameter combination and one seed. The sweep configuration can contain several values and seeds.
+The `experiment.seeds` array controls repeated stochastic runs. A one-sweep configuration must contain exactly one parameter combination and one seed. The sweep configuration can contain several values and seeds.
 
 ## Processing workflow
 
@@ -158,8 +205,13 @@ The external CMA-ES implementation used by this project is already stored under 
 
 Edit one of the following files:
 
-- `config/bonePoseOptimizationSanityCheckConfig.json` for one interactive test run.
-- `config/bonePoseOptimizationHyperparamSweepConfig.json` for an unattended multi-parameter, multi-seed experiment.
+- `config/optconfig_oneSweep_intensityCov.json` for an intensity-only interactive run.
+- `config/optconfig_oneSweep_ICPLike.json` for an ICP-like point-cloud interactive run.
+- `config/optconfig_oneSweep_intensityICP.json` for the combined interactive run selected by the one-sweep script.
+- `config/optconfig_hyperparamSweep_intensityCov.json` for the current unattended multi-parameter, multi-seed experiment.
+
+The file under `config/legacy/` records the former schemaVersion02 layout for historical
+reference only. Active readers do not execute schema-less legacy configs.
 
 Set `project.root` relative to the configuration directory or provide an absolute path. The supplied configuration files use `".."`, which resolves to this repository root. Input paths are then resolved relative to that project root.
 
@@ -171,13 +223,13 @@ Both main scripts build the configuration path from `pwd`. Change MATLAB's curre
 cd('D:/path/to/bmodeimage_3dspace')
 ```
 
-### 3. Run the sanity check first
+### 3. Run one sweep first
 
 ```matlab
-main_bonePoseOptimization_sanityCheck
+main_bonePoseOptimization_oneSweep
 ```
 
-The sanity check requires exactly one hyperparameter combination and one seed. It displays the initial setup and intersections, runs CMA-ES, leaves the numeric result in the MATLAB workspace, and displays the optimized estimate alongside the separately stored validation data.
+The one-sweep workflow requires exactly one hyperparameter combination and one seed. It displays the initial setup and intersections, runs CMA-ES, leaves the numeric result in the MATLAB workspace, and displays the optimized estimate alongside the separately stored validation data.
 
 Use this workflow to confirm that:
 
@@ -197,12 +249,12 @@ The sweep creates a new timestamped experiment on every invocation. It does not 
 
 ## Output structure
 
-### Sanity-check output
+### One-sweep output
 
-The sanity check stores raw CMA-ES files below the configured output folder. Its main `optimizationResult`, initial details, prepared data, and validation data remain in the MATLAB workspace unless the user saves them separately.
+The one-sweep workflow stores raw CMA-ES files below the configured output folder. Its main `optimizationResult`, initial details, prepared data, and validation data remain in the MATLAB workspace unless the user saves them separately.
 
 ```text
-output/bonePoseOptimization/sanityChecks/
+output/bonePoseOptimization/oneSweeps/
 +-- run_yyyyMMdd_HHmmss/
     +-- variablescmaes.mat
     +-- outcmaes*.dat
@@ -252,7 +304,34 @@ output/bonePoseOptimization/experiments/
 | `summary.csv` | Flat, analysis-friendly row for every planned combination-seed run. |
 | `summary.mat` | MATLAB version of the same summary table with MATLAB data types preserved. |
 
-The summary begins with every run marked `pending`. After each attempt, its row is updated with identifiers, scalar hyperparameters, seed, status, timestamps, runtime, initial and best costs, function-evaluation count, CMA-ES stop reason, result path, and any error information.
+The summary begins with every run marked `pending`. After each attempt, its row is updated with identifiers, cost-model name, scalar hyperparameters, seed, status, timestamps, runtime, initial and best costs, function-evaluation count, CMA-ES stop reason, result path, and any error information.
+
+### Evaluation tables
+
+`main_bonePoseOptimization_evaluation.m` loads the schema-version-4 experiment
+plan together with the summary and validation context. The saved
+`experimentPlan.parameterNames` list defines which summary columns are swept
+parameters and keeps them in the order chosen by the cost-model validator.
+
+The evaluation output contains one CSV row per run and one ranked CSV row per
+parameter combination. Both tables retain the cost-model name and all declared
+parameter columns. The MAT output also stores the schema version, cost model,
+and parameter-name list in `evaluationMetadata`.
+
+The active evaluator requires a schema-version-4 experiment plan containing
+`parameterNames`. Older experiment plans that do not contain this metadata are
+not inferred automatically and should be inspected with the code version that
+created them.
+
+The evaluator's `heatmapSettings` block controls one paneled heatmap figure.
+`xParameter` and `yParameter` form the cells inside each heatmap, while
+`panelRowParameter` and `panelColumnParameter` arrange the remaining parameter
+values as rows and columns of small heatmaps. A parameter can instead be given
+one value in `parametersToHold` when the figure should show only that slice.
+Every swept parameter must have exactly one of these roles, which prevents a
+new cost-model parameter from being hidden accidentally. To inspect a second
+arrangement, copy the settings block under a new name and call
+`plotHyperparameterPaneledHeatmaps` again.
 
 ### Per-run `runResult.mat`
 

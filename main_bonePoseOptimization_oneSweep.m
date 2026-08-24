@@ -5,17 +5,17 @@ addpath(genpath('functions'));
 
 %% CREATE CONFIGURATION
 
-% Use the same v03-shaped configuration schema as the unattended experiment workflow.
-configFilePath = fullfile(pwd, 'config', 'bonePoseOptimizationSanityCheckConfig.json');
-% Read the candidate values and explicit repeat seed from the sanity-check file.
+% Use the same active configuration schema as the unattended experiment workflow.
+configFilePath = fullfile(pwd, 'config', 'optconfig_oneSweep_intensityCov.json');
+% Read the single parameter combination and repeat seed from the one-sweep file.
 experimentSpec = createBonePoseOptimizationExperimentConfig(configFilePath);
-% Expand the specification through the same plan builder used by the v03 experiment.
+% Expand the specification through the same plan builder used by the experiment.
 experimentPlan = createBonePoseOptimizationExperimentPlan(experimentSpec);
 
 % Keep this interactive workflow focused on exactly one visible optimization run.
 if experimentPlan.numberOfCombinations ~= 1 || experimentPlan.numberOfSeeds ~= 1
-    error('main_bonePoseOptimization_sanityCheck:ExpectedOneRun', ...
-          'The sanity-check configuration must define exactly one hyperparameter combination and one seed.');
+    error('main_bonePoseOptimization_oneSweep:ExpectedOneRun', ...
+          'The one-sweep configuration must define exactly one hyperparameter combination and one seed.');
 end
 
 % Convert the only planned row into the scalar configuration used by existing functions.
@@ -23,7 +23,7 @@ combinationRow = experimentPlan.combinations(1, :);
 runRow         = experimentPlan.runs(1, :);
 config         = createBonePoseOptimizationRunConfig(experimentSpec, combinationRow, runRow.seed);
 
-% Store sanity-check CMA-ES logs below their dedicated output folder.
+% Store the one-sweep CMA-ES logs below their dedicated output folder.
 config.optimizer.outputFolder = experimentSpec.experiment.outputFolder;
 
 %% PREPARE STANDARDIZED INPUTS
@@ -43,11 +43,10 @@ displayBonePoseOptimizationIntersections(data, initialPoseVector, config, 'Initi
 
 % Evaluate the initial pose once so its cost and geometry remain available in the workspace.
 [initialCost, initialCostDetails] = bonePoseCostFunction(initialPoseVector, data, config);
-initialEvaluation = initialCostDetails.poseEvaluation;
 
 % Print a short input summary before the longer optimization starts.
 fprintf('Optimizing bone %s with %d ultrasound planes.\n', data.bone, numel(data.imagePlanesRef));
-fprintf('Sanity-check seed: %d\n', config.optimizer.seed);
+fprintf('One-sweep seed: %d\n', config.optimizer.seed);
 fprintf('Initial cost: %.6f\n', initialCost);
 fprintf('Loaded %d ground-truth intersections for later validation only.\n', numel(validationData.groundTruthIntersections));
 

@@ -25,8 +25,8 @@ function [surfaceResults, extractionMetadata] = extractBoneSurfacesFromSegmentat
 %                         confidence, spacing, summary values, and an empty
 %                         surfaceCoordinatesXYZRef field reserved for later 3D
 %                         recovery in the reference coordinate frame.
-%   extractionMetadata : Scalar struct describing the algorithm, coordinate
-%                        convention, creation time, and resolved configuration.
+%   extractionMetadata : Small scalar struct containing the creation time,
+%                        algorithm version, and processed frame count.
 
 if nargin < 3
     options = struct();
@@ -158,7 +158,7 @@ for groupIndex = 1:numberOfGroups
     surfaceResults(groupIndex).data = currentGroupSurfaceData;
 end
 
-% Record reproducibility information once rather than duplicating it in every
+% Record the small run summary once rather than duplicating it in every
 % per-frame result.
-extractionMetadata = buildExtractionMetadata(resolvedOptions, surfaceResults);
+extractionMetadata = buildExtractionMetadata(surfaceResults);
 end

@@ -1,72 +1,107 @@
 function [data, validationData] = prepareBonePoseOptimizationInputs(config)
 %PREPAREBONEPOSEOPTIMIZATIONINPUTS Prepare standardized optimization inputs.
-% This function loads the reviewed ultrasound snapshots, CT bone model, and
-% coarse registration produced by tools/. It prepares fixed estimation data
-% once so the cost function only needs to evaluate candidate poses.
+% This function loads reviewed ultrasound snapshots, optional bone-surface
+% measurements, the CT bone model, and coarse registration produced by
+% tools/. It prepares fixed estimation data once so the cost function only
+% needs to evaluate candidate poses.
 %
 % Input:
-%   config         - Configuration returned by
-%                    createBonePoseOptimizationConfig.
+%   config         - Scalar configuration returned by
+%                    createBonePoseOptimizationRunConfig.
 %
 % Outputs:
 %   data           - Estimation-only data containing the CT mesh, ultrasound
-%                    planes, initial transforms, and initial pixel counts.
+%                    measurements, initial transforms, and initial pixel counts.
 %   validationData - Saved ground-truth intersections, bone pose, and source
 %                    metadata. This output must not be passed to the optimizer.
-
-%% HANDLE OPTIONAL CONFIGURATION
-
-% Load the v02 configuration when this function is called directly.
-if nargin < 1 || isempty(config)
-    config = createBonePoseOptimizationConfig();
-end
 
 % Use one uppercase code to match the same bone across all standardized files.
 targetBone = upper(char(config.input.bone));
 
 %% LOAD STANDARDIZED TOOL OUTPUTS
 
-% Load reviewed snapshots and their matching ground-truth bone poses together.
-snapshotOutput = loadRequiredVariables( ...
-    config.input.validSnapshotsMatFile, {'validSnapshots', 'validBonePoses'});
-validSnapshots = snapshotOutput.validSnapshots;
-validBonePoses = snapshotOutput.validBonePoses;
+% snapshotOutput is structured as:
+%   snapshotOutput.validSnapshots = struct array of reviewed snapshots;
+%   snapshotOutput.validBonePoses  = struct containing ground-truth poses.
+% So we extract both saved variables from the wrapper returned by MATLAB load.
+snapshotOutput            = loadRequiredVariables(config.input.validSnapshotsMatFile, {'validSnapshots', 'validBonePoses'});
+validSnapshots            = snapshotOutput.validSnapshots;
+validBonePoses            = snapshotOutput.validBonePoses;
 
-% Load the CT model and coarse registration from their owning tool outputs.
-ctOutput = loadRequiredVariables( ...
-    config.input.ctPostProcessedMatFile, {'bones'});
-coarseOutput = loadRequiredVariables( ...
-    config.input.coarseRegistrationMatFile, {'coarseRegistration'});
-bones = ctOutput.bones;
-coarseRegistration = coarseOutput.coarseRegistration;
+% Bone surfaces are another ultrasound measurement input. Load their tool
+% output here beside the snapshots, while keeping them optional for cost
+% models that only use image intensity.
+hasBoneSurface = ~isempty(config.input.boneSurfaceMatFile);
+surfaceOutput = struct();
+if hasBoneSurface
+    surfaceOutput = loadRequiredVariables(config.input.boneSurfaceMatFile, {'surfaceResults', 'extractionMetadata'});
+end
 
-% Find one CT model and one coarse registration using the shared bone code.
-boneIndex = findUniqueBoneIndex(bones, targetBone, 'CT bone model');
-coarseIndex = findUniqueBoneIndex( ...
-    coarseRegistration, targetBone, 'coarse-registration result');
-currentBone = bones(boneIndex);
+% bones and coarseRegistration are structured as arrays with one record per bone:
+%   bones(1).bone              = 'F';
+%   bones(2).bone              = 'T';
+%   coarseRegistration(1).bone = 'F';
+%   coarseRegistration(2).bone = 'T';
+% So we load the complete CT-model and coarse-registration arrays first.
+ctOutput                  = loadRequiredVariables(config.input.ctPostProcessedMatFile, {'bones'});
+coarseOutput              = loadRequiredVariables(config.input.coarseRegistrationMatFile, {'coarseRegistration'});
+bones                     = ctOutput.bones;
+coarseRegistration        = coarseOutput.coarseRegistration;
+
+% currentCoarseRegistration is one record selected from coarseRegistration:
+%   currentCoarseRegistration.bone            = targetBone;
+%   currentCoarseRegistration.status          = "registered";
+%   currentCoarseRegistration.T_CT_ref_est    = 4-by-4 transform;
+%   currentCoarseRegistration.T_bone_ref_est  = 4-by-4 transform;
+%   currentCoarseRegistration.boneMeshRef_est = triangulation in ref coordinates.
+% So we find the matching bone codes instead of assuming a fixed array position.
+boneIndex                 = findUniqueBoneIndex(bones, targetBone, 'CT bone model');
+coarseIndex               = findUniqueBoneIndex(coarseRegistration, targetBone, 'coarse-registration result');
+currentBone               = bones(boneIndex);
 currentCoarseRegistration = coarseRegistration(coarseIndex);
 
-% Match the validation pose independently so array ordering cannot select another bone.
-groundTruthIndex = findUniqueBoneIndex( ...
-    validBonePoses.bonePoses, targetBone, 'ground-truth bone pose');
-currentGroundTruthPose = validBonePoses.bonePoses(groundTruthIndex).data;
+% validBonePoses.bonePoses is also an array with one record per bone:
+%   validBonePoses.bonePoses(1).bone = 'F';
+%   validBonePoses.bonePoses(2).bone = 'T';
+% Each record's data field contains its ground-truth transforms and mesh.
+% So we select the targetBone record and keep its data for later validation.
+groundTruthIndex          = findUniqueBoneIndex(validBonePoses.bonePoses, targetBone, 'ground-truth bone pose');
+currentGroundTruthPose    = validBonePoses.bonePoses(groundTruthIndex).data;
 
 % A skipped coarse-registration record cannot provide an optimization start pose.
 if ~strcmpi(string(currentCoarseRegistration.status), "registered")
     error('prepareBonePoseOptimizationInputs:BoneNotRegistered', ...
-        'The coarse-registration result for bone %s is not registered: %s', ...
-        targetBone, string(currentCoarseRegistration.status));
+          'The coarse-registration result for bone %s is not registered: %s', ...
+          targetBone, string(currentCoarseRegistration.status));
 end
 
 %% COLLECT ESTIMATION AND VALIDATION RECORDS
 
 % Copy planes and ground truth into separate arrays while preserving source order.
-[imagePlanesRef, groundTruthIntersections, snapshotSources] = ...
-    collectBoneSnapshots(validSnapshots, targetBone);
-
-% Check the fixed plane geometry before it is used in repeated evaluations.
+[imagePlanesRef, groundTruthIntersections, snapshotSources] = collectBoneSnapshots(validSnapshots, targetBone);
+% Validate imagePlanesRef whether the necessary fields are exist
 validateImagePlanes(imagePlanesRef);
+
+% Use the same stable output shape when no surface artifact is configured.
+boneSurface.isAvailable        = false;
+boneSurface.extractionMetadata = struct();
+boneSurface.measurements       = struct([]);
+
+% Collect surface records independently before comparing them with snapshots.
+if hasBoneSurface
+    collectedBoneSurface = collectBoneSurfaceMeasurements(surfaceOutput, targetBone);
+
+    % Validate boneSurface whether the necessary fields are exist
+    validateBoneSurfaceMeasurements(collectedBoneSurface);
+end
+
+%% VALIDATE AND ALIGN RELATED ULTRASOUND INPUTS
+
+% Bone surfaces come from the reviewed snapshots. Align them explicitly so
+% measurement k always belongs to image plane k in a future cost function.
+if hasBoneSurface
+    boneSurface = alignBoneSurfacesToSnapshots(collectedBoneSurface, snapshotSources, config.input.validSnapshotsMatFile);
+end
 
 %% PREPARE THE CT MESH AND INITIAL POSE
 
@@ -78,7 +113,7 @@ if ~isa(boneMeshCT, 'triangulation')
 end
 
 % Read the frame-explicit transforms produced by the CT and coarse-registration tools.
-T_bone_CT = currentBone.T_bone_CT;
+T_bone_CT        = currentBone.T_bone_CT;
 T_CT_ref_initial = currentCoarseRegistration.T_CT_ref_est;
 validateRigidTransform(T_bone_CT, 'bones.T_bone_CT');
 validateRigidTransform(T_CT_ref_initial, 'coarseRegistration.T_CT_ref_est');
@@ -87,38 +122,33 @@ validateRigidTransform(T_CT_ref_initial, 'coarseRegistration.T_CT_ref_est');
 T_CT_ref_groundTruth = currentGroundTruthPose.T_CT_ref;
 T_bone_ref_groundTruth = currentGroundTruthPose.T_bone_ref;
 boneMeshRefGroundTruth = currentGroundTruthPose.mesh;
-validateRigidTransform(T_CT_ref_groundTruth, ...
-    'validBonePoses.bonePoses.data.T_CT_ref');
-validateRigidTransform(T_bone_ref_groundTruth, ...
-    'validBonePoses.bonePoses.data.T_bone_ref');
+validateRigidTransform(T_CT_ref_groundTruth, 'validBonePoses.bonePoses.data.T_CT_ref');
+validateRigidTransform(T_bone_ref_groundTruth, 'validBonePoses.bonePoses.data.T_bone_ref');
 if ~isa(boneMeshRefGroundTruth, 'triangulation')
     error('prepareBonePoseOptimizationInputs:InvalidGroundTruthMesh', ...
-        'The ground-truth bone mesh must be a triangulation.');
+          'The ground-truth bone mesh must be a triangulation.');
 end
 
 % The saved anatomical frame must come from the same CT pose and CT bone model.
-if norm(T_bone_ref_groundTruth - ...
-        T_CT_ref_groundTruth * T_bone_CT, 'fro') > 1e-8
+if norm(T_bone_ref_groundTruth - T_CT_ref_groundTruth * T_bone_CT, 'fro') > 1e-8
     error('prepareBonePoseOptimizationInputs:InconsistentGroundTruthTransform', ...
-        'Ground-truth T_bone_ref does not equal T_CT_ref * T_bone_CT.');
+          'Ground-truth T_bone_ref does not equal T_CT_ref * T_bone_CT.');
 end
 
 % Derive the anatomical-frame pose from the CT pose so both always stay synchronized.
 T_bone_ref_initial = T_CT_ref_initial * T_bone_CT;
 if norm(T_bone_ref_initial - currentCoarseRegistration.T_bone_ref_est, 'fro') > 1e-8
     error('prepareBonePoseOptimizationInputs:InconsistentBoneTransform', ...
-        'T_bone_ref_est does not equal T_CT_ref_est * T_bone_CT.');
+          'T_bone_ref_est does not equal T_CT_ref_est * T_bone_CT.');
 end
 
 % Confirm that the coarse mesh belongs to this CT mesh and transform.
-validateCoarseMesh(boneMeshCT, currentCoarseRegistration.boneMeshRef_est, ...
-    T_CT_ref_initial);
+validateCoarseMesh(boneMeshCT, currentCoarseRegistration.boneMeshRef_est, T_CT_ref_initial);
 
 %% COMPUTE THE INITIAL COVERAGE REFERENCE
 
 % Recompute intersections at the coarse pose; saved intersections are validation data only.
-[initialPoseEvaluation, ~] = computeProbeFacingPixelsForPose( ...
-    boneMeshCT, imagePlanesRef, T_CT_ref_initial, config);
+[initialPoseEvaluation, ~] = computeProbeFacingPixelsForPose(boneMeshCT, imagePlanesRef, T_CT_ref_initial, config);
 
 % Store one fixed reference count per plane for active-plane and coverage scoring.
 nInitialIntersectionPixels = arrayfun( ...
@@ -131,10 +161,13 @@ nInitialIntersectionPixels = arrayfun( ...
 data.bone                       = targetBone;
 data.boneName                   = char(string(currentBone.name));
 data.boneMeshCT                 = boneMeshCT;
-data.imagePlanesRef             = imagePlanesRef;
 data.T_bone_CT                  = T_bone_CT;
 data.T_CT_ref_initial           = T_CT_ref_initial;
 data.T_bone_ref_initial         = T_bone_ref_initial;
+data.imagePlanesRef             = imagePlanesRef;
+data.hasBoneSurface             = boneSurface.isAvailable;
+data.boneSurfaceMetadata        = boneSurface.extractionMetadata;
+data.boneSurfaceMeasurements    = boneSurface.measurements;
 data.nInitialIntersectionPixels = nInitialIntersectionPixels;
 data.config                     = config;
 
@@ -153,6 +186,8 @@ if config.logging.printPreparationProgress
         numel(imagePlanesRef), targetBone);
 end
 end
+
+
 
 
 function loadedData = loadRequiredVariables(filePath, variableNames)
@@ -291,6 +326,94 @@ for planeIndex = 1:numel(imagePlanesRef)
         error('prepareBonePoseOptimizationInputs:InvalidPlaneImage', ...
             'Image plane %d has inconsistent dimensions or physical size.', ...
             planeIndex);
+    end
+end
+end
+
+
+function validateBoneSurfaceMeasurements(boneSurface)
+%VALIDATEBONESURFACEMEASUREMENTS Check collected 2D and 3D bone surfaces.
+% This function validates the coordinate convention and every collected
+% surface record independently from the snapshots. It is needed so future
+% cost functions receive surfaces with a clear and consistent meaning.
+%
+% Input:
+%   boneSurface - Struct returned by collectBoneSurfaceMeasurements.
+%
+% Output:
+%   None. The function stops with an error when a surface is invalid.
+
+metadata = boneSurface.extractionMetadata;
+
+% These metadata fields explain how image coordinates follow the ultrasound
+% beam and must be present before their values can be interpreted.
+requiredMetadataFields = {'coordinateConvention', 'beamAxis', 'beamDirection'};
+if ~all(isfield(metadata, requiredMetadataFields))
+    error('prepareBonePoseOptimizationInputs:MissingSurfaceCoordinateMetadata', ...
+          'Surface metadata must define coordinate and beam conventions.');
+end
+
+coordinateConvention = metadata.coordinateConvention;
+coordinateFields = {'indexBase', 'coordinateOrder', ...
+    'imageAxisByCoordinate', 'origin'};
+if ~isstruct(coordinateConvention) || ...
+        ~all(isfield(coordinateConvention, coordinateFields)) || ...
+        coordinateConvention.indexBase ~= 1 || ...
+        ~isequal(string(coordinateConvention.coordinateOrder), ["x", "y"]) || ...
+        ~isequal(string(coordinateConvention.imageAxisByCoordinate), ...
+                 ["column", "row"]) || ...
+        string(coordinateConvention.origin) ~= "topLeftPixelCenter"
+    error('prepareBonePoseOptimizationInputs:UnsupportedSurfaceCoordinateConvention', ...
+          'Bone surfaces must use one-based [x,y] = [column,row] image coordinates.');
+end
+
+% Increasing image rows must follow the beam direction used during surface
+% extraction and 3D recovery.
+beamAxis = metadata.beamAxis;
+beamDirection = metadata.beamDirection;
+if ~isstruct(beamAxis) || ~isstruct(beamDirection) || ...
+        ~all(isfield(beamAxis, {'name', 'matlabDimension'})) || ...
+        ~all(isfield(beamDirection, {'name', 'rowIndexStep'})) || ...
+        string(beamAxis.name) ~= "row" || beamAxis.matlabDimension ~= 1 || ...
+        string(beamDirection.name) ~= "increasingRowIndex" || ...
+        beamDirection.rowIndexStep ~= 1
+    error('prepareBonePoseOptimizationInputs:UnsupportedSurfaceBeamConvention', ...
+          'Bone surfaces must use increasing row index as the beam direction.');
+end
+
+% Validate the fields and coordinate arrays consumed by future cost models.
+measurements = boneSurface.measurements;
+requiredMeasurementFields = {'sourceIndex', 'status', ...
+    'surfaceCoordinatesXY', 'surfaceCoordinatesXYZRef'};
+allowedStatuses = ["extracted", "noSurface", "skippedUnprocessed"];
+
+for measurementIndex = 1:numel(measurements)
+    measurement = measurements(measurementIndex);
+    if ~all(isfield(measurement, requiredMeasurementFields))
+        error('prepareBonePoseOptimizationInputs:InvalidSurfaceRecord', ...
+              'Surface measurement %d is missing a required field.', ...
+              measurementIndex);
+    end
+
+    % Empty surfaces remain valid; each cost model decides how their status
+    % contributes to its objective.
+    if ~any(string(measurement.status) == allowedStatuses)
+        error('prepareBonePoseOptimizationInputs:InvalidSurfaceStatus', ...
+              'Surface measurement %d has unsupported status %s.', ...
+              measurementIndex, string(measurement.status));
+    end
+
+    surfaceCoordinatesXY = measurement.surfaceCoordinatesXY;
+    surfacePointsRef      = measurement.surfaceCoordinatesXYZRef;
+    if ~isnumeric(surfaceCoordinatesXY) || ...
+            size(surfaceCoordinatesXY, 2) ~= 2 || ...
+            ~isnumeric(surfacePointsRef) || size(surfacePointsRef, 2) ~= 3 || ...
+            size(surfaceCoordinatesXY, 1) ~= size(surfacePointsRef, 1) || ...
+            ~all(isfinite(surfaceCoordinatesXY), 'all') || ...
+            ~all(isfinite(surfacePointsRef), 'all')
+        error('prepareBonePoseOptimizationInputs:InvalidSurfaceCoordinates', ...
+              'Surface measurement %d must contain matching finite N-by-2 and N-by-3 coordinates.', ...
+              measurementIndex);
     end
 end
 end
