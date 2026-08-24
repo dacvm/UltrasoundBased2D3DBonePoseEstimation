@@ -40,8 +40,8 @@
     "parforWorkers": 6
   },
   "experiment": {
-    "name": "sanity_check",
+    "name": "sanityCheck_intensityCoverage",
     "seeds": [1001],
-    "outputFolder": "output/bonePoseOptimization/sanityChecks"
+    "outputFolder": "output/bonePoseOptimization/sanityChecks/intensityCoverage_v1"
   }
 }

@@ -1,10 +1,9 @@
 clear; clc; close all;
 
-% Locate the development fixture and reusable project functions without
+% Locate the development fixture and production project functions without
 % requiring the user to start MATLAB in one particular folder.
 developmentFolder = fileparts(mfilename('fullpath'));
 projectRoot = fileparts(fileparts(developmentFolder));
-addpath(developmentFolder);
 addpath(genpath(fullfile(projectRoot, 'functions')));
 
 %% LOAD THE PREPARED OPTIMIZATION SETUP

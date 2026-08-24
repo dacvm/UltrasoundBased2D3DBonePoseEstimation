@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 4,
+  "project": {
+    "root": "..",
+    "functionsFolderName": "functions"
+  },
+  "input": {
+    "bone": "T",
+    "validSnapshotsMatFile": "tools/ultrasoundSpatialProcessing/outputs/validSnapshots_20260812_160247.mat",
+    "boneSurfaceMatFile": "tools/boneSegmentationProcess/outputs/boneSurface_20260819_205405.mat",
+    "ctPostProcessedMatFile": "tools/ctkneePostProcess/outputs/kneephantom/kneephantom_bones_and_bonepins.mat",
+    "coarseRegistrationMatFile": "tools/bonePreRegistration/outputs/coarseRegistration_20260819_205443.mat"
+  },
+  "intersection": {
+    "normalFacingToleranceDeg": [30]
+  },
+  "cost": {
+    "model": "pointCloud3D_v1",
+    "fixedParameters": {
+      "nearestVertexCount": 20
+    },
+    "hyperparameters": {}
+  },
+  "logging": {
+    "printPreparationProgress": false,
+    "printEvaluationProgress": false
+  },
+  "optimizer": {
+    "translationBoundMm": 10.0,
+    "rotationBoundDeg": 10.0,
+    "translationSigmaMm": 3.0,
+    "rotationSigmaDeg": 3.0,
+    "populationSize": 4,
+    "maxFunctionEvaluations": 10,
+    "useParfor": true,
+    "parforWorkers": 6
+  },
+  "experiment": {
+    "name": "sanityCheck_pointCloud",
+    "seeds": [1001],
+    "outputFolder": "output/bonePoseOptimization/sanityChecks/pointCloud3D_v1"
+  }
+}

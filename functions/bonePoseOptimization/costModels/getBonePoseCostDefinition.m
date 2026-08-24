@@ -45,6 +45,12 @@ switch modelName
         definition.validateExperimentConfigFcn  = @validateBonePoseCostIntensityCoverageV1Config;
         definition.requiresBoneSurface          = false;
 
+    case 'pointCloud3D_v1'
+        definition.modelName                    = 'pointCloud3D_v1';
+        definition.evaluateFcn                  = @bonePoseCost3DPointCloudV1;
+        definition.validateExperimentConfigFcn  = @validateBonePoseCost3DPointCloudV1Config;
+        definition.requiresBoneSurface          = true;
+
     otherwise
         error('getBonePoseCostDefinition:UnsupportedModel', 'Unsupported cost model: %s', modelName);
 end
