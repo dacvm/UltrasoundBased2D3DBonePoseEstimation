@@ -37,6 +37,10 @@ end
 testCase.TestData.options = struct( ...
     'imageEvidence', struct('gaussianSigmaMm', 0.5));
 testCase.TestData.configurationPath = 'synthetic_config.json';
+% Supply compact export inputs to every GUI call. Navigation tests do not press
+% the export button, so the shared temporary directory remains unchanged.
+testCase.TestData.extractionMetadata = struct('source', 'synthetic_test');
+testCase.TestData.outputDirectory = tempdir;
 end
 
 
@@ -88,7 +92,8 @@ function testGroupedTabsAndLocalTableIdentity(testCase)
 [surfaceGroups, segmentationGroups, ultrasoundGroups] = makeReviewFixture();
 reviewFigure = createBoneSurfaceReviewGUI( ...
     surfaceGroups, segmentationGroups, ultrasoundGroups, ...
-    testCase.TestData.options, testCase.TestData.configurationPath);
+    testCase.TestData.options, testCase.TestData.configurationPath, ...
+    testCase.TestData.extractionMetadata, testCase.TestData.outputDirectory);
 drawnow;
 
 tabGroup = findall(reviewFigure, 'Tag', 'bone_surface_review_tab_group');
@@ -132,7 +137,8 @@ function testEmptyTabRememberedSelectionAndRepeatedSource(testCase)
 [surfaceGroups, segmentationGroups, ultrasoundGroups] = makeReviewFixture();
 reviewFigure = createBoneSurfaceReviewGUI( ...
     surfaceGroups, segmentationGroups, ultrasoundGroups, ...
-    testCase.TestData.options, testCase.TestData.configurationPath);
+    testCase.TestData.options, testCase.TestData.configurationPath, ...
+    testCase.TestData.extractionMetadata, testCase.TestData.outputDirectory);
 drawnow;
 
 tabGroup = findall(reviewFigure, 'Tag', 'bone_surface_review_tab_group');
@@ -173,6 +179,94 @@ verifyEqual(testCase, getDisplayedImageData(reviewFigure), ...
 end
 
 
+function testExportWritesOriginalGroupedResultOnce(testCase)
+%TESTEXPORTWRITESORIGINALGROUPEDRESULTONCE Verify explicit GUI export behavior.
+% Opening the review must not write a file. Pressing Export must preserve the
+% grouped public result and metadata, then prevent an identical second export.
+%
+% Input:
+%   testCase : matlab.unittest.FunctionTestCase used for assertions.
+%
+% Outputs:
+%   None.
+
+% Use a unique empty directory so any produced artifact belongs to this test.
+temporaryDirectory = tempname;
+mkdir(temporaryDirectory);
+directoryCleanup = onCleanup( ...
+    @() removeDirectoryIfPresent(temporaryDirectory));
+
+[surfaceGroups, segmentationGroups, ultrasoundGroups] = makeReviewFixture();
+extractionMetadata = struct( ...
+    'sourceSegmentationFile', 'synthetic_segmentation.mat', ...
+    'configurationFile', 'synthetic_config.json');
+reviewFigure = createBoneSurfaceReviewGUI( ...
+    surfaceGroups, segmentationGroups, ultrasoundGroups, ...
+    testCase.TestData.options, testCase.TestData.configurationPath, ...
+    extractionMetadata, temporaryDirectory);
+drawnow;
+
+% Creating the GUI alone must leave the configured output directory empty.
+exportedFiles = dir(fullfile(temporaryDirectory, 'boneSurface_*.mat'));
+verifyEmpty(testCase, exportedFiles);
+
+exportButton = findall(reviewFigure, ...
+    'Tag', 'bone_surface_review_export_button');
+verifyEqual(testCase, exportButton.Text, 'Export Surface Results');
+verifyEqual(testCase, string(exportButton.Enable), "on");
+
+% Invoke the same callback used by a real button press, then inspect the saved
+% variables rather than relying only on the visible success state.
+exportCallback = exportButton.ButtonPushedFcn;
+exportCallback(exportButton, struct());
+drawnow;
+
+exportedFiles = dir(fullfile(temporaryDirectory, 'boneSurface_*.mat'));
+verifyNumElements(testCase, exportedFiles, 1);
+savedArtifact = load(fullfile( ...
+    exportedFiles(1).folder, exportedFiles(1).name));
+verifyEqual(testCase, savedArtifact.surfaceResults, surfaceGroups);
+verifyEqual(testCase, savedArtifact.extractionMetadata, extractionMetadata);
+verifyEqual(testCase, exportButton.Text, 'Exported');
+verifyEqual(testCase, string(exportButton.Enable), "off");
+end
+
+
+function testExportFailureLeavesButtonAvailable(testCase)
+%TESTEXPORTFAILURELEAVESBUTTONAVAILABLE Verify that a failed save can be retried.
+% Removing the validated output directory after GUI creation forces SAVE to fail
+% without changing the production callback or writing a partial valid artifact.
+%
+% Input:
+%   testCase : matlab.unittest.FunctionTestCase used for assertions.
+%
+% Outputs:
+%   None.
+
+temporaryDirectory = tempname;
+mkdir(temporaryDirectory);
+[surfaceGroups, segmentationGroups, ultrasoundGroups] = makeReviewFixture();
+reviewFigure = createBoneSurfaceReviewGUI( ...
+    surfaceGroups, segmentationGroups, ultrasoundGroups, ...
+    testCase.TestData.options, testCase.TestData.configurationPath, ...
+    testCase.TestData.extractionMetadata, temporaryDirectory);
+drawnow;
+
+% Invalidate only this test-owned directory after input validation so the save
+% callback exercises its error path while the review window stays usable.
+rmdir(temporaryDirectory);
+exportButton = findall(reviewFigure, ...
+    'Tag', 'bone_surface_review_export_button');
+exportCallback = exportButton.ButtonPushedFcn;
+exportCallback(exportButton, struct());
+drawnow;
+
+verifyEqual(testCase, exportButton.Text, 'Export Surface Results');
+verifyEqual(testCase, string(exportButton.Enable), "on");
+verifyFalse(testCase, isfolder(temporaryDirectory));
+end
+
+
 function testFlatAndDuplicateGroupInputsAreRejected(testCase)
 %TESTFLATANDDUPLICATEGROUPINPUTSAREREJECTED Verify grouped-only GUI validation.
 % Flat surfaces and ambiguous group metadata must fail before a partial review
@@ -187,7 +281,8 @@ function testFlatAndDuplicateGroupInputsAreRejected(testCase)
 [surfaceGroups, segmentationGroups, ultrasoundGroups] = makeReviewFixture();
 verifyError(testCase, @() createBoneSurfaceReviewGUI( ...
     surfaceGroups(2).data, segmentationGroups, ultrasoundGroups, ...
-    testCase.TestData.options, testCase.TestData.configurationPath), ...
+    testCase.TestData.options, testCase.TestData.configurationPath, ...
+    testCase.TestData.extractionMetadata, testCase.TestData.outputDirectory), ...
     'createBoneSurfaceReviewGUI:InvalidSurfaceResults');
 
 segmentationGroups(2).name = segmentationGroups(1).name;
@@ -195,8 +290,26 @@ segmentationGroups(2).bone = segmentationGroups(1).bone;
 segmentationGroups(2).path = segmentationGroups(1).path;
 verifyError(testCase, @() createBoneSurfaceReviewGUI( ...
     surfaceGroups, segmentationGroups, ultrasoundGroups, ...
-    testCase.TestData.options, testCase.TestData.configurationPath), ...
+    testCase.TestData.options, testCase.TestData.configurationPath, ...
+    testCase.TestData.extractionMetadata, testCase.TestData.outputDirectory), ...
     'createBoneSurfaceReviewGUI:DuplicateGroupIdentity');
+end
+
+
+function removeDirectoryIfPresent(directoryPath)
+%REMOVEDIRECTORYIFPRESENT Delete a temporary export directory after a test.
+% Test cleanup must tolerate an earlier assertion or callback removing the same
+% directory, so existence is checked before recursive deletion.
+%
+% Input:
+%   directoryPath : Test-owned temporary directory that may contain a MAT-file.
+%
+% Outputs:
+%   None.
+
+if isfolder(directoryPath)
+    rmdir(directoryPath, 's');
+end
 end
 
 
