@@ -20,9 +20,9 @@
       "intensityMax": 255
     },
     "hyperparameters": {
-      "minReferencePixels": [50, 100],
-      "nMinPixels": [100, 200],
-      "lambdaMissing": [1.0, 1.5]
+      "minReferencePixels": [50, 100, 150],
+      "nMinPixels": [100, 200, 300],
+      "lambdaMissing": [1.0, 1.5, 2.0]
     }
   },
   "logging": {
@@ -34,14 +34,14 @@
     "rotationBoundDeg": 10.0,
     "translationSigmaMm": 3.0,
     "rotationSigmaDeg": 3.0,
-    "populationSize": 3,
-    "maxFunctionEvaluations": 5,
+    "populationSize": 32,
+    "maxFunctionEvaluations": 30,
     "useParfor": true,
     "parforWorkers": 6
   },
   "experiment": {
     "name": "intensityCov_v01",
-    "seeds": [1001, 1002, 1003],
+    "seeds": [1001, 1002, 1003, 1004, 1005],
     "outputFolder": "output/bonePoseOptimization/experiments"
   }
 }
