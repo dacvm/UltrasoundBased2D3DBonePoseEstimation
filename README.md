@@ -1,6 +1,40 @@
 # Optimization-Based Bone Registration with B-Mode Ultrasound
 
-## Short summary
+## 1. Table of contents
+
+- [1. Table of contents](#1-table-of-contents)
+- [2. Short summary](#2-short-summary)
+- [3. Experiment setup](#3-experiment-setup)
+  - [3.1. Equip the specimen with tracked bone pins](#31-equip-the-specimen-with-tracked-bone-pins)
+  - [3.2. Acquire the CT scan before the ultrasound experiment](#32-acquire-the-ct-scan-before-the-ultrasound-experiment)
+  - [3.3. Process the CT anatomy and tracking geometry](#33-process-the-ct-anatomy-and-tracking-geometry)
+  - [3.4. Place the specimen in the motion-capture workspace](#34-place-the-specimen-in-the-motion-capture-workspace)
+  - [3.5. Track and calibrate the ultrasound probe](#35-track-and-calibrate-the-ultrasound-probe)
+  - [3.6. Acquire tracked B-mode ultrasound snapshots](#36-acquire-tracked-b-mode-ultrasound-snapshots)
+  - [3.7. Build the estimation and ground-truth data](#37-build-the-estimation-and-ground-truth-data)
+- [4. Required input data](#4-required-input-data)
+  - [4.1. Optimization code organization](#41-optimization-code-organization)
+  - [4.2. Optimizer parameters](#42-optimizer-parameters)
+- [5. Supported cost functions](#5-supported-cost-functions)
+  - [5.1. `intensityCov_v1`: intensity and coverage](#51-intensitycov_v1-intensity-and-coverage)
+  - [5.2. `ICPLike_v1`: one-way 3D point-to-mesh distance](#52-icplike_v1-one-way-3d-point-to-mesh-distance)
+  - [5.3. `intensityICP_v1`: combined intensity and 3D distance](#53-intensityicp_v1-combined-intensity-and-3d-distance)
+- [6. Running the project](#6-running-the-project)
+  - [6.1. Requirements](#61-requirements)
+  - [6.2. Configure the input paths and settings](#62-configure-the-input-paths-and-settings)
+  - [6.3. Start MATLAB in the repository root](#63-start-matlab-in-the-repository-root)
+  - [6.4. Run one sweep first](#64-run-one-sweep-first)
+  - [6.5. Run the hyperparameter sweep](#65-run-the-hyperparameter-sweep)
+- [7. Output structure](#7-output-structure)
+  - [7.1. One-sweep output](#71-one-sweep-output)
+  - [7.2. Hyperparameter-sweep output](#72-hyperparameter-sweep-output)
+  - [7.3. Experiment-level files](#73-experiment-level-files)
+  - [7.4. Evaluation tables](#74-evaluation-tables)
+  - [7.5. Per-run `runResult.mat`](#75-per-run-runresultmat)
+- [8. Processing workflow](#8-processing-workflow)
+  - [8.1. Adding a new cost function](#81-adding-a-new-cost-function)
+
+## 2. Short summary
 
 This MATLAB project supports the development of optimization-based bone registration using tracked B-mode ultrasound images. Its purpose is to explore how much information conventional B-mode ultrasound can provide for estimating the three-dimensional pose of a bone when a CT-derived bone mesh and an approximate initial registration are available.
 
@@ -13,17 +47,17 @@ The project currently provides two entry points:
 
 This repository is research and development code. The cost function, optimization settings, and validation strategy are expected to evolve while the capabilities and limitations of B-mode ultrasound for bone registration are investigated.
 
-## Experiment setup
+## 3. Experiment setup
 
 The workflow was developed for a knee phantom, but the same general arrangement can be used with a cadaver leg. The physical setup must connect the CT anatomy, tracked bone pins, ultrasound probe, and motion-capture reference frame without changing their geometry between calibration, CT imaging, and ultrasound acquisition.
 
-### 1. Equip the specimen with tracked bone pins
+### 3.1. Equip the specimen with tracked bone pins
 
 Attach a bone pin to each bone that will be registered, such as the femur or tibia. Each pin carries an optical-marker rigid body so the bone pose can be measured by the motion-capture system. The pin must remain rigidly attached to the bone throughout CT scanning and ultrasound acquisition.
 
 Also provide a fixed reference rigid body in the experimental workspace. This reference defines the common coordinate frame in which the tracked ultrasound images, bone-pin measurements, CT meshes, coarse estimates, and final optimization results are compared.
 
-### 2. Acquire the CT scan before the ultrasound experiment
+### 3.2. Acquire the CT scan before the ultrasound experiment
 
 CT-scan the knee phantom or cadaver leg together with the attached bone pins and their optical-marker geometry. The CT scan must contain enough information to reconstruct:
 
@@ -34,25 +68,25 @@ CT-scan the knee phantom or cadaver leg together with the attached bone pins and
 
 Keeping the pin and marker assembly unchanged is essential. Reattaching or moving a pin after the CT scan breaks the rigid relationship used to obtain the ground-truth bone pose.
 
-### 3. Process the CT anatomy and tracking geometry
+### 3.3. Process the CT anatomy and tracking geometry
 
 Segment or prepare the bone meshes, define their anatomical coordinate systems, and identify the pin-marker geometry in the CT data. The tools in [`tools/`](tools/README.md) describe the expected processing order and output structures.
 
 The processed CT result connects the CT mesh to the tracked bone pin. During the ultrasound experiment, this relationship allows the measured pin pose to place the complete CT bone mesh in the common reference frame.
 
-### 4. Place the specimen in the motion-capture workspace
+### 3.4. Place the specimen in the motion-capture workspace
 
 Place the instrumented knee under the working volume of an optical motion-capture system. This project is being developed with a Qualisys system. Confirm that the reference object, bone-pin rigid bodies, and probe rigid body are simultaneously visible and use consistent rigid-body names.
 
 Before collecting ultrasound data, check the marker definitions, axis directions, units, and coordinate-system handedness. These definitions must agree with those used during CT processing. A mismatch can create a plausible-looking but incorrect bone registration.
 
-### 5. Track and calibrate the ultrasound probe
+### 3.5. Track and calibrate the ultrasound probe
 
 Attach an optical-marker rigid body to the B-mode ultrasound probe. Calibrate the relationship between the image and probe coordinate systems beforehand. This workflow uses the [PLUS Toolkit](https://plustoolkit.github.io/) and expects an fCal/PLUS calibration containing the `ImageToProbe` transform.
 
 The calibration connects an ultrasound pixel to a physical location relative to the tracked probe. Together with the measured probe and reference poses, it allows each B-mode image to be represented as a finite plane in the common three-dimensional reference frame.
 
-### 6. Acquire tracked B-mode ultrasound snapshots
+### 3.6. Acquire tracked B-mode ultrasound snapshots
 
 Move the tracked probe over the bone surface and record B-mode ultrasound snapshots. Save the ultrasound image data together with the corresponding probe, reference, and bone-pin tracking measurements. The acquisition software used for this work is maintained in the separate [BmodeMocapIntegration repository](https://github.com/dacvm/BmodeMocapIntegration).
 
@@ -62,7 +96,7 @@ Each accepted snapshot ultimately provides:
 - A calibrated image plane in three-dimensional reference coordinates.
 - A timestamp and source record that connect the image to its tracking data.
 
-### 7. Build the estimation and ground-truth data
+### 3.7. Build the estimation and ground-truth data
 
 The tracked and calibrated probe provides the estimated position of each ultrasound image in 3D space. The CT mesh and the optically tracked bone pin provide an independent ground-truth bone pose. These two information paths serve different purposes:
 
@@ -71,7 +105,7 @@ The tracked and calibrated probe provides the estimated position of each ultraso
 
 This separation prevents the optimization cost from using the answer that it is intended to estimate.
 
-## Required input data
+## 4. Required input data
 
 Raw B-mode ultrasound and motion-capture data can be recorded with the acquisition software in [BmodeMocapIntegration](https://github.com/dacvm/BmodeMocapIntegration). Before running the optimizer, follow the instructions in [`tools/README.md`](tools/README.md) and the README inside each relevant tool directory. The preparation tools are generally used in this order:
 
@@ -91,7 +125,7 @@ The optimization configuration points to three required MAT files and one option
 
 The prepared files must describe the same specimen, bone, pin selection, marker geometry, units, and coordinate-frame conventions. The `input.bone` setting selects the target bone code, such as `F` for femur or `T` for tibia.
 
-### Optimization code organization
+### 4.1. Optimization code organization
 
 The three stable workflow entry points remain directly under
 `functions/bonePoseOptimization/`: cost evaluation, one optimization run, and
@@ -104,7 +138,7 @@ one experiment run. Supporting functions are grouped one level below:
 - `evaluationMetric/` and `evaluationPlot/` analyze saved results.
 - `tests/` test codes that verifies the active pipeline.
 
-### Optimizer parameters
+### 4.2. Optimizer parameters
 
 The optimizer represents a candidate as a local six-value perturbation `[vx; vy; vz; wx; wy; wz]` around the coarse CT-to-reference transform. Translation is expressed in the mesh length unit, normally millimetres, and rotation is configured in degrees before conversion to radians.
 
@@ -121,13 +155,13 @@ The optimizer represents a candidate as a local six-value perturbation `[vx; vy;
 
 The `experiment.seeds` array controls repeated stochastic runs. A one-sweep configuration must contain exactly one parameter combination and one seed. The sweep configuration can contain several values and seeds.
 
-## Supported cost functions
+## 5. Supported cost functions
 
-This is an ongoing list. The current framework registers the following three versioned cost models; more models can be added through the extension process described in [Processing workflow](#processing-workflow). Every model returns one scalar objective to CMA-ES, and a lower value is always better.
+This is an ongoing list. The current framework registers the following three versioned cost models; more models can be added through the extension process described in [Processing workflow](#8-processing-workflow). Every model returns one scalar objective to CMA-ES, and a lower value is always better.
 
 In the tables below, a **fixed parameter** has one value for the complete experiment. A **hyperparameter** is an array of candidate values; the experiment planner includes it in the Cartesian product used to create parameter combinations.
 
-### `intensityCov_v1`: intensity and coverage
+### 5.1. `intensityCov_v1`: intensity and coverage
 
 This model intersects the candidate CT mesh with each tracked ultrasound plane and keeps pixels produced by probe-facing mesh faces. It rewards intersections that are both bright and sufficiently covered relative to the intersection at the coarse initial pose. It also penalizes active image planes whose candidate intersection contains too few pixels. This prevents a very small but bright intersection from appearing better than a physically meaningful one.
 
@@ -142,7 +176,7 @@ For every active plane, the score is the normalized mean pixel intensity multipl
 
 This model does not require `boneSurfaceMatFile`.
 
-### `ICPLike_v1`: one-way 3D point-to-mesh distance
+### 5.2. `ICPLike_v1`: one-way 3D point-to-mesh distance
 
 This model transforms the CT mesh to the candidate pose and measures the distance from every ultrasound-derived 3D bone-surface point to its closest location on the mesh triangles. The returned cost is the root-mean-square of all point-to-surface distances in millimetres. It is one-way: measured ultrasound points must agree with the mesh, but unobserved regions of the mesh do not require corresponding ultrasound points.
 
@@ -152,7 +186,7 @@ This model transforms the CT mesh to the candidate pose and measures the distanc
 
 This model requires aligned 3D bone-surface measurements from `boneSurfaceMatFile`.
 
-### `intensityICP_v1`: combined intensity and 3D distance
+### 5.3. `intensityICP_v1`: combined intensity and 3D distance
 
 This model evaluates both models above at the same candidate pose. It divides the point-to-mesh RMSE by a reference distance to make that term dimensionless, then returns the convex blend
 
@@ -175,9 +209,9 @@ A `weight` of `1` selects only the intensity-and-coverage term, while `0` select
 
 This model requires aligned 3D bone-surface measurements from `boneSurfaceMatFile`.
 
-## Running the project
+## 6. Running the project
 
-### Requirements
+### 6.1. Requirements
 
 - MATLAB with support for `triangulation`, tables, JSON decoding, and the functions used by the preparation tools.
 - Parallel Computing Toolbox is optional. When it is unavailable, a configuration requesting `useParfor` falls back to serial CMA-ES with a warning.
@@ -185,7 +219,7 @@ This model requires aligned 3D bone-surface measurements from `boneSurfaceMatFil
 
 The external CMA-ES implementation used by this project is already stored under `functions/external/`. Do not modify files in that directory when changing project-specific optimization behavior.
 
-### 1. Configure the input paths and settings
+### 6.2. Configure the input paths and settings
 
 Edit one of the following files:
 
@@ -199,7 +233,7 @@ reference only. Active readers do not execute schema-less legacy configs.
 
 Set `project.root` relative to the configuration directory or provide an absolute path. The supplied configuration files use `".."`, which resolves to this repository root. Input paths are then resolved relative to that project root.
 
-### 2. Start MATLAB in the repository root
+### 6.3. Start MATLAB in the repository root
 
 Both main scripts build the configuration path from `pwd`. Change MATLAB's current folder to the directory containing this README before running either script:
 
@@ -207,7 +241,7 @@ Both main scripts build the configuration path from `pwd`. Change MATLAB's curre
 cd('D:/path/to/bmodeimage_3dspace')
 ```
 
-### 3. Run one sweep first
+### 6.4. Run one sweep first
 
 ```matlab
 main_bonePoseOptimization_oneSweep
@@ -223,7 +257,7 @@ Use this workflow to confirm that:
 - The initial and optimized costs are finite.
 - Search bounds, population size, evaluation budget, and parallel settings are practical.
 
-### 4. Run the hyperparameter sweep
+### 6.5. Run the hyperparameter sweep
 
 ```matlab
 main_bonePoseOptimization_hyperparamSweep
@@ -231,9 +265,9 @@ main_bonePoseOptimization_hyperparamSweep
 
 The sweep creates a new timestamped experiment on every invocation. It does not resume an older experiment. Before starting, MATLAB prints the number of combinations, seeds, planned runs, and maximum planned CMA-ES function evaluations. During execution, each completed or failed run is written to disk and the summary files are refreshed.
 
-## Output structure
+## 7. Output structure
 
-### One-sweep output
+### 7.1. One-sweep output
 
 The one-sweep workflow stores raw CMA-ES files below the configured output folder. Its main `optimizationResult`, initial details, prepared data, and validation data remain in the MATLAB workspace unless the user saves them separately.
 
@@ -248,7 +282,7 @@ output/bonePoseOptimization/oneSweeps/
 
 `variablescmaes.mat` and the `outcmaes*.dat` files contain the raw optimizer state, history, and diagnostics produced by the bundled CMA-ES implementation. `OptSaver.mat` is the progress file expected by that implementation.
 
-### Hyperparameter-sweep output
+### 7.2. Hyperparameter-sweep output
 
 Every sweep creates a separate experiment folder. Its name combines `experiment.name` with a timestamp:
 
@@ -278,7 +312,7 @@ output/bonePoseOptimization/experiments/
 
 `validation_context.mat` is written after the first successful input preparation. It may be absent if every combination fails before validation data can be saved.
 
-### Experiment-level files
+### 7.3. Experiment-level files
 
 | File | Contents |
 | --- | --- |
@@ -290,7 +324,7 @@ output/bonePoseOptimization/experiments/
 
 The summary begins with every run marked `pending`. After each attempt, its row is updated with identifiers, cost-model name, scalar hyperparameters, seed, status, timestamps, runtime, initial and best costs, function-evaluation count, CMA-ES stop reason, result path, and any error information.
 
-### Evaluation tables
+### 7.4. Evaluation tables
 
 `main_bonePoseOptimization_evaluation.m` loads the schema-version-4 experiment
 plan together with the summary and validation context. The saved
@@ -317,7 +351,7 @@ new cost-model parameter from being hidden accidentally. To inspect a second
 arrangement, copy the settings block under a new name and call
 `plotHyperparameterPaneledHeatmaps` again.
 
-### Per-run `runResult.mat`
+### 7.5. Per-run `runResult.mat`
 
 Each seed folder contains one `runResult.mat`, including failed runs. Its top-level structure is:
 
@@ -349,7 +383,7 @@ For a completed run, `optimizationResult` contains the initial and best pose vec
 
 For a failed run, the same overall shape is retained where practical, while unavailable numeric values are stored as `NaN` or empty structs. The `error` group records whether the failure occurred during preparation or optimization and preserves the MATLAB exception information.
 
-## Processing workflow
+## 8. Processing workflow
 
 The one-sweep and hyperparameter-sweep scripts share the same configuration, planning, input-preparation, optimizer, and cost-dispatch framework. The sweep runner adds loops over parameter combinations and random seeds, plus immediate result saving. The following sequence shows the main function calls; display-only calls in the interactive one-sweep script are omitted.
 
@@ -401,7 +435,7 @@ At configuration time, `createBonePoseOptimizationExperimentConfig` asks the reg
 
 At optimization time, CMA-ES changes only the six-value local pose perturbation. `bonePoseCostFunction` is the stable public dispatcher: it reads `config.cost.model`, resolves the registered evaluator, and forwards the pose, prepared data, and scalar configuration. Consequently, the optimizer and runner do not need model-specific branches.
 
-### Adding a new cost function
+### 8.1. Adding a new cost function
 
 1. **Create a versioned evaluator in `functions/bonePoseOptimization/costModels/`.** Use the interface `[cost, details] = cost_<name>_vNN(poseVector, data, config)`. Perform file loading and other reusable preparation before optimization, not inside this frequently called function. Return one finite numeric scalar, keep the convention that lower is better, and place useful intermediate values in `details` so a saved best pose can be inspected.
 
