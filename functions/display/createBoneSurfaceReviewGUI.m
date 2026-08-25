@@ -1,10 +1,12 @@
 function reviewFigure = createBoneSurfaceReviewGUI( ...
         surfaceResults, segmentationResults, ultrasoundSequence, ...
-        extractionOptions, configurationFilePath)
+        extractionOptions, configurationFilePath, extractionMetadata, ...
+        outputDirectory)
 %CREATEBONESURFACEREVIEWGUI Open an interactive bone-surface review window.
 % The GUI keeps each source directory in its own sortable table tab. Selecting
 % a row redraws only its matching ultrasound image, segmentation, and extracted
-% surface. The right-hand controls document JSON settings without allowing edits.
+% surface. The right-hand controls document JSON settings without allowing edits
+% and let the user export the reviewed grouped result when it should be retained.
 %
 % Inputs:
 %   surfaceResults        : Grouped extracted surface result struct vector.
@@ -12,6 +14,8 @@ function reviewFigure = createBoneSurfaceReviewGUI( ...
 %   ultrasoundSequence    : Grouped source images matched within each group.
 %   extractionOptions     : Scalar struct decoded from the extraction JSON.
 %   configurationFilePath : Path of the JSON file shown in the GUI.
+%   extractionMetadata    : Scalar provenance struct saved with surfaceResults.
+%   outputDirectory       : Existing directory used for the optional MAT export.
 %
 % Outputs:
 %   reviewFigure          : Handle to the non-blocking review uifigure.
@@ -27,12 +31,6 @@ numberOfResultsByGroup = cellfun(@numel, stateIndicesByGroup);
 numberOfResults = sum(numberOfResultsByGroup);
 firstNonemptyGroupIndex = find(numberOfResultsByGroup > 0, 1);
 
-% Use aligned internal arrays below so repeated sourceIndex values in different
-% groups can never be mistaken for global identifiers.
-surfaceResults = flatSurfaceResults;
-segmentationResults = flatSegmentationResults;
-ultrasoundSequence = flatUltrasoundSequence;
-
 % Reject malformed configuration inputs before creating a partial figure.
 if ~isstruct(extractionOptions) || ~isscalar(extractionOptions)
     error('createBoneSurfaceReviewGUI:InvalidOptions', ...
@@ -43,6 +41,20 @@ if ~(ischar(configurationFilePath) || ...
     error('createBoneSurfaceReviewGUI:InvalidConfigurationPath', ...
         'configurationFilePath must be a character vector or string scalar.');
 end
+if ~isstruct(extractionMetadata) || ~isscalar(extractionMetadata)
+    error('createBoneSurfaceReviewGUI:InvalidExtractionMetadata', ...
+        'extractionMetadata must be a scalar provenance struct.');
+end
+if ~(ischar(outputDirectory) || ...
+        (isstring(outputDirectory) && isscalar(outputDirectory)))
+    error('createBoneSurfaceReviewGUI:InvalidOutputDirectory', ...
+        'outputDirectory must be a character vector or string scalar.');
+end
+outputDirectory = char(string(outputDirectory));
+if ~isfolder(outputDirectory)
+    error('createBoneSurfaceReviewGUI:OutputDirectoryNotFound', ...
+        'The surface export directory was not found: %s', outputDirectory);
+end
 
 % Build one table per group. LocalResultIndex remains stable after sorting and
 % maps through stateIndicesByGroup to the aligned internal flat record.
@@ -52,7 +64,7 @@ for groupIndex = 1:numberOfGroups
     numberOfGroupResults = numel(groupStateIndices);
     localResultIndices = (1:numberOfGroupResults).';
     if numberOfGroupResults > 0
-        groupSurfaceResults = surfaceResults(groupStateIndices);
+        groupSurfaceResults = flatSurfaceResults(groupStateIndices);
         sequencePositions = [groupSurfaceResults.sequencePosition].';
         sourceIndices = [groupSurfaceResults.sourceIndex].';
         statusValues = string({groupSurfaceResults.status}).';
@@ -209,8 +221,10 @@ parameterPanel = uipanel(mainGrid, ...
     'Tag', 'bone_surface_review_parameter_panel');
 parameterPanel.Layout.Row = 1;
 parameterPanel.Layout.Column = 3;
-parameterGrid = uigridlayout(parameterPanel, [1, 1], ...
-    'Padding', [5, 5, 5, 5]);
+parameterGrid = uigridlayout(parameterPanel, [2, 1], ...
+    'RowHeight', {'1x', 38}, ...
+    'Padding', [5, 5, 5, 5], ...
+    'RowSpacing', 5);
 
 parameterScrollPanel = uipanel(parameterGrid, ...
     'BorderType', 'none', ...
@@ -219,6 +233,15 @@ parameterScrollPanel = uipanel(parameterGrid, ...
     'Tag', 'bone_surface_review_parameter_scroll_panel');
 parameterScrollPanel.Layout.Row = 1;
 parameterScrollPanel.Layout.Column = 1;
+
+% Keep the export action outside the scroll area so it remains visible while
+% the reviewer inspects even a long list of processing parameters.
+exportButton = uibutton(parameterGrid, 'push', ...
+    'Text', 'Export Surface Results', ...
+    'Tag', 'bone_surface_review_export_button', ...
+    'ButtonPushedFcn', @exportSurfaceResults);
+exportButton.Layout.Row = 2;
+exportButton.Layout.Column = 1;
 
 % Build the grouped controls inside one tall content panel. The outer panel
 % provides vertical scrolling while descriptions use their full wrapped text.
@@ -351,6 +374,48 @@ resultsTabGroup.SelectionChangedFcn = @handleTabSelection;
             resultIndex, targetGroupIndex, localResultIndex);
     end
 
+    function exportSurfaceResults(~, ~)
+        %EXPORTSURFACERESULTS Save the reviewed grouped result on user request.
+        % The immutable grouped result and its provenance are written together
+        % only after review, so opening or closing the GUI alone creates no file.
+        %
+        % Inputs:
+        %   ~ : Unused button source and event values supplied by MATLAB.
+        %
+        % Outputs:
+        %   None. The callback writes one MAT-file and updates the export button.
+
+        % Create the timestamp at the moment of export so the filename describes
+        % the user's save action rather than the earlier extraction or GUI launch.
+        exportTimestamp = char(datetime('now', ...
+            'Format', 'yyyyMMdd_HHmmss'));
+        outputFileName = sprintf('boneSurface_%s.mat', exportTimestamp);
+        outputFilePath = fullfile(outputDirectory, outputFileName);
+
+        % Save the original grouped input, not the aligned flat arrays used only
+        % for fast table navigation and rendering inside this GUI.
+        try
+            save(outputFilePath, ...
+                'surfaceResults', 'extractionMetadata', '-v7.3');
+        catch saveError
+            uialert(reviewFigure, ...
+                sprintf('Could not export the surface results:\n\n%s', ...
+                saveError.message), ...
+                'Export failed', ...
+                'Icon', 'error');
+            return;
+        end
+
+        % Results cannot change in this read-only GUI, so disable the action after
+        % success to prevent accidental duplicate exports of identical content.
+        exportButton.Text = 'Exported';
+        exportButton.Enable = 'off';
+        uialert(reviewFigure, ...
+            sprintf('Surface results were saved to:\n\n%s', outputFilePath), ...
+            'Export complete', ...
+            'Icon', 'success');
+    end
+
     function renderEmptyGroup(groupIndexToRender)
         %RENDEREMPTYGROUP Clear the image for a source group without results.
         % Keeping the empty tab selectable makes the GUI mirror the complete
@@ -390,8 +455,8 @@ resultsTabGroup.SelectionChangedFcn = @handleTabSelection;
         % Outputs:
         %   None. The central axes and summary label are updated in place.
 
-        currentResult = surfaceResults(resultIndex);
-        currentPlane = ultrasoundSequence(resultIndex).plane;
+        currentResult = flatSurfaceResults(resultIndex);
+        currentPlane = flatUltrasoundSequence(resultIndex).plane;
         displayedImage = currentPlane.image.';
 
         % plane.W and plane.H describe the distances between the first and
@@ -418,7 +483,7 @@ resultsTabGroup.SelectionChangedFcn = @handleTabSelection;
 
         % Normalization already aligned this segmentation record by exact group
         % metadata and group-local sourceIndex.
-        segmentationEntry = segmentationResults(resultIndex);
+        segmentationEntry = flatSegmentationResults(resultIndex);
         segmentationDisplayStatus = plotSegmentationOverlay( ...
             imageAxes, segmentationEntry, size(displayedImage), ...
             pixelSpacingXYMm);

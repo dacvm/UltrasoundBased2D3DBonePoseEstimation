@@ -114,7 +114,7 @@ catch configurationError
           configurationError.message);
 end
 
-%% EXTRACT AND SAVE THE THIN BONE SURFACES
+%% EXTRACT AND REVIEW THE THIN BONE SURFACES
 
 % Extract the 2D bone surface. Each output record also reserves an empty
 % surfaceCoordinatesXYZRef field that the later 3D recovery step will fill.
@@ -128,21 +128,17 @@ extractionMetadata.sourceUltrasoundFile       = ultrasoundFilePath;
 extractionMetadata.sourceUltrasoundVariable   = 'validSnapshots';
 extractionMetadata.configurationFile          = configurationFilePath;
 
-% Create metadata
-runTimestamp = char(datetime('now', 'Format', 'yyyyMMdd_HHmmss'));
-surfaceOutputFilePath = fullfile(boneSurfaceOutputDirectory, ['boneSurface_', runTimestamp, '.mat']);
-
-% Save the numerical result before opening the non-blocking review window.
-% The GUI is not part of the saved artifact because it can be recreated from
-% the surface results and configuration file.
-save(surfaceOutputFilePath, 'surfaceResults', 'extractionMetadata', '-v7.3');
-
-% Count nested records rather than outer source groups so the message reports
-% the number of processed ultrasound frames after grouped extraction.
-numberOfSurfaceRecords = sum(arrayfun(@(surfaceGroup) numel(surfaceGroup.data), surfaceResults));
-fprintf('Saved %d surface result(s) to:\n%s\n', numberOfSurfaceRecords, surfaceOutputFilePath);
-
 % Launch one interactive browser instead of creating paged 3-by-3 figures.
 % Row selection redraws a single image and the JSON settings remain read only.
-reviewFigureHandle = createBoneSurfaceReviewGUI(surfaceResults, segmentationResults, ultrasoundSequence, extractionOptions, configurationFilePath);
+% - The grouped surface, segmentation, and ultrasound arguments let the GUI 
+%   keep each reviewed overlay matched to its source directory and frame.
+% - The extraction options and their file path explain which settings 
+%   produced the visible result.
+%- Metadata is passed separately because it must remain beside surfaceResults in
+%  an exported MAT-file, while the output directory tells the GUI where its
+%  user-triggered export belongs without making the user choose the folder again.
+reviewFigureHandle = createBoneSurfaceReviewGUI( ...
+    surfaceResults, segmentationResults, ultrasoundSequence, ...
+    extractionOptions, configurationFilePath, extractionMetadata, ...
+    boneSurfaceOutputDirectory);
 fprintf('Opened the interactive bone-surface review GUI.\n');
