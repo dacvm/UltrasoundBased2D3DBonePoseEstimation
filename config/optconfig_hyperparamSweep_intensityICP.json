@@ -15,14 +15,17 @@
     "normalFacingToleranceDeg": [30]
   },
   "cost": {
-    "model": "intensityCov_v1",
+    "model": "intensityICP_v1",
     "fixedParameters": {
-      "intensityMax": 255
+      "intensityMax": 255,
+      "nearestVertexCount": 20,
+      "distanceReferenceMm": 5.0
     },
     "hyperparameters": {
       "minReferencePixels": [50, 100],
       "nMinPixels": [100, 200],
-      "lambdaMissing": [1.0, 1.5]
+      "lambdaMissing": [1.0, 1.5],
+      "weight": [0.25, 0.5]
     }
   },
   "logging": {
@@ -40,7 +43,7 @@
     "parforWorkers": 6
   },
   "experiment": {
-    "name": "intensityCov_v01",
+    "name": "intensityICP_v01",
     "seeds": [1001, 1002, 1003],
     "outputFolder": "output/bonePoseOptimization/experiments"
   }

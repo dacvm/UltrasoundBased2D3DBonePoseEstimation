@@ -6,7 +6,7 @@ addpath(genpath('functions'));
 %% SELECT THE COMPLETED EXPERIMENT
 
 % Edit only this folder name when evaluating a different sweep experiment.
-experimentFolderName = 'costFunction_v01_20260819_120610_647';
+experimentFolderName = 'intensityICP_v01_20260825_171647_319';
 experimentFolder = fullfile(pwd, 'output', 'bonePoseOptimization', 'experiments', experimentFolderName);
 
 % Keep the detailed seed-distribution plot readable when a sweep is large.
@@ -22,7 +22,7 @@ heatmapSettings.panelColumnParameter = 'lambdaMissing';
 
 % Put parameters here when this heatmap should hold them at chosen values.
 % This affects only the figure; it does not change the optimization settings.
-heatmapSettings.parametersToHold = struct();
+heatmapSettings.parametersToHold.weight = 0.25;
 
 %% LOAD THE EXPERIMENT PLAN, SUMMARY, AND GROUND TRUTH
 
