@@ -25,9 +25,9 @@
   },
   "regularization": {
     "enabled": true,
-    "halfResponseWavelengthMm": 2.5,
-    "huberDeltaMm": 0.15,
-    "maximumDisplacementMm": 0.75,
+    "halfResponseWavelengthMm": 3.5,
+    "huberDeltaMm": 0.10,
+    "maximumDisplacementMm": 1.0,
     "minimumDataWeight": 0.10,
     "maximumIterations": 10,
     "convergenceMm": 0.001

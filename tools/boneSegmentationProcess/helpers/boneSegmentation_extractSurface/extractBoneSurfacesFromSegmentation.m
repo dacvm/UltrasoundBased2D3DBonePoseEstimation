@@ -67,25 +67,20 @@ for groupIndex = 1:numberOfGroups
     surfaceResults(groupIndex).path = currentSegmentationGroup.path;
 
     for localResultIndex = 1:numberOfGroupResults
-        segmentationEntry = currentSegmentationGroup.data(localResultIndex);
-        ultrasoundLocalIndex = inputMatches(groupIndex). ...
-            ultrasoundLocalIndices(localResultIndex);
-        ultrasoundEntry = ...
-            currentUltrasoundGroup.data(ultrasoundLocalIndex);
-        frameIdentity = sprintf( ...
+        segmentationEntry    = currentSegmentationGroup.data(localResultIndex);
+        ultrasoundLocalIndex = inputMatches(groupIndex).ultrasoundLocalIndices(localResultIndex);
+        ultrasoundEntry      = currentUltrasoundGroup.data(ultrasoundLocalIndex);
+        frameIdentity        = sprintf( ...
             'group "%s", local position %d, sourceIndex %g', ...
             char(string(currentSegmentationGroup.name)), ...
             localResultIndex, double(segmentationEntry.sourceIndex));
 
         % Validate and align the stored packet before checking status. This
         % keeps skipped outputs correctly sized and catches corrupt files early.
-        [displayedImage, candidateMask, pixelSpacingXYMm] = ...
-            prepareFrameData( ...
-                segmentationEntry, ultrasoundEntry, frameIdentity);
+        [displayedImage, candidateMask, pixelSpacingXYMm] = prepareFrameData(segmentationEntry, ultrasoundEntry, frameIdentity);
 
         numberOfColumns = size(displayedImage, 2);
-        currentResult = createEmptySizedResult( ...
-            segmentationEntry, numberOfColumns, pixelSpacingXYMm);
+        currentResult = createEmptySizedResult(segmentationEntry, numberOfColumns, pixelSpacingXYMm);
 
         if ~strcmpi(char(string(segmentationEntry.status)), 'processed')
             % Unprocessed coordinates are not evidence that no bone exists, so
@@ -105,47 +100,36 @@ for groupIndex = 1:numberOfGroups
 
         % Estimate evidence only at exported coordinates, then choose one
         % globally consistent depth from competing points in each scan line.
-        candidateConfidence = computeCandidateConfidence( ...
-            displayedImage, candidateMask, pixelSpacingXYMm, resolvedOptions);
-        frameSurface = traceSurfacePaths( ...
-            candidateConfidence, candidateMask, pixelSpacingXYMm, ...
-            resolvedOptions, frameIdentity);
+        candidateConfidence = computeCandidateConfidence(displayedImage, candidateMask, pixelSpacingXYMm, resolvedOptions);
+        frameSurface        = traceSurfacePaths(candidateConfidence, candidateMask, pixelSpacingXYMm, resolvedOptions, frameIdentity);
 
-        currentResult.surfaceRowByColumn = ...
-            frameSurface.surfaceRowByColumn;
-        currentResult.rawSurfaceRowByColumn = ...
-            frameSurface.rawSurfaceRowByColumn;
-        currentResult.observedColumnMask = frameSurface.observedColumnMask;
-        currentResult.interpolatedColumnMask = ...
-            frameSurface.interpolatedColumnMask;
-        currentResult.segmentIdByColumn = frameSurface.segmentIdByColumn;
-        currentResult.confidenceByColumn = frameSurface.confidenceByColumn;
-        currentResult.rawConfidenceByColumn = ...
-            frameSurface.rawConfidenceByColumn;
-        currentResult.regularizationDisplacementMmByColumn = ...
-            frameSurface.regularizationDisplacementMmByColumn;
-        currentResult.regularizationBoundHitColumnMask = ...
-            frameSurface.regularizationBoundHitColumnMask;
-        currentResult.regularizationStatus = ...
-            frameSurface.regularizationStatus;
-        currentResult.roughnessBeforePerMm = ...
-            frameSurface.roughnessBeforePerMm;
-        currentResult.roughnessAfterPerMm = ...
-            frameSurface.roughnessAfterPerMm;
-        currentResult.regularizationRmsDisplacementMm = ...
-            frameSurface.regularizationRmsDisplacementMm;
-        currentResult.regularizationMaxDisplacementMm = ...
-            frameSurface.regularizationMaxDisplacementMm;
-        currentResult.observedLengthMm = frameSurface.observedLengthMm;
-        currentResult.interpolatedLengthMm = ...
-            frameSurface.interpolatedLengthMm;
-        currentResult.meanConfidence = frameSurface.meanConfidence;
-        currentResult.numberOfSegments = frameSurface.numberOfSegments;
+        currentResult.surfaceRowByColumn                    = frameSurface.surfaceRowByColumn;
+        currentResult.rawSurfaceRowByColumn                 = frameSurface.rawSurfaceRowByColumn;
+        currentResult.observedColumnMask                    = frameSurface.observedColumnMask;
+        currentResult.interpolatedColumnMask                = frameSurface.interpolatedColumnMask;
+        currentResult.segmentIdByColumn                     = frameSurface.segmentIdByColumn;
+        currentResult.confidenceByColumn                    = frameSurface.confidenceByColumn;
+        currentResult.rawConfidenceByColumn                 = frameSurface.rawConfidenceByColumn;
+        currentResult.regularizationDisplacementMmByColumn  = frameSurface.regularizationDisplacementMmByColumn;
+        currentResult.regularizationBoundHitColumnMask      = frameSurface.regularizationBoundHitColumnMask;
+        currentResult.regularizationStatus                  = frameSurface.regularizationStatus;
+        currentResult.roughnessBeforePerMm                  = frameSurface.roughnessBeforePerMm;
+        currentResult.roughnessAfterPerMm                   = frameSurface.roughnessAfterPerMm;
+        currentResult.regularizationRmsDisplacementMm       = frameSurface.regularizationRmsDisplacementMm;
+        currentResult.regularizationMaxDisplacementMm       = frameSurface.regularizationMaxDisplacementMm;
+        currentResult.observedLengthMm                      = frameSurface.observedLengthMm;
+        currentResult.interpolatedLengthMm                  = frameSurface.interpolatedLengthMm;
+        currentResult.meanConfidence                        = frameSurface.meanConfidence;
+        currentResult.numberOfSegments                      = frameSurface.numberOfSegments;
 
         validColumns = find(isfinite(frameSurface.surfaceRowByColumn));
-        currentResult.surfaceCoordinatesXY = [ ...
-            double(validColumns(:)), ...
-            frameSurface.surfaceRowByColumn(validColumns).'];
+        currentResult.surfaceCoordinatesXY = [double(validColumns(:)), frameSurface.surfaceRowByColumn(validColumns).'];
+
+        % Estimate orientation only after the final regularized curve has
+        % been compacted. The segment labels prevent a finite difference
+        % from accidentally spanning a disconnected surface gap.
+        [currentResult.surfaceNormalXY, currentResult.surfaceNormalMask] = estimateSurfaceNormals2D( ...
+                currentResult.surfaceCoordinatesXY, currentResult.segmentIdByColumn, pixelSpacingXYMm);
 
         if isempty(validColumns)
             currentResult.status = 'noSurface';

@@ -179,6 +179,111 @@ verifyEqual(testCase, getDisplayedImageData(reviewFigure), ...
 end
 
 
+function testNormalOverlayToggleSpacingAndNavigationState(testCase)
+%TESTNORMALOVERLAYTOGGLESPACINGANDNAVIGATIONSTATE Verify review visualization.
+% One masked row is omitted, cumulative spacing remains approximately 3 mm,
+% and hiding normals persists when another row is rendered.
+
+[surfaceGroups, segmentationGroups, ultrasoundGroups] = makeReviewFixture();
+surfaceRecord = surfaceGroups(2).data(1);
+surfaceRecord.status = 'extracted';
+surfaceRecord.surfaceCoordinatesXY = [(1:8).', 3 * ones(8, 1)];
+surfaceRecord.surfaceNormalXY = repmat([0, -1], 8, 1);
+surfaceRecord.surfaceNormalXY(4, :) = [NaN, NaN];
+surfaceRecord.surfaceNormalMask = true(8, 1);
+surfaceRecord.surfaceNormalMask(4) = false;
+surfaceRecord.surfaceRowByColumn = 3 * ones(1, 8);
+surfaceRecord.rawSurfaceRowByColumn = 3 * ones(1, 8);
+surfaceRecord.observedColumnMask = true(1, 8);
+surfaceRecord.segmentIdByColumn = ones(1, 8, 'uint16');
+surfaceRecord.numberOfSegments = 1;
+surfaceGroups(2).data(1) = surfaceRecord;
+
+reviewFigure = createBoneSurfaceReviewGUI( ...
+    surfaceGroups, segmentationGroups, ultrasoundGroups, ...
+    testCase.TestData.options, testCase.TestData.configurationPath, ...
+    testCase.TestData.extractionMetadata, testCase.TestData.outputDirectory);
+drawnow;
+
+normalCheckbox = findall(reviewFigure, ...
+    'Tag', 'bone_surface_review_show_normals_checkbox');
+verifyNotEmpty(testCase, normalCheckbox);
+verifyTrue(testCase, normalCheckbox.Value);
+normalOverlay = findall(reviewFigure, ...
+    'Tag', 'bone_surface_review_normal_overlay');
+verifyNumElements(testCase, normalOverlay, 1);
+verifyEqual(testCase, normalOverlay.XData(:), [0; 4; 7], ...
+    'AbsTol', 1e-12);
+verifyEqual(testCase, normalOverlay.YData(:), [2; 2; 2], ...
+    'AbsTol', 1e-12);
+verifyEqual(testCase, normalOverlay.UData(:), zeros(3, 1), ...
+    'AbsTol', 1e-12);
+verifyEqual(testCase, normalOverlay.VData(:), -2 * ones(3, 1), ...
+    'AbsTol', 1e-12);
+verifyEqual(testCase, string(normalOverlay.Visible), "on");
+
+imageAxes = findall(reviewFigure, ...
+    'Tag', 'bone_surface_review_image_axes');
+verifyTrue(testCase, any(contains(string(imageAxes.Title.String), ...
+    "Valid normals: 7/8")));
+verifyEmpty(testCase, findall(reviewFigure, ...
+    'Tag', 'bone_surface_review_result_summary'));
+
+normalCheckbox.Value = false;
+normalCallback = normalCheckbox.ValueChangedFcn;
+normalCallback(normalCheckbox, struct());
+verifyEqual(testCase, string(normalOverlay.Visible), "off");
+
+groupATable = findall(reviewFigure, ...
+    'Tag', 'bone_surface_review_data_table_2');
+tableCallback = groupATable.SelectionChangedFcn;
+tableCallback(groupATable, struct('Selection', 2));
+tableCallback(groupATable, struct('Selection', 1));
+drawnow;
+verifyFalse(testCase, normalCheckbox.Value);
+normalOverlay = findall(reviewFigure, ...
+    'Tag', 'bone_surface_review_normal_overlay');
+verifyEqual(testCase, string(normalOverlay.Visible), "off");
+end
+
+
+function testHistoricalRecordsWithoutNormalsRemainReviewable(testCase)
+%TESTHISTORICALRECORDSWITHOUTNORMALSREMAINREVIEWABLE Verify schema fallback.
+
+[surfaceGroups, segmentationGroups, ultrasoundGroups] = makeReviewFixture();
+for groupIndex = 1:numel(surfaceGroups)
+    surfaceGroups(groupIndex).data = rmfield( ...
+        surfaceGroups(groupIndex).data, ...
+        {'surfaceNormalXY', 'surfaceNormalMask'});
+end
+
+reviewFigure = createBoneSurfaceReviewGUI( ...
+    surfaceGroups, segmentationGroups, ultrasoundGroups, ...
+    testCase.TestData.options, testCase.TestData.configurationPath, ...
+    testCase.TestData.extractionMetadata, testCase.TestData.outputDirectory);
+drawnow;
+
+verifyEmpty(testCase, findall(reviewFigure, ...
+    'Tag', 'bone_surface_review_normal_overlay'));
+imageAxes = findall(reviewFigure, ...
+    'Tag', 'bone_surface_review_image_axes');
+verifyTrue(testCase, any(contains(string(imageAxes.Title.String), ...
+    "Normals: unavailable")));
+verifyEqual(testCase, getDisplayedImageData(reviewFigure), ...
+    uint8(20 * ones(6, 8)));
+
+% Overlay information belongs to a standard axes legend rather than custom
+% colored labels occupying a separate grid row.
+reviewLegend = findall(reviewFigure, ...
+    'Tag', 'bone_surface_review_overlay_legend');
+verifyNumElements(testCase, reviewLegend, 1);
+verifyEqual(testCase, string(reviewLegend.String), ...
+    ["Segmentation", "Raw surface", "Final observed", ...
+     "Final interpolated", "Probe-facing normal"]);
+verifyEqual(testCase, string(reviewLegend.AutoUpdate), "off");
+end
+
+
 function testExportWritesOriginalGroupedResultOnce(testCase)
 %TESTEXPORTWRITESORIGINALGROUPEDRESULTONCE Verify explicit GUI export behavior.
 % Opening the review must not write a file. Pressing Export must preserve the
@@ -399,6 +504,8 @@ surfaceRecord = struct( ...
     'sourceIndex', sourceIndex, ...
     'status', 'noSurface', ...
     'surfaceCoordinatesXY', zeros(0, 2), ...
+    'surfaceNormalXY', zeros(0, 2), ...
+    'surfaceNormalMask', false(0, 1), ...
     'surfaceRowByColumn', nan(1, numberOfColumns), ...
     'rawSurfaceRowByColumn', nan(1, numberOfColumns), ...
     'observedColumnMask', false(1, numberOfColumns), ...

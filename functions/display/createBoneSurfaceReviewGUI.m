@@ -159,8 +159,8 @@ imagePanel = uipanel(mainGrid, ...
     'Tag', 'bone_surface_review_image_panel');
 imagePanel.Layout.Row = 1;
 imagePanel.Layout.Column = 2;
-imageGrid = uigridlayout(imagePanel, [3, 1], ...
-    'RowHeight', {'1x', 26, 26}, ...
+imageGrid = uigridlayout(imagePanel, [2, 1], ...
+    'RowHeight', {'1x', 26}, ...
     'Padding', [5, 5, 5, 5], ...
     'RowSpacing', 2);
 
@@ -175,44 +175,16 @@ ylabel(imageAxes, 'Image height (mm)');
 box(imageAxes, 'on');
 colormap(imageAxes, gray(256));
 
-% A changing summary below the image exposes key metrics without requiring
-% the reviewer to find the corresponding columns in a wide sorted table.
-resultSummaryLabel = uilabel(imageGrid, ...
-    'HorizontalAlignment', 'center', ...
-    'Text', '', ...
-    'Tag', 'bone_surface_review_result_summary');
-resultSummaryLabel.Layout.Row = 2;
-resultSummaryLabel.Layout.Column = 1;
-
-% Keep a color key permanently visible instead of rebuilding a legend that
-% could cover anatomy in the selected ultrasound image.
-legendGrid = uigridlayout(imageGrid, [1, 4], ...
-    'ColumnWidth', {'1x', '1x', '1x', '1x'}, ...
-    'Padding', [0, 0, 0, 0], ...
-    'ColumnSpacing', 3);
-legendGrid.Layout.Row = 3;
-legendGrid.Layout.Column = 1;
-
-segmentationLegendLabel = uilabel(legendGrid, ...
-    'Text', '--- Segmentation', ...
-    'FontColor', [0.68, 0.50, 0.00], ...
-    'HorizontalAlignment', 'center');
-segmentationLegendLabel.Layout.Column = 1;
-rawLegendLabel = uilabel(legendGrid, ...
-    'Text', '--- Raw surface', ...
-    'FontColor', [0.90, 0.10, 0.80], ...
-    'HorizontalAlignment', 'center');
-rawLegendLabel.Layout.Column = 2;
-observedLegendLabel = uilabel(legendGrid, ...
-    'Text', '* Final observed', ...
-    'FontColor', [0.85, 0.10, 0.05], ...
-    'HorizontalAlignment', 'center');
-observedLegendLabel.Layout.Column = 3;
-interpolatedLegendLabel = uilabel(legendGrid, ...
-    'Text', '* Final interpolated', ...
-    'FontColor', [0.00, 0.65, 0.75], ...
-    'HorizontalAlignment', 'center');
-interpolatedLegendLabel.Layout.Column = 4;
+% Normals are useful for reviewing orientation but can obscure subtle image
+% evidence. Keep them enabled by default and let the reviewer hide only the
+% overlay without changing the extracted result.
+showNormalsCheckbox = uicheckbox(imageGrid, ...
+    'Text', 'Show probe-facing normals', ...
+    'Value', true, ...
+    'Tag', 'bone_surface_review_show_normals_checkbox', ...
+    'ValueChangedFcn', @handleNormalVisibility);
+showNormalsCheckbox.Layout.Row = 2;
+showNormalsCheckbox.Layout.Column = 1;
 
 % The right panel reports exactly the settings supplied from the JSON file.
 % Each algorithm group receives its own panel in a vertically scrollable area.
@@ -374,6 +346,27 @@ resultsTabGroup.SelectionChangedFcn = @handleTabSelection;
             resultIndex, targetGroupIndex, localResultIndex);
     end
 
+    function handleNormalVisibility(sourceCheckbox, ~)
+        %HANDLENORMALVISIBILITY Show or hide the current normal overlay.
+        % Changing this display-only property preserves both the selected row
+        % and the immutable result that will be exported later.
+        %
+        % Inputs:
+        %   sourceCheckbox : Checkbox containing the requested visibility.
+        %   ~              : Unused event data supplied by MATLAB.
+        %
+        % Outputs:
+        %   None. Existing normal graphics change visibility in place.
+
+        normalOverlays = findall(imageAxes, ...
+            'Tag', 'bone_surface_review_normal_overlay');
+        if sourceCheckbox.Value
+            set(normalOverlays, 'Visible', 'on');
+        else
+            set(normalOverlays, 'Visible', 'off');
+        end
+    end
+
     function exportSurfaceResults(~, ~)
         %EXPORTSURFACERESULTS Save the reviewed grouped result on user request.
         % The immutable grouped result and its provenance are written together
@@ -427,7 +420,10 @@ resultsTabGroup.SelectionChangedFcn = @handleTabSelection;
         % Outputs:
         %   None. The axes and summary are replaced with an empty-group message.
 
+        delete(findall(imageAxes, ...
+            'Tag', 'bone_surface_review_normal_overlay'));
         cla(imageAxes);
+        legend(imageAxes, 'off');
         axis(imageAxes, 'off');
         text(imageAxes, 0.5, 0.5, sprintf( ...
             'No bone-surface results are available in "%s".', ...
@@ -436,9 +432,9 @@ resultsTabGroup.SelectionChangedFcn = @handleTabSelection;
             'HorizontalAlignment', 'center', ...
             'VerticalAlignment', 'middle', ...
             'Interpreter', 'none');
-        resultSummaryLabel.Text = sprintf( ...
-            '%s: no result selected.', ...
-            char(string(groupMetadata(groupIndexToRender).name)));
+        title(imageAxes, sprintf('%s: no result selected.', ...
+            char(string(groupMetadata(groupIndexToRender).name))), ...
+            'Interpreter', 'none');
     end
 
     function renderSelectedResult( ...
@@ -470,6 +466,11 @@ resultsTabGroup.SelectionChangedFcn = @handleTabSelection;
             imageWidthMm / (numberOfImageColumns - 1), ...
             imageHeightMm / (numberOfImageRows - 1)];
 
+        % Quiver objects use hidden handles so the normal overlay does not
+        % pollute legends. Delete them explicitly before CLA to prevent an
+        % earlier selection from surviving beneath the newly rendered row.
+        delete(findall(imageAxes, ...
+            'Tag', 'bone_surface_review_normal_overlay'));
         cla(imageAxes);
         axis(imageAxes, 'on');
         imagesc(imageAxes, ...
@@ -489,26 +490,33 @@ resultsTabGroup.SelectionChangedFcn = @handleTabSelection;
             pixelSpacingXYMm);
 
         plotSurfaceResult(imageAxes, currentResult, pixelSpacingXYMm);
+        plotSurfaceNormals(imageAxes, currentResult, pixelSpacingXYMm, ...
+            showNormalsCheckbox.Value);
+        createReviewOverlayLegend(imageAxes);
         hold(imageAxes, 'off');
 
-        title(imageAxes, sprintf( ...
+        identityText = sprintf( ...
             ['%s: %d/%d | Overall %d/%d | sequence %g | ' ...
             'source %g | %s'], ...
             char(string(groupMetadata(groupIndexToRender).name)), ...
             localResultIndex, ...
             numberOfResultsByGroup(groupIndexToRender), ...
             resultIndex, numberOfResults, currentResult.sequencePosition, ...
-            currentResult.sourceIndex, currentResult.status), ...
-            'Interpreter', 'none');
+            currentResult.sourceIndex, currentResult.status);
 
-        % Keep the summary concise enough to remain readable under the image.
-        resultSummaryLabel.Text = sprintf( ...
+        % Place the extraction summary immediately below the record identity.
+        % Keeping both lines in the axes title visually groups all information
+        % about the selected result instead of separating metrics below the image.
+        extractionSummaryText = sprintf( ...
             ['Segmentation: %s | Segments: %d | Observed: %.3g mm | ' ...
-             'Interpolated: %.3g mm | Mean confidence: %.3g'], ...
+             'Interpolated: %.3g mm | Mean confidence: %.3g | %s'], ...
             char(segmentationDisplayStatus), currentResult.numberOfSegments, ...
             currentResult.observedLengthMm, ...
             currentResult.interpolatedLengthMm, ...
-            currentResult.meanConfidence);
+            currentResult.meanConfidence, ...
+            describeSurfaceNormals(currentResult));
+        title(imageAxes, {identityText; extractionSummaryText}, ...
+            'Interpreter', 'none');
         drawnow limitrate;
     end
 end
@@ -1110,6 +1118,218 @@ interpolatedYMm = ...
 plot(targetAxes, interpolatedXMm, interpolatedYMm, ...
     '.', 'Color', [0.00, 0.90, 1.00], 'MarkerSize', 10, ...
     'HandleVisibility', 'off');
+end
+
+
+function plotSurfaceNormals( ...
+        targetAxes, surfaceResult, pixelSpacingXYMm, normalsAreVisible)
+%PLOTSURFACENORMALS Draw a sparse physical-length normal overlay.
+% The saved normals stay row-aligned with the dense final curve. Displaying
+% roughly one arrow every 3 mm keeps the review legible without changing or
+% downsampling the stored result.
+%
+% Inputs:
+%   targetAxes       : Axes that already display the source B-mode image.
+%   surfaceResult    : Extracted surface result, possibly historical.
+%   pixelSpacingXYMm : Horizontal and vertical pixel spacing in millimetres.
+%   normalsAreVisible: Logical display state from the review checkbox.
+%
+% Outputs:
+%   None. A green quiver overlay is added when compatible normals exist.
+
+[normalDataAreAvailable, validNormalMask] = ...
+    inspectSurfaceNormalData(surfaceResult);
+if ~normalDataAreAvailable || ~any(validNormalMask)
+    return;
+end
+
+surfaceCoordinatesXY = double(surfaceResult.surfaceCoordinatesXY);
+surfaceColumns = surfaceCoordinatesXY(:, 1);
+segmentIdByColumn = reshape(surfaceResult.segmentIdByColumn, 1, []);
+if any(surfaceColumns ~= round(surfaceColumns)) || ...
+        any(surfaceColumns < 1) || ...
+        any(surfaceColumns > numel(segmentIdByColumn))
+    return;
+end
+pointSegmentIds = double(segmentIdByColumn(surfaceColumns));
+
+displayRows = selectNormalDisplayRows( ...
+    surfaceCoordinatesXY, pointSegmentIds, validNormalMask, ...
+    pixelSpacingXYMm, 3);
+if isempty(displayRows)
+    return;
+end
+
+basePointsMm = (surfaceCoordinatesXY(displayRows, :) - 1) .* ...
+    pixelSpacingXYMm;
+arrowVectorsMm = 2 .* double(surfaceResult.surfaceNormalXY(displayRows, :));
+if normalsAreVisible
+    overlayVisibility = 'on';
+else
+    overlayVisibility = 'off';
+end
+
+quiver(targetAxes, basePointsMm(:, 1), basePointsMm(:, 2), ...
+    arrowVectorsMm(:, 1), arrowVectorsMm(:, 2), 0, ...
+    'AutoScale', 'off', ...
+    'Color', [0.10, 0.80, 0.20], ...
+    'LineWidth', 1.1, ...
+    'MaxHeadSize', 0.7, ...
+    'Tag', 'bone_surface_review_normal_overlay', ...
+    'Visible', overlayVisibility, ...
+    'HandleVisibility', 'off');
+end
+
+
+function createReviewOverlayLegend(targetAxes)
+%CREATEREVIEWOVERLAYLEGEND Create a stable MATLAB legend for review overlays.
+% Some selected records legitimately contain no segmentation or surface.
+% NaN-valued proxy graphics keep the legend complete and visually consistent
+% without adding marks to the ultrasound image or altering stored results.
+%
+% Input:
+%   targetAxes : Axes containing the ultrasound review visualization.
+%
+% Outputs:
+%   None. A standard MATLAB legend is attached to targetAxes.
+
+segmentationProxy = plot(targetAxes, NaN, NaN, '-', ...
+    'Color', [1.00, 0.80, 0.05], ...
+    'LineWidth', 1.2, ...
+    'DisplayName', 'Segmentation');
+rawSurfaceProxy = plot(targetAxes, NaN, NaN, '-', ...
+    'Color', [0.90, 0.10, 0.80], ...
+    'LineWidth', 0.9, ...
+    'DisplayName', 'Raw surface');
+observedSurfaceProxy = plot(targetAxes, NaN, NaN, '.', ...
+    'Color', [1.00, 0.15, 0.10], ...
+    'MarkerSize', 10, ...
+    'DisplayName', 'Final observed');
+interpolatedSurfaceProxy = plot(targetAxes, NaN, NaN, '.', ...
+    'Color', [0.00, 0.90, 1.00], ...
+    'MarkerSize', 10, ...
+    'DisplayName', 'Final interpolated');
+normalProxy = plot(targetAxes, NaN, NaN, '-', ...
+    'Color', [0.10, 0.80, 0.20], ...
+    'LineWidth', 1.1, ...
+    'Marker', '>', ...
+    'MarkerSize', 5, ...
+    'DisplayName', 'Probe-facing normal');
+
+reviewLegend = legend(targetAxes, ...
+    [segmentationProxy, rawSurfaceProxy, observedSurfaceProxy, ...
+     interpolatedSurfaceProxy, normalProxy], ...
+    'Location', 'northeast', ...
+    'AutoUpdate', 'off', ...
+    'Interpreter', 'none');
+reviewLegend.Tag = 'bone_surface_review_overlay_legend';
+reviewLegend.Box = 'on';
+end
+
+
+function displayRows = selectNormalDisplayRows( ...
+        surfaceCoordinatesXY, pointSegmentIds, validNormalMask, ...
+        pixelSpacingXYMm, displaySpacingMm)
+%SELECTNORMALDISPLAYROWS Select arrows by cumulative within-segment distance.
+% Using cumulative curve distance, rather than a fixed column interval,
+% gives comparable visual spacing on steep and shallow surfaces.
+%
+% Inputs:
+%   surfaceCoordinatesXY : N-by-2 dense curve coordinates in pixels.
+%   pointSegmentIds      : N-by-1 segment label aligned with the coordinates.
+%   validNormalMask      : N-by-1 rows eligible for display.
+%   pixelSpacingXYMm     : [x,y] millimetres per pixel.
+%   displaySpacingMm     : Approximate cumulative distance between arrows.
+%
+% Outputs:
+%   displayRows : Coordinate-row indices selected for quiver display.
+
+displayRows = zeros(0, 1);
+positiveSegmentIds = unique(pointSegmentIds(pointSegmentIds > 0), 'stable');
+for segmentIndex = 1:numel(positiveSegmentIds)
+    segmentRows = find(pointSegmentIds == positiveSegmentIds(segmentIndex));
+    if isempty(segmentRows)
+        continue;
+    end
+
+    segmentPointsMm = (surfaceCoordinatesXY(segmentRows, :) - 1) .* ...
+        pixelSpacingXYMm;
+    cumulativeDistanceMm = [0; cumsum(vecnorm(diff(segmentPointsMm), 2, 2))];
+    validLocalRows = find(validNormalMask(segmentRows));
+    if isempty(validLocalRows)
+        continue;
+    end
+
+    selectedLocalRows = validLocalRows(1);
+    lastSelectedDistanceMm = cumulativeDistanceMm(selectedLocalRows);
+    for candidateIndex = 2:numel(validLocalRows)
+        candidateLocalRow = validLocalRows(candidateIndex);
+        if cumulativeDistanceMm(candidateLocalRow) - ...
+                lastSelectedDistanceMm >= displaySpacingMm
+            selectedLocalRows(end + 1, 1) = candidateLocalRow; %#ok<AGROW>
+            lastSelectedDistanceMm = cumulativeDistanceMm(candidateLocalRow);
+        end
+    end
+    displayRows = [displayRows; segmentRows(selectedLocalRows)]; %#ok<AGROW>
+end
+end
+
+
+function description = describeSurfaceNormals(surfaceResult)
+%DESCRIBESURFACENORMALS Build the compact normal-availability summary.
+% Historical records intentionally report an unavailable state rather than
+% preventing the rest of the review GUI from opening.
+%
+% Inputs:
+%   surfaceResult : One current or historical extracted-surface record.
+%
+% Outputs:
+%   description : Character vector suitable for the result summary label.
+
+[normalDataAreAvailable, validNormalMask] = ...
+    inspectSurfaceNormalData(surfaceResult);
+if ~normalDataAreAvailable
+    description = 'Normals: unavailable';
+    return;
+end
+description = sprintf('Valid normals: %d/%d', ...
+    nnz(validNormalMask), size(surfaceResult.surfaceCoordinatesXY, 1));
+end
+
+
+function [normalDataAreAvailable, validNormalMask] = ...
+        inspectSurfaceNormalData(surfaceResult)
+%INSPECTSURFACENORMALDATA Safely inspect optional current-schema fields.
+% This lenient display check protects review of old files while omitting any
+% malformed or nonfinite vectors from the overlay.
+%
+% Inputs:
+%   surfaceResult : One extracted-surface result record.
+%
+% Outputs:
+%   normalDataAreAvailable : True when both fields have row-aligned shapes.
+%   validNormalMask        : Logical rows that are masked valid and finite.
+
+normalDataAreAvailable = false;
+validNormalMask = false(0, 1);
+if ~isfield(surfaceResult, 'surfaceNormalXY') || ...
+        ~isfield(surfaceResult, 'surfaceNormalMask') || ...
+        ~isfield(surfaceResult, 'surfaceCoordinatesXY')
+    return;
+end
+
+numberOfPoints = size(surfaceResult.surfaceCoordinatesXY, 1);
+surfaceNormalXY = surfaceResult.surfaceNormalXY;
+surfaceNormalMask = surfaceResult.surfaceNormalMask;
+if ~isnumeric(surfaceNormalXY) || ...
+        ~isequal(size(surfaceNormalXY), [numberOfPoints, 2]) || ...
+        ~islogical(surfaceNormalMask) || ...
+        ~isequal(size(surfaceNormalMask), [numberOfPoints, 1])
+    return;
+end
+
+normalDataAreAvailable = true;
+validNormalMask = surfaceNormalMask & all(isfinite(surfaceNormalXY), 2);
 end
 
 

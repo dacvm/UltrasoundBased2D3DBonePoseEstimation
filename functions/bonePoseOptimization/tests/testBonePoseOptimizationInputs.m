@@ -235,6 +235,62 @@ verifyEqual(testCase, detailsWithoutSurface.activePlaneMask, ...
 end
 
 
+function testOptionalSurfaceNormalsAreValidatedWhenPresent(testCase)
+%TESTOPTIONALSURFACENORMALSAREVALIDATEDWHENPRESENT Check the optional schema.
+% The real historical artifact already proves missing fields remain accepted.
+% This test adds valid normals to a temporary copy, then confirms a non-unit
+% vector is rejected at the generic preparation boundary.
+
+config = testCase.TestData.config;
+surfaceOutput = load(config.input.boneSurfaceMatFile, ...
+    'surfaceResults', 'extractionMetadata');
+surfaceResults = surfaceOutput.surfaceResults;
+targetBone = string(config.input.bone);
+firstNonemptyIdentity = zeros(0, 2);
+
+for groupIndex = 1:numel(surfaceResults)
+    if ~strcmpi(string(surfaceResults(groupIndex).bone), targetBone)
+        continue;
+    end
+    for recordIndex = 1:numel(surfaceResults(groupIndex).data)
+        numberOfPoints = size( ...
+            surfaceResults(groupIndex).data(recordIndex).surfaceCoordinatesXY, 1);
+        surfaceResults(groupIndex).data(recordIndex).surfaceNormalXY = ...
+            repmat([0, -1], numberOfPoints, 1);
+        surfaceResults(groupIndex).data(recordIndex).surfaceNormalMask = ...
+            true(numberOfPoints, 1);
+        if isempty(firstNonemptyIdentity) && numberOfPoints > 0
+            firstNonemptyIdentity = [groupIndex, recordIndex];
+        end
+    end
+end
+verifyNotEmpty(testCase, firstNonemptyIdentity);
+
+temporarySurfacePath = [tempname, '.mat'];
+cleanupTemporarySurface = onCleanup( ...
+    @() deleteFileIfPresent(temporarySurfacePath));
+extractionMetadata = surfaceOutput.extractionMetadata;
+save(temporarySurfacePath, ...
+    'surfaceResults', 'extractionMetadata', '-v7.3');
+
+configWithNormals = config;
+configWithNormals.input.boneSurfaceMatFile = temporarySurfacePath;
+dataWithNormals = prepareBonePoseOptimizationInputs(configWithNormals);
+verifyTrue(testCase, all(isfield( ...
+    dataWithNormals.boneSurfaceMeasurements, ...
+    {'surfaceNormalXY', 'surfaceNormalMask'})));
+
+groupIndex = firstNonemptyIdentity(1);
+recordIndex = firstNonemptyIdentity(2);
+surfaceResults(groupIndex).data(recordIndex).surfaceNormalXY(1, :) = [2, 0];
+save(temporarySurfacePath, ...
+    'surfaceResults', 'extractionMetadata', '-v7.3');
+verifyError(testCase, ...
+    @() prepareBonePoseOptimizationInputs(configWithNormals), ...
+    'prepareBonePoseOptimizationInputs:InvalidSurfaceNormalValues');
+end
+
+
 function testGroundTruthBonePoseIsPreparedForValidation(testCase)
 %TESTGROUNDTRUTHBONEPOSEISPREPAREDFORVALIDATION Check the selected saved pose.
 % testCase supplies the CT model and validation-only pose. This function has
@@ -392,4 +448,21 @@ config = testCase.TestData.config;
 config.input.bone = 'F';
 verifyError(testCase, @() prepareBonePoseOptimizationInputs(config), ...
     'prepareBonePoseOptimizationInputs:BoneNotRegistered');
+end
+
+
+function deleteFileIfPresent(filePath)
+%DELETEFILEIFPRESENT Remove a test-owned temporary MAT-file during cleanup.
+% Failed assertions can trigger cleanup after the file has already gone, so
+% existence is checked before deletion.
+%
+% Input:
+%   filePath : Absolute path to the temporary file owned by the current test.
+%
+% Outputs:
+%   None.
+
+if isfile(filePath)
+    delete(filePath);
+end
 end

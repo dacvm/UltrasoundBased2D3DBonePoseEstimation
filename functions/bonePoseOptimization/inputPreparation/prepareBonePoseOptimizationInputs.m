@@ -415,6 +415,61 @@ for measurementIndex = 1:numel(measurements)
               'Surface measurement %d must contain matching finite N-by-2 and N-by-3 coordinates.', ...
               measurementIndex);
     end
+
+    % Surface normals are optional here so historical ICPLike_v1 and
+    % intensity artifacts remain usable. When either new field is present,
+    % require the complete row-aligned contract so a future P-IMLOP model
+    % cannot silently consume ambiguous orientation data.
+    hasNormalValues = isfield(measurement, 'surfaceNormalXY');
+    hasNormalMask = isfield(measurement, 'surfaceNormalMask');
+    if hasNormalValues ~= hasNormalMask
+        error('prepareBonePoseOptimizationInputs:IncompleteSurfaceNormals', ...
+            ['Surface measurement %d must provide surfaceNormalXY and ' ...
+             'surfaceNormalMask together.'], measurementIndex);
+    end
+    if hasNormalValues
+        validateOptionalSurfaceNormals( ...
+            measurement, size(surfaceCoordinatesXY, 1), measurementIndex);
+    end
+end
+end
+
+
+function validateOptionalSurfaceNormals(measurement, numberOfPoints, measurementIndex)
+%VALIDATEOPTIONALSURFACENORMALS Check the row-aligned 2-D normal contract.
+% Normals remain optional at the generic preparation boundary, but malformed
+% normals must be rejected when present so downstream cost models receive an
+% unambiguous validity mask.
+%
+% Inputs:
+%   measurement      : One prepared bone-surface measurement record.
+%   numberOfPoints   : Number of corresponding surface coordinate rows.
+%   measurementIndex : One-based index used in diagnostic messages.
+%
+% Outputs:
+%   None. The function throws a descriptive error for invalid artifacts.
+
+surfaceNormalXY = measurement.surfaceNormalXY;
+surfaceNormalMask = measurement.surfaceNormalMask;
+if ~isnumeric(surfaceNormalXY) || ...
+        ~isequal(size(surfaceNormalXY), [numberOfPoints, 2]) || ...
+        ~islogical(surfaceNormalMask) || ...
+        ~isequal(size(surfaceNormalMask), [numberOfPoints, 1])
+    error('prepareBonePoseOptimizationInputs:InvalidSurfaceNormalShape', ...
+        ['Surface measurement %d normals must be N-by-2 numeric values and ' ...
+         'an N-by-1 logical mask aligned with the surface coordinates.'], ...
+        measurementIndex);
+end
+
+validNormals = surfaceNormalXY(surfaceNormalMask, :);
+invalidNormals = surfaceNormalXY(~surfaceNormalMask, :);
+normalLengths = vecnorm(validNormals, 2, 2);
+if any(~isfinite(validNormals), 'all') || ...
+        any(abs(normalLengths - 1) > 1e-10) || ...
+        any(~isnan(invalidNormals), 'all')
+    error('prepareBonePoseOptimizationInputs:InvalidSurfaceNormalValues', ...
+        ['Surface measurement %d valid normals must be finite unit vectors, ' ...
+         'and invalid rows must be [NaN,NaN].'], measurementIndex);
 end
 end
 
