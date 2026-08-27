@@ -1,6 +1,7 @@
 data/*
 output/*
 configs/*
+literatures/*
 
 # Ignore configuration directories anywhere below tools.
 # /tools/**/configs/
