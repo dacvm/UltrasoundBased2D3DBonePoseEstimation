@@ -128,18 +128,18 @@ title(setupAxes, sprintf( ...
 % this simple setup: 1 mm in-plane and 1.5 mm out-of-plane standard deviation.
 % The function rotates this shared image-frame covariance into ref using R_p.
 positionStdImageMm       = [1.0; 1.0; 1.5];
-positionCovarianceImage = diag(positionStdImageMm .^ 2);
+positionCovarianceImage  = diag(positionStdImageMm .^ 2);
 kappa                    = 50;
 
 % Enable the optional diagnostic display and detailed command-window output.
 % Passing the caller-owned axes is mandatory when ShowDisplay is true.
 displayOptions = struct();
-displayOptions.ShowDisplay          = true;
-displayOptions.Axes                 = setupAxes;
-displayOptions.NormalDisplayScale   = normalDisplayScale;
+displayOptions.ShowDisplay           = true;
+displayOptions.Axes                  = setupAxes;
+displayOptions.NormalDisplayScale    = normalDisplayScale;
 displayOptions.ConfidenceProbability = 0.95;
-displayOptions.ShowLabels           = true;
-displayOptions.Verbose              = true;
+displayOptions.ShowLabels            = true;
+displayOptions.Verbose               = true;
 
 
 %% CALL CALCULATEPIMLOPMATCHERROR
