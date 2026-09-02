@@ -3,7 +3,7 @@
     "ultrasoundImageFilePath": "../../ultrasoundSpatialProcessing/outputs",
     "ultrasoundImageFileName": "validSnapshots_20260812_160247.mat",
     "boneSurfaceFilePath": "../../boneSegmentationProcess/outputs",
-    "boneSurfaceFileName": "boneSurface_20260819_205405.mat",
+    "boneSurfaceFileName": "boneSurface_20260827_165900.mat",
     "boneLandmarksFilePath": "../outputs",
     "boneLandmarksFileName": "boneLandmarks_20260810_174351.mat"
   },
