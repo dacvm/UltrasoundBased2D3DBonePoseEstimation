@@ -367,9 +367,10 @@ legend(setupAxes, ...
     'Interpreter', 'none');
 
 fprintf('E_position calculation:\n');
-fprintf('  Ordinary Euclidean distance : %.3f mm\n',   euclideanDistanceMm);
-fprintf('  Mahalanobis distance        : %.3f unit\n', mahalanobisDistance);
-fprintf('  E_position: %.6f\n', E_position);
+fprintf('  Ordinary Euclidean distance             : %.3f mm\n',   euclideanDistanceMm);
+fprintf('  Mahalanobis distance                    : %.3f unit\n', mahalanobisDistance);
+fprintf('  Mahalanobis distance squared            : %.3f unit\n', mahalanobisDistanceSquared);
+fprintf('  E_position                              : %.6f\n',      E_position);
 
 
 %% CALCULATING E_ORIENTATION
@@ -459,11 +460,11 @@ drawnow;
 % Print each projection stage so the numerical values can be matched to the
 % operations in Equation (1) before E_orientation itself is implemented.
 fprintf('\nProjected model-normal calculation:\n');
-fprintf('  R_p^T * y_3dn in image XYZ            : [%.6f, %.6f, %.6f]\n',  yNormal3DImage);
-fprintf('  P(R_p^T * y_3dn) in image XY          : [%.6f, %.6f]\n',        projectedYNormal2DImageUnnormalized);
-fprintf('  Projected length before normalization : %.6f\n',                projectedYNormalLength);
-fprintf('  Normalized projection in image XY     : [%.6f, %.6f]\n',        projectedYNormal2DImage);
-fprintf('  Display projection in ref XYZ         : [%.6f, %.6f, %.6f]\n',  projectedYNormal3DRefForDisplay);
+fprintf('  R_p^T * y_3dn in image XYZ              : [%.6f, %.6f, %.6f]\n',  yNormal3DImage);
+fprintf('  P(R_p^T * y_3dn) in image XY            : [%.6f, %.6f]\n',        projectedYNormal2DImageUnnormalized);
+fprintf('  Projected length before normalization   : %.6f\n',                projectedYNormalLength);
+fprintf('  Normalized projection in image XY       : [%.6f, %.6f]\n',        projectedYNormal2DImage);
+fprintf('  Display projection in ref XYZ           : [%.6f, %.6f, %.6f]\n',  projectedYNormal3DRefForDisplay);
 
 
 % -------------------------------------------------------------------------
@@ -491,6 +492,9 @@ E_orientation = -kappa * orientationCosine;
 % sqrt(2*E_orientation) would not define a real distance. Add the constant
 % kappa to obtain the equivalent nonnegative mismatch energy. Eq (7).
 %       kappa * (1 - cos(theta)).
+% But we use simpler expression E_orientation + kappa, because
+%       E_orientation + kappa = -kappa * cos(theta) + kappa
+%                             = kappa * (1 - cos(theta))
 % Adding this fixed constant does not change which orientation minimizes the
 % cost, but it lets us recover the unit-vector chord distance between tips:
 %       d_orientation = sqrt(2 * (1 - cos(theta)))
@@ -573,4 +577,51 @@ fprintf('  E_orientation = -kappa*cos(theta)       : %.6f\n',      E_orientation
 fprintf('  Shifted mismatch kappa*(1-cos(theta))   : %.6f\n',      E_orientationMismatch);
 fprintf('  Orientation chord distance              : %.6f unit\n', orientationChordDistance);
 
-%%
+%% FINALLY, CALCULATE E_MATCH
+
+% Combine the two nonnegative mismatch components. E_position measures the
+% position disagreement relative to its covariance, while
+% E_orientationMismatch measures disagreement between the two unit normals.
+% This is the always-nonnegative match-error form introduced in Equation (7):
+%
+%   E_match = E_position + kappa * (1 - cos(theta)).
+%
+% E_orientationMismatch already stores kappa * (1 - cos(theta)), so the
+% final calculation is simply the sum below.
+E_match = E_position + E_orientationMismatch;
+
+% Equation (3) writes the orientation component as -kappa*cos(theta).
+% Calculate that original form as well so it is easy to compare the code with
+% the paper. The two match errors differ only by the constant kappa, and thus
+% rank every candidate correspondence in exactly the same order.
+E_matchEquation3 = E_position + E_orientation;
+
+% Check the constant-shift relationship explicitly. This helps catch a future
+% edit that accidentally mixes the raw and nonnegative orientation terms.
+matchShiftTolerance = 1e-12;
+if abs(E_match - (E_matchEquation3 + kappa)) > matchShiftTolerance
+    error('dev_Ematch_simpleSetup:MatchErrorShiftMismatch', ...
+          'The nonnegative E_match must equal the Equation (3) value plus kappa.');
+end
+
+% Report how much each nonnegative component contributes to this particular
+% match. These percentages are for monitoring only; P-IMLOP minimizes the
+% scalar E_match itself.
+if E_match > 0
+    positionContributionPercent    = 100 * E_position / E_match;
+    orientationContributionPercent = 100 * E_orientationMismatch / E_match;
+else
+    % Both components are zero for a perfect match.
+    positionContributionPercent    = 0;
+    orientationContributionPercent = 0;
+end
+
+fprintf('\nFinal E_match calculation:\n');
+fprintf('  E_position                              : %.6f\n',    E_position);
+fprintf('  E_orientation                           : %.6f\n',    E_orientation);
+fprintf('  E_orientationMismatch                   : %.6f\n',    E_orientationMismatch);
+fprintf('  --------------------------------------------------\n' );
+fprintf('  E_match (Equation 3 form)               : %.6f\n',    E_matchEquation3);
+fprintf('  E_match (nonnegative, Equation 7 form)  : %.6f\n',    E_match);
+fprintf('  Position contribution                   : %.2f %%\n', positionContributionPercent);
+fprintf('  Orientation contribution                : %.2f %%\n', orientationContributionPercent);
