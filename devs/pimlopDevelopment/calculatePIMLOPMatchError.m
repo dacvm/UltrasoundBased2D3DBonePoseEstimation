@@ -8,12 +8,12 @@ function [E_match, details, graphicsHandles] = calculatePIMLOPMatchError( ...
 %
 %   Paper notation used in this function
 %   ------------------------------------
-%   X.position3DRef  corresponds to x_3dp, the measured ultrasound point.
+%   X.position3D     corresponds to x_3dp, the measured ultrasound point.
 %   X.normal2DImage  corresponds to x_2dn, its measured in-plane unit normal.
-%   Y.position3DRef  corresponds to y_3dp, one candidate model point.
-%   Y.normal3DRef    corresponds to y_3dn, its 3D model-surface unit normal.
+%   Y.position3D     corresponds to y_3dp, one candidate model point.
+%   Y.normal3D       corresponds to y_3dn, its 3D model-surface unit normal.
 %   R_p              is the image-plane rotation used in Equations (1)-(3).
-%   SigmaRef         corresponds to Sigma, the covariance of x_3dp.
+%   Sigma3D          corresponds to Sigma, the covariance of x_3dp.
 %   kappa            is the concentration of the 2D von Mises normal model.
 %
 %   Equation (3) combines a Gaussian position term and a von Mises
@@ -32,19 +32,19 @@ function [E_match, details, graphicsHandles] = calculatePIMLOPMatchError( ...
 %   Inputs
 %   ------
 %   X : Scalar structure describing the ultrasound measurement. It must have
-%       position3DRef, a 3x1 position in ref, and normal2DImage, a nonzero
-%       2x1 normal expressed in the local ultrasound image X-Y frame.
+%       position3D, a 3x1 position in the chosen shared 3D frame, and
+%       normal2DImage, a nonzero 2x1 normal in the ultrasound image plane.
 %   Y : Scalar structure describing the model correspondence. It must have
-%       position3DRef, a 3x1 position in ref, and normal3DRef, a nonzero 3x1
-%       model normal expressed in ref.
-%   R_p : 3x3 rotation from the local ultrasound image frame into ref. Thus,
-%       R_p' rotates y_3dn from ref back into local image X-Y-Z before the
-%       projection operator P removes its image-Z component.
+%       position3D, a 3x1 position in the same shared 3D frame, and normal3D,
+%       a nonzero 3x1 model normal in that frame.
+%   R_p : 3x3 rotation from the local ultrasound image frame into the shared
+%       3D frame. Thus, R_p' rotates y_3dn back into local image X-Y-Z before
+%       the projection operator P removes its image-Z component.
 %   positionCovarianceImage : 3x3 positive-definite positional covariance in
 %       the local image X-Y-Z frame. Keeping it separate from X allows one
 %       shared noise model or a different matrix for an individual point.
-%       The function rotates it into ref to obtain the Sigma used in the
-%       positional term of Equations (3), (5), and (7).
+%       The function rotates it into the shared 3D frame to obtain the Sigma
+%       used in the positional term of Equations (3), (5), and (7).
 %   kappa : Nonnegative von Mises concentration for the measured 2D normal.
 %   options : Optional scalar structure controlling diagnostics. ShowDisplay
 %       enables plotting; Axes must then be supplied by the caller.
@@ -57,7 +57,8 @@ function [E_match, details, graphicsHandles] = calculatePIMLOPMatchError( ...
 %   E_match : Nonnegative Equation (7) match error, equal to E_position plus
 %       kappa*(1-cos(theta)).
 %   details : Structure containing the intermediate distances, orientation
-%       quantities, covariance in ref, and the Equation (3) match value.
+%       quantities, covariance in the shared 3D frame, and the Equation (3)
+%       match value.
 %   graphicsHandles : Structure containing handles created when ShowDisplay
 %       is true. Its fields contain empty graphics arrays otherwise.
 
@@ -104,21 +105,21 @@ verbose     = logical(options.Verbose);
 
 % Check the two point structures before reading their fields. Keeping these
 % errors close to the interface makes frame or shape mistakes easier to find.
-requiredXFields = {'position3DRef', 'normal2DImage'};
-requiredYFields = {'position3DRef', 'normal3DRef'};
+requiredXFields = {'position3D', 'normal2DImage'};
+requiredYFields = {'position3D', 'normal3D'};
 if ~isstruct(X) || ~isscalar(X) || ~all(isfield(X, requiredXFields))
     error('calculatePIMLOPMatchError:InvalidX', ...
-          'X must be a scalar structure with position3DRef and normal2DImage.');
+          'X must be a scalar structure with position3D and normal2DImage.');
 end
 if ~isstruct(Y) || ~isscalar(Y) || ~all(isfield(Y, requiredYFields))
     error('calculatePIMLOPMatchError:InvalidY', ...
-          'Y must be a scalar structure with position3DRef and normal3DRef.');
+          'Y must be a scalar structure with position3D and normal3D.');
 end
 
-validateattributes(X.position3DRef, {'numeric'}, {'real', 'finite', 'size', [3, 1]}, mfilename, 'X.position3DRef');
+validateattributes(X.position3D,    {'numeric'}, {'real', 'finite', 'size', [3, 1]}, mfilename, 'X.position3D');
 validateattributes(X.normal2DImage, {'numeric'}, {'real', 'finite', 'size', [2, 1]}, mfilename, 'X.normal2DImage');
-validateattributes(Y.position3DRef, {'numeric'}, {'real', 'finite', 'size', [3, 1]}, mfilename, 'Y.position3DRef');
-validateattributes(Y.normal3DRef,   {'numeric'}, {'real', 'finite', 'size', [3, 1]}, mfilename, 'Y.normal3DRef');
+validateattributes(Y.position3D,    {'numeric'}, {'real', 'finite', 'size', [3, 1]}, mfilename, 'Y.position3D');
+validateattributes(Y.normal3D,      {'numeric'}, {'real', 'finite', 'size', [3, 1]}, mfilename, 'Y.normal3D');
 validateattributes(R_p, {'numeric'}, {'real', 'finite', 'size', [3, 3]}, mfilename, 'R_p');
 validateattributes(positionCovarianceImage, {'numeric'}, {'real', 'finite', 'size', [3, 3]}, mfilename, 'positionCovarianceImage');
 validateattributes(kappa, {'numeric'}, {'real', 'finite', 'scalar', 'nonnegative'}, mfilename, 'kappa');
@@ -129,17 +130,17 @@ validateattributes(kappa, {'numeric'}, {'real', 'finite', 'scalar', 'nonnegative
 % not change their dot product or the resulting von Mises orientation term.
 normalLengthTolerance = 1e-12;
 xNormalLength = norm(X.normal2DImage);
-yNormalLength = norm(Y.normal3DRef);
+yNormalLength = norm(Y.normal3D);
 if xNormalLength <= normalLengthTolerance
     error('calculatePIMLOPMatchError:ZeroMeasuredNormal', ...
           'X.normal2DImage must have nonzero length.');
 end
 if yNormalLength <= normalLengthTolerance
     error('calculatePIMLOPMatchError:ZeroModelNormal', ...
-          'Y.normal3DRef must have nonzero length.');
+          'Y.normal3D must have nonzero length.');
 end
 xNormal2DImage = double(X.normal2DImage) / xNormalLength;
-yNormal3DRef   = double(Y.normal3DRef) / yNormalLength;
+yNormal3D      = double(Y.normal3D) / yNormalLength;
 
 % R_p defines the tracked ultrasound plane orientation in the paper. It must
 % be a proper rotation because both R_p' * y_3dn and R_p * Sigma * R_p' rely
@@ -174,31 +175,31 @@ end
 % The paper writes Sigma in the same 3D coordinate system as x_3dp and y_3dp.
 % Our reusable input instead describes uncertainty along local image X, Y,
 % and Z, where the out-of-plane variance can be larger. Rotate that uncertainty
-% ellipsoid into ref using
+% ellipsoid into the shared 3D frame using
 %
-%     Sigma_ref = R_p * Sigma_image * R_p'.
+%     Sigma_3D = R_p * Sigma_image * R_p'.
 %
 % Translation does not appear because covariance describes spread and
 % orientation around a point, not the position of the centre itself.
-SigmaRef = R_p * SigmaImage * R_p.';
-SigmaRef = 0.5 * (SigmaRef + SigmaRef.');
+Sigma3D = R_p * SigmaImage * R_p.';
+Sigma3D = 0.5 * (Sigma3D + Sigma3D.');
 
 % Form the positional residual d = y_3dp - x_3dp from Equation (3). The paper
 % weights this residual by inv(Sigma), so displacement along a reliable axis
 % costs more than the same displacement along an uncertain axis:
 %
-%     E_position = 1/2 * d' * inv(Sigma_ref) * d.
+%     E_position = 1/2 * d' * inv(Sigma_3D) * d.
 %
-% Do not form inv(Sigma_ref) explicitly. If Sigma_ref = L*L', then L\d is
+% Do not form inv(Sigma_3D) explicitly. If Sigma_3D = L*L', then L\d is
 % the residual expressed in standard-deviation units, and ||L\d||^2 is the
 % squared Mahalanobis distance. This Cholesky solve is numerically safer.
-positionResidualRef         = double(Y.position3DRef) - double(X.position3DRef);
-covarianceCholeskyLower     = chol(SigmaRef, 'lower');
-normalizedPositionResidual  = covarianceCholeskyLower \ positionResidualRef;
+positionResidual3D          = double(Y.position3D) - double(X.position3D);
+covarianceCholeskyLower     = chol(Sigma3D, 'lower');
+normalizedPositionResidual  = covarianceCholeskyLower \ positionResidual3D;
 mahalanobisDistanceSquared  = normalizedPositionResidual.' * normalizedPositionResidual;
 E_position                  = 0.5 * mahalanobisDistanceSquared;
 mahalanobisDistance         = sqrt(mahalanobisDistanceSquared);
-euclideanDistanceMm         = norm(positionResidualRef);
+euclideanDistanceMm         = norm(positionResidual3D);
 
 % Reproduce the projection inside the orientation term of Equation (1):
 %
@@ -206,16 +207,20 @@ euclideanDistanceMm         = norm(positionResidualRef);
 %
 % R_p' first expresses the model normal in local image X-Y-Z coordinates.
 % P then keeps image X and Y while removing image Z. Projection shortens the
-% vector, so divide by its new length to restore a 2D unit direction. If the
-% model normal points purely along image Z, its 2D direction is undefined.
-yNormal3DImage = R_p.' * yNormal3DRef;
+% vector, so divide by its new length to restore a 2D unit direction. When
+% the model normal points along image Z, the projected vector is zero. The
+% paper authors' implementation treats this as zero orientation agreement.
+yNormal3DImage = R_p.' * yNormal3D;
 projectedYNormal2DImageUnnormalized = yNormal3DImage(1:2);
 projectedYNormalLength = norm(projectedYNormal2DImageUnnormalized);
 if projectedYNormalLength <= normalLengthTolerance
-    error('calculatePIMLOPMatchError:UndefinedProjectedNormal', ...
-          'Y.normal3DRef is nearly perpendicular to the image plane.');
+    projectedYNormal2DImage = zeros(2, 1);
+    projectionIsDefined = false;
+else
+    projectedYNormal2DImage = ...
+        projectedYNormal2DImageUnnormalized / projectedYNormalLength;
+    projectionIsDefined = true;
 end
-projectedYNormal2DImage = projectedYNormal2DImageUnnormalized / projectedYNormalLength;
 
 % The orientation factor in Equations (1), (3), and (7) is the dot product
 %
@@ -281,7 +286,7 @@ details.E_position                            = E_position;
 details.E_orientation                         = E_orientation;
 details.E_orientationMismatch                 = E_orientationMismatch;
 details.E_matchEquation3                      = E_matchEquation3;
-details.positionResidualRef                   = positionResidualRef;
+details.positionResidual3D                    = positionResidual3D;
 details.mahalanobisDistance                   = mahalanobisDistance;
 details.mahalanobisDistanceSquared            = mahalanobisDistanceSquared;
 details.euclideanDistanceMm                   = euclideanDistanceMm;
@@ -291,8 +296,9 @@ details.orientationChordDistance              = orientationChordDistance;
 details.projectedYNormal2DImage               = projectedYNormal2DImage;
 details.projectedYNormal2DImageUnnormalized   = projectedYNormal2DImageUnnormalized;
 details.projectedYNormalLength                = projectedYNormalLength;
+details.projectionIsDefined                   = projectionIsDefined;
 details.positionCovarianceImage               = SigmaImage;
-details.positionCovarianceRef                 = SigmaRef;
+details.positionCovariance3D                  = Sigma3D;
 details.positionContributionPercent           = positionContributionPercent;
 details.orientationContributionPercent        = orientationContributionPercent;
 
@@ -323,7 +329,7 @@ if showDisplay
     % Use a caller-controlled normal length when provided. The automatic
     % fallback uses the point separation and covariance size to remain visible.
     if isempty(options.NormalDisplayScale)
-        largestPositionStdMm = sqrt(max(eig(SigmaRef)));
+        largestPositionStdMm = sqrt(max(eig(Sigma3D)));
         normalDisplayScale   = max([1, euclideanDistanceMm, 2 * largestPositionStdMm]);
     else
         validateattributes(options.NormalDisplayScale, {'numeric'}, ...
@@ -340,32 +346,32 @@ if showDisplay
     axesWasHeld = ishold(displayAxes);
     hold(displayAxes, 'on');
 
-    % Transform the two in-plane directions into ref only for drawing. The
-    % P-IMLOP orientation calculation above remains in local image X-Y, as in
-    % Equation (1). No translation is applied because normals are directions.
-    xNormal3DRef          = R_p * [xNormal2DImage; 0];
-    xNormal3DRef          = xNormal3DRef / norm(xNormal3DRef);
-    projectedYNormal3DRef = R_p * [projectedYNormal2DImage; 0];
-    projectedYNormal3DRef = projectedYNormal3DRef / norm(projectedYNormal3DRef);
-    imagePlaneNormalRef   = R_p(:, 3) / norm(R_p(:, 3));
+    % Transform the two in-plane directions into the shared 3D frame only
+    % for drawing. The P-IMLOP orientation calculation above remains in local
+    % image X-Y, as in Equation (1). No translation is applied because
+    % normals are directions.
+    xNormal3D          = R_p * [xNormal2DImage; 0];
+    xNormal3D          = xNormal3D / norm(xNormal3D);
+    projectedYNormal3D = R_p * [projectedYNormal2DImage; 0];
+    imagePlaneNormal3D = R_p(:, 3) / norm(R_p(:, 3));
 
     % Visualize the Gaussian positional model assumed in Equation (1). A joint
     % 3D confidence boundary is a constant-Mahalanobis-distance ellipsoid:
     %
-    %     d' * inv(Sigma_ref) * d = chi-square quantile.
+    %     d' * inv(Sigma_3D) * d = chi-square quantile.
     %
     % Compute that quantile without requiring Statistics Toolbox, then map a
     % unit sphere through the same Cholesky factor used for E_position.
     confidenceRadiusScale = sqrt(2 * gammaincinv(confidenceProbability, 3 / 2));
     [unitSphereX, unitSphereY, unitSphereZ] = sphere(48);
     unitSpherePoints   = [unitSphereX(:).'; unitSphereY(:).'; unitSphereZ(:).'];
-    ellipsoidPointsRef = double(X.position3DRef) + confidenceRadiusScale * covarianceCholeskyLower * unitSpherePoints;
-    ellipsoidXRef = reshape(ellipsoidPointsRef(1, :), size(unitSphereX));
-    ellipsoidYRef = reshape(ellipsoidPointsRef(2, :), size(unitSphereY));
-    ellipsoidZRef = reshape(ellipsoidPointsRef(3, :), size(unitSphereZ));
+    ellipsoidPoints3D = double(X.position3D) + confidenceRadiusScale * covarianceCholeskyLower * unitSpherePoints;
+    ellipsoidX3D = reshape(ellipsoidPoints3D(1, :), size(unitSphereX));
+    ellipsoidY3D = reshape(ellipsoidPoints3D(2, :), size(unitSphereY));
+    ellipsoidZ3D = reshape(ellipsoidPoints3D(3, :), size(unitSphereZ));
 
     graphicsHandles.covarianceEllipsoid = surf(displayAxes, ...
-        ellipsoidXRef, ellipsoidYRef, ellipsoidZRef, ...
+        ellipsoidX3D, ellipsoidY3D, ellipsoidZ3D, ...
         'FaceColor', [1.00, 0.55, 0.05], ...
         'FaceAlpha', 0.22, ...
         'EdgeColor', 'none', ...
@@ -374,25 +380,25 @@ if showDisplay
 
     % Draw the two points and their original measured/model normals.
     graphicsHandles.xPoint = scatter3(displayAxes, ...
-        X.position3DRef(1), X.position3DRef(2), X.position3DRef(3), ...
+        X.position3D(1), X.position3D(2), X.position3D(3), ...
         70, [0.90, 0.05, 0.05], 'filled', ...
         'DisplayName', 'Ultrasound point x');
     graphicsHandles.xNormal = quiver3(displayAxes, ...
-        X.position3DRef(1), X.position3DRef(2), X.position3DRef(3), ...
-        normalDisplayScale * xNormal3DRef(1), ...
-        normalDisplayScale * xNormal3DRef(2), ...
-        normalDisplayScale * xNormal3DRef(3), ...
+        X.position3D(1), X.position3D(2), X.position3D(3), ...
+        normalDisplayScale * xNormal3D(1), ...
+        normalDisplayScale * xNormal3D(2), ...
+        normalDisplayScale * xNormal3D(3), ...
         0, 'Color', [0.90, 0.05, 0.05], 'LineWidth', 2.5, ...
-        'MaxHeadSize', 0.8, 'DisplayName', 'Ultrasound normal x_{2dn} in ref');
+        'MaxHeadSize', 0.8, 'DisplayName', 'Ultrasound normal x_{2dn}');
     graphicsHandles.yPoint = scatter3(displayAxes, ...
-        Y.position3DRef(1), Y.position3DRef(2), Y.position3DRef(3), ...
+        Y.position3D(1), Y.position3D(2), Y.position3D(3), ...
         70, [0.05, 0.35, 0.95], 'filled', ...
         'DisplayName', 'Model point y');
     graphicsHandles.yNormal = quiver3(displayAxes, ...
-        Y.position3DRef(1), Y.position3DRef(2), Y.position3DRef(3), ...
-        normalDisplayScale * yNormal3DRef(1), ...
-        normalDisplayScale * yNormal3DRef(2), ...
-        normalDisplayScale * yNormal3DRef(3), ...
+        Y.position3D(1), Y.position3D(2), Y.position3D(3), ...
+        normalDisplayScale * yNormal3D(1), ...
+        normalDisplayScale * yNormal3D(2), ...
+        normalDisplayScale * yNormal3D(3), ...
         0, 'Color', [0.05, 0.35, 0.95], 'LineWidth', 2.5, ...
         'MaxHeadSize', 0.8, 'DisplayName', 'Model normal y_{3dn}');
 
@@ -401,16 +407,16 @@ if showDisplay
     % P(R_p'*y_3dn) direction used by the orientation dot product. Both red
     % and green in-plane normal arrows use exactly the same display scale.
     graphicsHandles.positionResidual = plot3(displayAxes, ...
-        [X.position3DRef(1), Y.position3DRef(1)], ...
-        [X.position3DRef(2), Y.position3DRef(2)], ...
-        [X.position3DRef(3), Y.position3DRef(3)], ...
+        [X.position3D(1), Y.position3D(1)], ...
+        [X.position3D(2), Y.position3D(2)], ...
+        [X.position3D(3), Y.position3D(3)], ...
         '--', 'Color', [0.65, 0.10, 0.65], 'LineWidth', 2.5, ...
         'DisplayName', 'Position residual X-Y');
     graphicsHandles.projectedYNormal = quiver3(displayAxes, ...
-        X.position3DRef(1), X.position3DRef(2), X.position3DRef(3), ...
-        normalDisplayScale * projectedYNormal3DRef(1), ...
-        normalDisplayScale * projectedYNormal3DRef(2), ...
-        normalDisplayScale * projectedYNormal3DRef(3), ...
+        X.position3D(1), X.position3D(2), X.position3D(3), ...
+        normalDisplayScale * projectedYNormal3D(1), ...
+        normalDisplayScale * projectedYNormal3D(2), ...
+        normalDisplayScale * projectedYNormal3D(3), ...
         0, 'Color', [0.05, 0.70, 0.20], 'LineWidth', 1.5, ...
         'MaxHeadSize', 0.8, ...
         'DisplayName', 'Projected model normal P(R_p^T y_{3dn})');
@@ -418,28 +424,28 @@ if showDisplay
     % Join the equally scaled in-plane normal tips. This orange line visualizes
     % the dimensionless chord derived from cos(theta); it is deliberately kept
     % visually separate from the kappa-weighted orientation energy.
-    xNormalTipRef          = double(X.position3DRef) + normalDisplayScale * xNormal3DRef;
-    projectedYNormalTipRef = double(X.position3DRef) + normalDisplayScale * projectedYNormal3DRef;
+    xNormalTip3D          = double(X.position3D) + normalDisplayScale * xNormal3D;
+    projectedYNormalTip3D = double(X.position3D) + normalDisplayScale * projectedYNormal3D;
     graphicsHandles.orientationChord = plot3(displayAxes, ...
-        [xNormalTipRef(1), projectedYNormalTipRef(1)], ...
-        [xNormalTipRef(2), projectedYNormalTipRef(2)], ...
-        [xNormalTipRef(3), projectedYNormalTipRef(3)], ...
+        [xNormalTip3D(1), projectedYNormalTip3D(1)], ...
+        [xNormalTip3D(2), projectedYNormalTip3D(2)], ...
+        [xNormalTip3D(3), projectedYNormalTip3D(3)], ...
         '--', 'Color', [0.95, 0.45, 0.05], 'LineWidth', 2.0, ...
         'DisplayName', 'Orientation chord distance');
 
     if showLabels
         % Offset the position label within the image plane so it does not
         % cover a short residual. Use image X when the residual is degenerate.
-        residualMidpointRef = 0.5 * (double(X.position3DRef) + double(Y.position3DRef));
-        positionLabelDirectionRef = cross(positionResidualRef, imagePlaneNormalRef);
-        if norm(positionLabelDirectionRef) <= normalLengthTolerance
-            positionLabelDirectionRef = R_p(:, 1);
+        residualMidpoint3D = 0.5 * (double(X.position3D) + double(Y.position3D));
+        positionLabelDirection3D = cross(positionResidual3D, imagePlaneNormal3D);
+        if norm(positionLabelDirection3D) <= normalLengthTolerance
+            positionLabelDirection3D = R_p(:, 1);
         else
-            positionLabelDirectionRef = positionLabelDirectionRef / norm(positionLabelDirectionRef);
+            positionLabelDirection3D = positionLabelDirection3D / norm(positionLabelDirection3D);
         end
-        positionLabelRef = residualMidpointRef + 0.08 * normalDisplayScale * positionLabelDirectionRef;
+        positionLabel3D = residualMidpoint3D + 0.08 * normalDisplayScale * positionLabelDirection3D;
         graphicsHandles.positionLabel = text(displayAxes, ...
-            positionLabelRef(1), positionLabelRef(2), positionLabelRef(3), ...
+            positionLabel3D(1), positionLabel3D(2), positionLabel3D(3), ...
             sprintf('d_M = %.3f', mahalanobisDistance), ...
             'Interpreter', 'tex', 'FontSize', 9, 'FontWeight', 'bold', ...
             'Color', [0.45, 0.05, 0.45], 'Margin', 3, ...
@@ -447,16 +453,16 @@ if showDisplay
 
         % Offset the orientation label perpendicular to its chord while
         % keeping the label inside the ultrasound plane.
-        orientationChordRef = projectedYNormalTipRef - xNormalTipRef;
-        orientationLabelDirectionRef = cross(imagePlaneNormalRef, orientationChordRef);
-        if norm(orientationLabelDirectionRef) <= normalLengthTolerance
-            orientationLabelDirectionRef = R_p(:, 1);
+        orientationChord3D = projectedYNormalTip3D - xNormalTip3D;
+        orientationLabelDirection3D = cross(imagePlaneNormal3D, orientationChord3D);
+        if norm(orientationLabelDirection3D) <= normalLengthTolerance
+            orientationLabelDirection3D = R_p(:, 1);
         else
-            orientationLabelDirectionRef = orientationLabelDirectionRef / norm(orientationLabelDirectionRef);
+            orientationLabelDirection3D = orientationLabelDirection3D / norm(orientationLabelDirection3D);
         end
-        orientationLabelRef = 0.5 * (xNormalTipRef + projectedYNormalTipRef) + 0.08 * normalDisplayScale * orientationLabelDirectionRef;
+        orientationLabel3D = 0.5 * (xNormalTip3D + projectedYNormalTip3D) + 0.08 * normalDisplayScale * orientationLabelDirection3D;
         graphicsHandles.orientationLabel = text(displayAxes, ...
-            orientationLabelRef(1), orientationLabelRef(2), orientationLabelRef(3), ...
+            orientationLabel3D(1), orientationLabel3D(2), orientationLabel3D(3), ...
             sprintf('d_{orientation} = %.3f', orientationChordDistance), ...
             'Interpreter', 'tex', 'FontSize', 9, 'FontWeight', 'bold', ...
             'Color', [0.80, 0.30, 0.00], 'Margin', 3, ...

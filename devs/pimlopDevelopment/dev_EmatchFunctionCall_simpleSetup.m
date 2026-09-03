@@ -42,7 +42,10 @@ surfacePointIndex = validNormalIndices(round((numel(validNormalIndices) + 1) / 2
 % X contains only the measurement geometry. Its covariance remains a separate
 % noise-model input so one matrix can be shared by many measurements.
 X = struct();
-X.position3DRef = double(selectedSurfaceMeasurement.surfaceCoordinatesXYZRef(surfacePointIndex, :)).';
+% calculatePIMLOPMatchError uses the frame-neutral name position3D because
+% later PD-tree calls will evaluate both X and Y in CT. In this small example,
+% the chosen shared 3D frame is still ref.
+X.position3D = double(selectedSurfaceMeasurement.surfaceCoordinatesXYZRef(surfacePointIndex, :)).';
 X.normal2DImage = double(selectedSurfaceMeasurement.surfaceNormalXY(surfacePointIndex, :)).';
 X.normal2DImage = X.normal2DImage / norm(X.normal2DImage);
 
@@ -63,7 +66,7 @@ outOfPlaneOffsetMm  = 0.15 * imageExtentMm;
 imagePlaneNormalRef = R_p(:, 3);
 
 Y = struct();
-Y.position3DRef = X.position3DRef ...
+Y.position3D = X.position3D ...
                   + inPlaneOffsetMm * xNormal3DRefForSetup ...
                   + outOfPlaneOffsetMm * imagePlaneNormalRef;
 
@@ -72,8 +75,8 @@ Y.position3DRef = X.position3DRef ...
 xTangent2DImage = [-X.normal2DImage(2); X.normal2DImage(1)];
 yNormal3DImageForConstruction = [X.normal2DImage + 0.30 * xTangent2DImage; 0.20];
 yNormal3DImageForConstruction = yNormal3DImageForConstruction / norm(yNormal3DImageForConstruction);
-Y.normal3DRef = R_p * yNormal3DImageForConstruction;
-Y.normal3DRef = Y.normal3DRef / norm(Y.normal3DRef);
+Y.normal3D = R_p * yNormal3DImageForConstruction;
+Y.normal3D = Y.normal3D / norm(Y.normal3D);
 
 
 %% CREATE THE INITIAL FIGURE AND AXES

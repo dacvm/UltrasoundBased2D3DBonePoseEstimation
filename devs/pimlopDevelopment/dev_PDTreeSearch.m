@@ -569,4 +569,241 @@ legend(treeAxes, [treeBoneHandle; depthLegendHandles], 'Location', 'northeastout
 rotate3d(treeFigure, 'on');
 drawnow;
 
-%%
+%% STAGE 3: ONE-TRIANGLE MATCH AND BRUTE-FORCE REFERENCE
+
+% -------------------------------------------------------------------------
+% PART 1: VERIFY THE CLOSEST-POINT CALCULATION ON A SIMPLE TRIANGLE
+% Check the new triangle-search geometry using examples whose answers are
+% known before the real bone mesh is involved. If these small examples fail,
+% there is no reason to trust a result obtained from thousands of bone faces.
+
+% Before searching the real bone, use a triangle whose correct answers are
+% easy to calculate by hand. The first query projects inside the triangle.
+% The second query projects outside the triangle plane, so its closest point
+% must lie on the diagonal edge between [4,0,0] and [0,4,0].
+simpleTriangle      = [0, 0, 0;
+                       4, 0, 0;
+                       0, 4, 0];
+isotropicCovariance = eye(3);
+
+% Call the closest-point function twice. Each call receives:
+%   1. a query position X above the triangle;
+%   2. the three triangle vertices; and
+%   3. an identity covariance, so Mahalanobis distance is the same as normal
+%      Euclidean distance in this introductory test.
+%
+% The function returns the closest position on the triangle and three
+% barycentric weights describing where that position lies. The first call
+% should return the point directly below X. The second should return the
+% nearest point on the triangle's diagonal boundary.
+[insidePoint, insideBarycentric] = findMostLikelyPointOnTriangle([1; 1; 2], simpleTriangle, isotropicCovariance);
+[edgePoint, edgeBarycentric]     = findMostLikelyPointOnTriangle([3; 3; 2], simpleTriangle, isotropicCovariance);
+
+% Compare the calculated answers with their hand-computed values. NORM gives
+% the size of the difference between two vectors. A result below 1e-12 means
+% they agree apart from insignificant floating-point round-off.
+insideTestPassed = norm(insidePoint - [1; 1; 0]) < 1e-12 && norm(insideBarycentric - [0.5; 0.25; 0.25]) < 1e-12;
+edgeTestPassed   = norm(edgePoint - [2; 2; 0]) < 1e-12   && norm(edgeBarycentric - [0; 0.5; 0.5]) < 1e-12;
+
+% Stop immediately if either basic test fails. Continuing to the bone search
+% would otherwise produce a plausible-looking result built on faulty
+% closest-point geometry.
+if ~insideTestPassed || ~edgeTestPassed
+    error('dev_PDTreeSearch:TriangleClosestPointTestFailed', ...
+          'The simple one-triangle closest-point checks did not pass.');
+end
+
+
+% -------------------------------------------------------------------------
+% PART 2: CREATE ONE KNOWN QUERY ON THE REAL CT BONE
+% Build a controlled X for which we already know the correct model match Y.
+% This lets us test the complete all-triangle search on the real CT geometry
+% without yet introducing uncertainty about the true ultrasound match.
+
+% Reuse the deterministic seed face from Stage 1. Place X exactly at its
+% centre and align the measured 2D normal with that face normal. Therefore,
+% this face contains a perfect match whose expected error is zero. This
+% gives the brute-force search a result that is unambiguous and easy to
+% verify before we try more difficult ultrasound measurements.
+% These four variables collect the selected face number, its three vertices,
+% its centre, and its prepared unit normal, all in the CT frame.
+knownFaceIndex          = seedFaceIndex;
+knownTriangleVerticesCT = bonePointsCT(boneFaces(knownFaceIndex, :), :);
+knownFaceCenterCT       = mean(knownTriangleVerticesCT, 1).';
+knownFaceNormalCT       = PsiCT.faceNormals(knownFaceIndex, :).';
+
+% Construct a temporary ultrasound-image orientation for this synthetic
+% check. Its image X-axis is deliberately set equal to the known face normal.
+% Consequently, projecting the model normal into the image plane produces
+% [1;0], which is also the measured 2D normal below.
+%
+% A 3D rotation needs three mutually perpendicular unit axes. We already
+% know the desired X-axis. A helper direction lets CROSS construct a Z-axis
+% perpendicular to it. If the default helper is nearly parallel to X, use a
+% different helper; crossing parallel directions would produce a zero vector.
+% The final cross product constructs Y and completes a right-handed frame.
+imageXAxisCT      = knownFaceNormalCT;
+helperDirectionCT = [0; 0; 1];
+if abs(dot(imageXAxisCT, helperDirectionCT)) > 0.9
+    helperDirectionCT = [0; 1; 0];
+end
+imageZAxisCT     = cross(imageXAxisCT, helperDirectionCT);
+imageZAxisCT     = imageZAxisCT / norm(imageZAxisCT);
+imageYAxisCT     = cross(imageZAxisCT, imageXAxisCT);
+imageYAxisCT     = imageYAxisCT / norm(imageYAxisCT);
+R_stage3Image_CT = [imageXAxisCT, imageYAxisCT, imageZAxisCT];
+
+% Define the synthetic projection-oriented measurement X. Its position is
+% the known triangle centre in CT, while its normal remains a 2D direction
+% in the temporary ultrasound image plane, exactly as required by P-IMLOP.
+Xstage3 = struct();
+Xstage3.position3D    = knownFaceCenterCT;
+Xstage3.normal2DImage = [1; 0];
+
+% A diagonal covariance keeps this first full-mesh test easy to read while
+% still exercising the covariance rotation used by the P-IMLOP equations.
+% Squaring the standard deviations converts millimetres into variances in
+% mm^2. Kappa controls how strongly disagreement between normals is penalized.
+positionStandardDeviationImageMm = [1.0; 1.0; 1.5];
+positionCovarianceImage          = diag(positionStandardDeviationImageMm .^ 2);
+kappaStage3 = 50;
+
+
+% -------------------------------------------------------------------------
+% PART 3: SEARCH EVERY VALID TRIANGLE
+% Run the simplest possible complete correspondence search and verify that
+% it recovers the answer deliberately created in Part 2. This slow result
+% will later serve as the trusted reference for testing the faster PD-tree.
+
+% This is intentionally the slow, obvious reference implementation. It
+% evaluates every valid triangle and keeps the smallest complete P-IMLOP
+% match error. A future PD-tree search should return the same answer while
+% avoiding most of these triangle evaluations.
+[Ystage3, E_stage3, stage3SearchDetails] = searchPIMLOPBruteForce( ...
+    Xstage3, PsiCT, R_stage3Image_CT, positionCovarianceImage, kappaStage3);
+
+% Read the important outputs into clearly named variables. Valid barycentric
+% coordinates must sum to one and must not be negative; those two properties
+% guarantee that the returned Y lies on or inside the winning triangle.
+% The point difference measures whether Y returned to the known centre.
+stage3Barycentric        = stage3SearchDetails.barycentricCoordinates;
+stage3PointDifferenceMm  = norm(Ystage3.position3D - knownFaceCenterCT);
+stage3BarycentricIsValid = abs(sum(stage3Barycentric) - 1) < 1e-10 && all(stage3Barycentric >= -1e-10);
+stage3PerfectMatchFound  = Ystage3.faceIndex == knownFaceIndex && stage3PointDifferenceMm < 1e-9 && E_stage3 < 1e-10;
+
+% Require all three parts of the known answer: the correct face, the correct
+% position, and essentially zero match error. The small tolerances allow for
+% ordinary floating-point round-off without accepting a meaningful mismatch.
+if ~stage3BarycentricIsValid || ~stage3PerfectMatchFound
+    error('dev_PDTreeSearch:Stage3VerificationFailed', ...
+          'The Stage 3 brute-force search did not recover the known CT match.');
+end
+
+% Print the same evidence numerically. The figure in Part 4 is intuitive,
+% but this report provides exact values and confirms that every valid face
+% was evaluated rather than only the highlighted neighbourhood.
+fprintf('\nP-IMLOP Stage 3 triangle and brute-force verification:\n');
+fprintf('  Simple projection inside triangle       : PASS\n');
+fprintf('  Simple projection onto triangle edge    : PASS\n');
+fprintf('  Expected CT face index                  : %d\n', knownFaceIndex);
+fprintf('  Returned CT face index                  : %d\n', Ystage3.faceIndex);
+fprintf('  Returned barycentric coordinates        : [%.6f, %.6f, %.6f]\n', stage3Barycentric(1), stage3Barycentric(2), stage3Barycentric(3));
+fprintf('  Distance from known point               : %.3e mm\n', stage3PointDifferenceMm);
+fprintf('  Best nonnegative match error            : %.3e\n', E_stage3);
+fprintf('  Valid faces evaluated                   : %d\n', stage3SearchDetails.numberOfFacesEvaluated);
+fprintf('  Brute-force search time                 : %.3f s\n', stage3SearchDetails.elapsedSeconds);
+fprintf('  Known full-mesh match recovered         : PASS\n');
+
+
+% -------------------------------------------------------------------------
+% PART 4: VISUALLY INSPECT THE WINNING TRIANGLE AND ORIENTED POINTS
+% Turn the numerical PASS result into a geometric picture. We want to see
+% that Y is on the winning mesh triangle, X and Y coincide for this perfect
+% test, and their normals point in the same direction. The covariance
+% ellipsoid also shows the positional uncertainty used by E_match.
+
+% Show a close view in CT coordinates. The complete bone is faint, while the
+% winning triangle is opaque. The match-error display adds X, Y, the two
+% normals, and the positional covariance ellipsoid. For this known perfect
+% case, X and Y intentionally overlap and their normals point in the same
+% direction. Therefore, the blue Y marker can cover the red X marker, and
+% the model-normal arrow can cover the ultrasound-normal arrow. That visual
+% overlap is expected evidence of the perfect synthetic match, not a missing
+% plotted object.
+
+% Create an equal-scale 3D CT view. Equal axis scaling is important because
+% otherwise MATLAB could visually distort the triangle or normal directions.
+stage3Figure = figure('Name', 'P-IMLOP Stage 3: Brute-Force Match');
+stage3Axes = axes(stage3Figure);
+hold(stage3Axes, 'on');
+grid(stage3Axes, 'on');
+axis(stage3Axes, 'equal');
+view(stage3Axes, 35, 35);
+xlabel(stage3Axes, 'X_{CT} (mm)');
+ylabel(stage3Axes, 'Y_{CT} (mm)');
+zlabel(stage3Axes, 'Z_{CT} (mm)');
+
+% Draw the complete bone with very low opacity to provide anatomical context.
+% Draw only the winning triangle again with a strong cyan fill and dark edge,
+% making the correspondence selected from the full mesh easy to locate.
+stage3BoneHandle = patch(stage3Axes, ...
+    'Faces', boneFaces, ...
+    'Vertices', bonePointsCT, ...
+    'FaceColor', [0.82, 0.82, 0.82], ...
+    'EdgeColor', 'none', ...
+    'FaceAlpha', 0.12, ...
+    'DisplayName', 'Complete CT bone mesh');
+stage3TriangleHandle = patch(stage3Axes, ...
+    'Faces', boneFaces(knownFaceIndex, :), ...
+    'Vertices', bonePointsCT, ...
+    'FaceColor', [0.10, 0.75, 0.90], ...
+    'EdgeColor', [0.00, 0.20, 0.35], ...
+    'LineWidth', 2, ...
+    'DisplayName', 'Winning triangle');
+
+% Measure the triangle edges and use their largest length to choose a normal
+% arrow scale. This keeps the arrows visible relative to the local triangle;
+% the scale changes only the drawing, never the stored unit normals or error.
+stage3TriangleEdgeLengths = [ ...
+    norm(knownTriangleVerticesCT(2, :) - knownTriangleVerticesCT(1, :)); ...
+    norm(knownTriangleVerticesCT(3, :) - knownTriangleVerticesCT(2, :)); ...
+    norm(knownTriangleVerticesCT(1, :) - knownTriangleVerticesCT(3, :))];
+stage3NormalDisplayScale = max(2, 1.5 * max(stage3TriangleEdgeLengths));
+
+% Ask the existing E_match function to add its diagnostic graphics to these
+% axes. It draws the covariance ellipsoid, X, Y, their original normals, the
+% projected model normal, and the positional/orientation comparison lines.
+% Labels are disabled here because they would clutter this small local view.
+stage3DisplayOptions = struct();
+stage3DisplayOptions.ShowDisplay        = true;
+stage3DisplayOptions.Axes               = stage3Axes;
+stage3DisplayOptions.NormalDisplayScale = stage3NormalDisplayScale;
+stage3DisplayOptions.ShowLabels         = false;
+[~, ~, stage3MatchGraphics] = calculatePIMLOPMatchError( ...
+    Xstage3, Ystage3, R_stage3Image_CT, ...
+    positionCovarianceImage, kappaStage3, stage3DisplayOptions);
+
+% Crop the view around the winning triangle with enough padding to include
+% the uncertainty ellipsoid and normal arrows. The full bone remains present,
+% but only the nearby surface is useful for judging this correspondence.
+stage3PatchMinimumCT = min(knownTriangleVerticesCT, [], 1);
+stage3PatchMaximumCT = max(knownTriangleVerticesCT, [], 1);
+stage3ViewPaddingMm  = max(4, 3 * max(stage3TriangleEdgeLengths));
+xlim(stage3Axes, [stage3PatchMinimumCT(1), stage3PatchMaximumCT(1)] + [-1, 1] * stage3ViewPaddingMm);
+ylim(stage3Axes, [stage3PatchMinimumCT(2), stage3PatchMaximumCT(2)] + [-1, 1] * stage3ViewPaddingMm);
+zlim(stage3Axes, [stage3PatchMinimumCT(3), stage3PatchMaximumCT(3)] + [-1, 1] * stage3ViewPaddingMm);
+
+% Put the selected face and error in the title. Use only the most important
+% graphics in the legend so it explains the verification without becoming
+% overcrowded. ROTATE3D lets the developer inspect overlap from other views.
+title(stage3Axes, sprintf('Stage 3 match: face %d, E_{match} = %.2e', Ystage3.faceIndex, E_stage3));
+legend(stage3Axes, [ ...
+    stage3BoneHandle; ...
+    stage3TriangleHandle; ...
+    stage3MatchGraphics.xPoint; ...
+    stage3MatchGraphics.yPoint; ...
+    stage3MatchGraphics.xNormal; ...
+    stage3MatchGraphics.yNormal], ...
+    'Location', 'northeastoutside', 'Interpreter', 'tex');
+rotate3d(stage3Figure, 'on');
+drawnow;
