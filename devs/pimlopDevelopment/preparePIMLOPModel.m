@@ -1,16 +1,14 @@
 function PsiCT = preparePIMLOPModel(boneMeshCT)
-%PREPAREPIMLOPMODEL Prepare CT mesh geometry for future P-IMLOP matching.
+%PREPAREPIMLOPMODEL Prepare the CT mesh geometry needed by P-IMLOP.
 %   This function computes one area and one unit face normal for every
 %   triangle in a CT-frame bone mesh. It also marks degenerate triangles so
-%   later PD-tree construction can ignore them safely. Stage 1 prepares only
-%   the mesh geometry; the PD-tree field is deliberately left empty.
+%   later stages, including the PD-tree, can ignore them.
 %
 %   Input
 %   -----
 %   boneMeshCT : MATLAB triangulation containing the bone vertices and
 %       triangle connectivity in CT coordinates. Point coordinates are
 %       expected in millimetres.
-%
 %   Output
 %   ------
 %   PsiCT : Structure describing the complete P-IMLOP model in CT. It has:
@@ -19,12 +17,15 @@ function PsiCT = preparePIMLOPModel(boneMeshCT)
 %       faceAreas        - M-by-1 triangle areas in square millimetres;
 %       validFaceMask    - M-by-1 logical mask for nondegenerate faces;
 %       normalConvention - metadata explaining the normal convention;
-%       pdTree           - empty in Stage 1, ready for Stage 2.
+%       pdTree           - empty placeholder; Stage 2 will store the
+%                          position-based PD-tree here.
 %
 %   Example
 %   -------
 %       PsiCT = preparePIMLOPModel(data.boneMeshCT);
 %       validNormalsCT = PsiCT.faceNormals(PsiCT.validFaceMask, :);
+%       PsiCT.pdTree = buildPIMLOPPDTree( ...
+%           PsiCT.mesh, PsiCT.validFaceMask);
 
 % A triangulation is required because P-IMLOP treats every mesh triangle as
 % one model datum. Keeping this check small gives a clear message when the
@@ -96,7 +97,7 @@ PsiCT.normalConvention.direction   = 'outward';
 PsiCT.normalConvention.source      = 'triangle vertex winding';
 PsiCT.normalConvention.unitLength  = true;
 
-% Stage 2 will replace this empty value with the spatial search tree. Making
-% the field visible now documents the intended final structure of PsiCT.
+% Reserve a clear location for the PD-tree without constructing it here.
+% This keeps Stage 1 (mesh geometry) separate from Stage 2 (tree building).
 PsiCT.pdTree = [];
 end

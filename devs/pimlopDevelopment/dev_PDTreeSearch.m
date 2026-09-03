@@ -68,33 +68,6 @@ xNormal3DRefForDisplay = xNormal3DRefForDisplay / norm(xNormal3DRefForDisplay);
 X = x;
 
 
-%% PREPARE THE WHOLE BONE MODEL IN CT
-
-% Read the original CT-frame triangulation from the prepared optimization
-% data. Keep the source mesh unchanged so later PD-tree experiments can
-% always start from the same model geometry.
-if ~isfield(data, 'boneMeshCT') || ~isa(data.boneMeshCT, 'triangulation')
-    error('dev_PDTreeSearch:MissingBoneMesh', ...
-          'The loaded optimization setup must contain data.boneMeshCT as a triangulation.');
-end
-boneMeshCT = data.boneMeshCT;
-
-% PsiCT is the complete searchable model from the paper. Stage 1 computes
-% only triangle areas, face normals, and the valid-face mask. Its pdTree
-% field intentionally remains empty until Stage 2 is implemented.
-PsiCT = preparePIMLOPModel(boneMeshCT);
-
-% The existing overview figure remains in ref because it helps relate the
-% bone to the tracked ultrasound measurement. This transformed copy is for
-% display only; the prepared P-IMLOP model itself stays fixed in CT.
-% The coarse-registration transform maps CT coordinates into ref:
-%       p_ref = T_CT_ref_initial * p_CT.
-% Transform every mesh vertex with the shared project helper, then rebuild
-% the triangulation with the original face connectivity.
-T_CT_ref_initial = data.T_CT_ref_initial;
-bonePointsRef    = applyRigidTransform(PsiCT.mesh.Points, T_CT_ref_initial);
-boneMeshRef      = triangulation(PsiCT.mesh.ConnectivityList, bonePointsRef);
-
 
 %% DISPLAY THE SETUP
 
@@ -116,17 +89,6 @@ view(setupAxes, 35, 35);
 xlabel(setupAxes, 'X_{ref} (mm)');
 ylabel(setupAxes, 'Y_{ref} (mm)');
 zlabel(setupAxes, 'Z_{ref} (mm)');
-
-% Draw the complete bone model after transforming it from CT into ref. A
-% transparent surface keeps the selected image and measurement point visible
-% while still showing the full model domain that the PD-tree will search.
-boneMeshHandle = patch(setupAxes, ...
-    'Faces', boneMeshRef.ConnectivityList, ...
-    'Vertices', boneMeshRef.Points, ...
-    'FaceColor', [0.92, 0.83, 0.74], ...
-    'EdgeColor', 'none', ...
-    'FaceAlpha', 0.30, ...
-    'DisplayName', 'Bone mesh \Psi in ref');
 
 % Draw the selected tracked image at its saved pose in ref.
 imageHandle = display_image3D(setupAxes, ...
@@ -171,13 +133,58 @@ xNormalHandle = quiver3(setupAxes, ...
 % Use one compact legend for the visible model and measurement objects. The
 % three image-frame axis arrows remain visible without separate legend rows.
 legend(setupAxes, ...
-    [boneMeshHandle, imageHandle, xPointHandle, xNormalHandle], ...
+    [imageHandle, xPointHandle, xNormalHandle], ...
     'Location', 'best', ...
     'Interpreter', 'tex');
 drawnow;
 
 
-%% VALIDATE STAGE 1: MODEL GEOMETRY
+%% STAGE 1: PREPARE THE CT MESH GEOMETRY
+
+% -------------------------------------------------------------------------
+% PART 1: PREPARE THE WHOLE BONE MODEL IN CT
+
+% Read the original CT-frame triangulation from the prepared optimization
+% data. Keep the source mesh unchanged so later PD-tree experiments can
+% always start from the same model geometry.
+if ~isfield(data, 'boneMeshCT') || ~isa(data.boneMeshCT, 'triangulation')
+    error('dev_PDTreeSearch:MissingBoneMesh', ...
+          'The loaded optimization setup must contain data.boneMeshCT as a triangulation.');
+end
+boneMeshCT = data.boneMeshCT;
+
+% PsiCT is the complete model from the paper. At this first stage, the
+% preparation function computes only the triangle geometry. The PD-tree is
+% deliberately built later, at the beginning of Stage 2, so each
+% development step remains visible and easy to study.
+PsiCT = preparePIMLOPModel(boneMeshCT);
+
+% The existing overview figure remains in ref because it helps relate the
+% bone to the tracked ultrasound measurement. This transformed copy is for
+% display only; the prepared P-IMLOP model itself stays fixed in CT.
+% The coarse-registration transform maps CT coordinates into ref:
+%       p_ref = T_CT_ref_initial * p_CT.
+% Transform every mesh vertex with the shared project helper, then rebuild
+% the triangulation with the original face connectivity.
+T_CT_ref_initial = data.T_CT_ref_initial;
+bonePointsRef    = applyRigidTransform(PsiCT.mesh.Points, T_CT_ref_initial);
+boneMeshRef      = triangulation(PsiCT.mesh.ConnectivityList, bonePointsRef);
+
+% Draw the complete bone model after transforming it from CT into ref. A
+% transparent surface keeps the selected image and measurement point visible
+% while still showing the full model domain that the PD-tree will search.
+boneMeshHandle = patch(setupAxes, ...
+    'Faces', boneMeshRef.ConnectivityList, ...
+    'Vertices', boneMeshRef.Points, ...
+    'FaceColor', [0.92, 0.83, 0.74], ...
+    'EdgeColor', 'none', ...
+    'FaceAlpha', 0.30, ...
+    'DisplayName', 'Bone mesh \Psi in ref');
+drawnow;
+
+
+% -------------------------------------------------------------------------
+% PART 2: VALIDATE NORMALS
 
 % Summarize the prepared arrays before drawing them. These checks focus on
 % the properties needed by later P-IMLOP stages without adding PD-tree logic.
@@ -220,9 +227,9 @@ faceVertex2CT      = bonePointsCT(boneFaces(:, 2), :);
 faceVertex3CT      = bonePointsCT(boneFaces(:, 3), :);
 faceCentersCT      = (faceVertex1CT + faceVertex2CT + faceVertex3CT) / 3;
 
-seedFaceIndex      = validFaceIndices(round((numel(validFaceIndices) + 1) / 2));
-offsetFromSeedCT   = faceCentersCT(validFaceIndices, :) - faceCentersCT(seedFaceIndex, :);
-squaredSeedDistance = sum(offsetFromSeedCT .^ 2, 2);
+seedFaceIndex         = validFaceIndices(round((numel(validFaceIndices) + 1) / 2));
+offsetFromSeedCT      = faceCentersCT(validFaceIndices, :) - faceCentersCT(seedFaceIndex, :);
+squaredSeedDistance   = sum(offsetFromSeedCT .^ 2, 2);
 [~, nearestFaceOrder] = sort(squaredSeedDistance, 'ascend');
 
 numberOfPatchFaces = min(80, numel(validFaceIndices));
@@ -301,3 +308,265 @@ title(geometryAxes, sprintf('Stage 1 verification: %d nearby CT faces', numberOf
 legend(geometryAxes, [wholeBoneHandle, areaPatchHandle, normalHandle], 'Location', 'best');
 rotate3d(geometryFigure, 'on');
 drawnow;
+
+
+%% STAGE 2: PD-TREE CONSTRUCTION
+
+% -------------------------------------------------------------------------
+% PART 1: CONSTRUCT THE PD-TREE
+
+% Build the fixed CT-frame PD-tree from the valid triangles prepared in
+% Stage 1. Keeping this call here makes the two development steps explicit:
+% first prepare the mesh geometry, and then organize it into a search tree.
+pdTreeOptions = struct();
+pdTreeOptions.faceCountThreshold    = 15;
+pdTreeOptions.minimumNodeDiagonalMm = 15;
+
+PsiCT.pdTree = buildPIMLOPPDTree(PsiCT.mesh, PsiCT.validFaceMask, pdTreeOptions);
+
+% -------------------------------------------------------------------------
+% PART 2: VALIDATION REPORT
+
+% This validation asks a simple question first: "Did the tree lose or
+% duplicate any model triangles?"
+%
+% A triangle appears in several ancestor nodes while we travel down the
+% tree, but it must finish in exactly one leaf. Therefore, we collect the
+% face indices from all leaves and compare that collection with the complete
+% list of valid faces prepared in Stage 1.
+pdTree          = PsiCT.pdTree;
+treeNodes       = pdTree.nodes;
+leafNodeIndices = find([treeNodes.isLeaf]);
+leafFaceIndices = vertcat(treeNodes(leafNodeIndices).datumFaceIndices);
+
+% Sorting removes any dependence on tree traversal order. The three tests
+% below mean:
+%   1. both lists contain the same number of entries;
+%   2. both lists contain the same face indices;
+%   3. the leaf list contains no repeated face index.
+sortedValidFaces = sort(validFaceIndices(:));
+sortedLeafFaces  = sort(leafFaceIndices(:));
+everyFaceAppearsOnce = numel(sortedLeafFaces) == numel(sortedValidFaces) && ...
+    isequal(sortedLeafFaces, sortedValidFaces) && ...
+    numel(unique(sortedLeafFaces)) == numel(sortedLeafFaces);
+
+% The following flags start as true. While visiting every node, a flag stays
+% true only if every node examined so far satisfies that property. This
+% gives one compact final result for each important tree promise:
+%   - every node has a valid local coordinate frame;
+%   - every node bounding box encloses its complete triangles;
+%   - every internal node divides its faces correctly between two children.
+allNodeFramesRigid      = true;
+allNodeBoundsContainFaces = true;
+childrenPartitionParents  = true;
+
+for nodeIndex = 1:numel(treeNodes)
+    % STEP 1: Read this node and validate its coordinate frame.
+    %
+    % T_node_CT maps a point from this node's local coordinates into CT:
+    %       p_CT = T_node_CT * p_node.
+    % Its upper-left 3-by-3 block must therefore be a genuine rotation.
+    % Orthonormal columns preserve lengths and angles, determinant +1 rules
+    % out a reflection, and the final row gives the standard homogeneous
+    % rigid-transform form.
+    node = treeNodes(nodeIndex);
+    R_node_CT = node.T_node_CT(1:3, 1:3);
+
+    rotationIsOrthonormal = norm(R_node_CT.' * R_node_CT - eye(3), 'fro') <= 1e-10;
+    rotationIsProper      = abs(det(R_node_CT) - 1) <= 1e-10;
+    homogeneousRowIsValid = norm(node.T_node_CT(4, :) - [0, 0, 0, 1]) <= 1e-12;
+    allNodeFramesRigid    = allNodeFramesRigid && rotationIsOrthonormal && rotationIsProper && homogeneousRowIsValid;
+
+    % STEP 2: Confirm that the node's oriented bounding box (OBB) really
+    % contains the model geometry assigned to this node.
+    %
+    % The OBB limits are stored in node-local coordinates, so CT vertices
+    % cannot be compared with those limits directly. We first gather every
+    % unique vertex used by the node's triangles, subtract the node origin,
+    % and apply R_node_CT transpose. The transpose is the inverse rotation,
+    % so this operation expresses CT points in the node frame:
+    %       p_node = R_node_CT' * (p_CT - origin_CT).
+    nodeVertexIndices = unique(boneFaces(node.datumFaceIndices, :));
+    nodePointsCT      = bonePointsCT(nodeVertexIndices, :);
+    nodeOriginCT      = node.T_node_CT(1:3, 4).';
+    nodePointsNode    = (R_node_CT.' * (nodePointsCT - nodeOriginCT).').';
+    % Floating-point calculations may place a point an extremely small
+    % distance outside a theoretically exact limit. The tolerance avoids
+    % treating that numerical roundoff as a faulty box. Every local x, y,
+    % and z coordinate must then lie between the saved minimum and maximum.
+    boundsToleranceMm = 1e-9 * max(1, norm(node.boundsMaxNode - node.boundsMinNode));
+    nodeInsideBounds  = all(nodePointsNode >= node.boundsMinNode - boundsToleranceMm, 'all') && ...
+                        all(nodePointsNode <= node.boundsMaxNode + boundsToleranceMm, 'all');
+    allNodeBoundsContainFaces = allNodeBoundsContainFaces && nodeInsideBounds;
+
+    % STEP 3: If this is an internal node, confirm that its split was valid.
+    %
+    % A correct binary split neither invents, loses, nor duplicates faces:
+    % the left and right sets must not overlap, and joining them must recover
+    % the parent's complete face set. Each child also stores the index of
+    % this node, allowing future tree traversal to move in either direction.
+    % Leaf nodes have no children, so this step does not apply to them.
+    if ~node.isLeaf
+        leftNode  = treeNodes(node.leftNodeIndex);
+        rightNode = treeNodes(node.rightNodeIndex);
+        combinedChildFaces = [leftNode.datumFaceIndices; rightNode.datumFaceIndices];
+
+        childrenAreDisjoint       = isempty(intersect(leftNode.datumFaceIndices, rightNode.datumFaceIndices));
+        childrenCoverParent       = isequal(sort(combinedChildFaces), sort(node.datumFaceIndices));
+        childrenPointBackToParent = leftNode.parentNodeIndex == nodeIndex && rightNode.parentNodeIndex == nodeIndex;
+
+        childrenPartitionParents  = childrenPartitionParents && childrenAreDisjoint && childrenCoverParent && childrenPointBackToParent;
+    end
+end
+
+leafFaceCounts = arrayfun( ...
+    @(nodeIndex) numel(treeNodes(nodeIndex).datumFaceIndices), ...
+    leafNodeIndices);
+
+if ~everyFaceAppearsOnce || ~childrenPartitionParents || ~allNodeBoundsContainFaces || ~allNodeFramesRigid
+    error('dev_PDTreeSearch:Stage2VerificationFailed', ...
+          'The Stage 2 PD-tree did not pass its structural verification.');
+end
+
+fprintf('\nP-IMLOP Stage 2 PD-tree verification:\n');
+fprintf('  Valid mesh datums                 : %d\n', pdTree.numberOfDatums);
+fprintf('  Datums stored in leaves           : %d\n', numel(leafFaceIndices));
+fprintf('  Total nodes                       : %d\n', pdTree.numberOfNodes);
+fprintf('  Leaf nodes                        : %d\n', pdTree.numberOfLeaves);
+fprintf('  Maximum depth                     : %d\n', pdTree.maximumDepth);
+fprintf('  Leaf face count min / mean / max  : %d / %.2f / %d\n', min(leafFaceCounts), mean(leafFaceCounts), max(leafFaceCounts));
+fprintf('  Face-count stopping threshold     : %d\n', pdTree.options.faceCountThreshold);
+fprintf('  Minimum node diagonal setting     : %.2f mm\n', pdTree.options.minimumNodeDiagonalMm);
+fprintf('  Every valid face appears once     : PASS\n');
+fprintf('  Child sets partition parents      : PASS\n');
+fprintf('  Every OBB contains its faces      : PASS\n');
+fprintf('  Every node frame is rigid         : PASS\n');
+
+
+% -------------------------------------------------------------------------
+% PART 3: VALIDATION DISPLAY
+
+% This figure is a visual explanation of the first three PD-tree levels:
+%   - the black root box surrounds the whole valid bone mesh;
+%   - the two red child boxes show the root's first spatial division;
+%   - the four blue grandchild boxes show the next division.
+%
+% Displaying deeper levels would add hundreds of overlapping boxes and make
+% the hierarchy harder to see. These first seven boxes are enough to check
+% that child regions become smaller and follow the shape of their assigned
+% bone regions.
+treeFigure = figure('Name', 'P-IMLOP Stage 2: First PD-Tree Generations');
+treeAxes   = axes(treeFigure);
+hold(treeAxes, 'on');
+grid(treeAxes, 'on');
+axis(treeAxes, 'equal');
+view(treeAxes, 35, 35);
+xlabel(treeAxes, 'X_{CT} (mm)');
+ylabel(treeAxes, 'Y_{CT} (mm)');
+zlabel(treeAxes, 'Z_{CT} (mm)');
+
+treeBoneHandle = patch(treeAxes, ...
+    'Faces', boneFaces, ...
+    'Vertices', bonePointsCT, ...
+    'FaceColor', [0.65, 0.70, 0.75], ...
+    'EdgeColor', 'none', ...
+    'FaceAlpha', 0.55, ...
+    'DisplayName', 'CT bone mesh');
+
+% Each row gives the eight corners of a box in an order that makes the edge
+% list below easy to follow: four corners on the lower face, then four on the
+% upper face.
+boxEdgePairs = [ ...
+    1, 2; 2, 3; 3, 4; 4, 1; ...
+    5, 6; 6, 7; 7, 8; 8, 5; ...
+    1, 5; 2, 6; 3, 7; 4, 8];
+depthColors = [ ...
+    0.05, 0.05, 0.05; ...
+    0.85, 0.15, 0.15; ...
+    0.10, 0.35, 0.95];
+depthNames = {'Depth 0: root OBB', 'Depth 1: child OBBs', 'Depth 2: grandchild OBBs'};
+depthLegendHandles = gobjects(3, 1);
+
+displayNodeIndices = find([treeNodes.depth] <= 2);
+for displayIndex = 1:numel(displayNodeIndices)
+    % STEP 1: Select one of the root, child, or grandchild nodes. Its depth
+    % determines the box colour used to reveal the tree generation.
+    nodeIndex = displayNodeIndices(displayIndex);
+    node      = treeNodes(nodeIndex);
+    depth     = node.depth;
+
+    % STEP 2: Reconstruct the eight corners of the node's box.
+    %
+    % boundsMinNode and boundsMaxNode store two opposite corners in the
+    % node's own coordinate frame. Taking every minimum/maximum combination
+    % of x, y, and z produces all eight corners of the rectangular box.
+    minimumCorner = node.boundsMinNode;
+    maximumCorner = node.boundsMaxNode;
+    boxCornersNode = [ ...
+        minimumCorner(1), minimumCorner(2), minimumCorner(3); ...
+        maximumCorner(1), minimumCorner(2), minimumCorner(3); ...
+        maximumCorner(1), maximumCorner(2), minimumCorner(3); ...
+        minimumCorner(1), maximumCorner(2), minimumCorner(3); ...
+        minimumCorner(1), minimumCorner(2), maximumCorner(3); ...
+        maximumCorner(1), minimumCorner(2), maximumCorner(3); ...
+        maximumCorner(1), maximumCorner(2), maximumCorner(3); ...
+        minimumCorner(1), maximumCorner(2), maximumCorner(3)];
+    % The corners currently live in the node frame. Transform them into CT
+    % so they can be drawn on top of the CT bone mesh in the same axes.
+    boxCornersCT = applyRigidTransform(boxCornersNode, node.T_node_CT);
+
+    % STEP 3: Turn the eight CT corners into twelve visible box edges.
+    % boxEdgePairs says which two corners form each edge. A NaN after every
+    % pair tells MATLAB to lift the virtual pen before drawing the next edge;
+    % otherwise MATLAB would add unwanted lines between unrelated edges.
+    % Drawing all twelve segments as one object also keeps the figure simple.
+    boxX = [boxCornersCT(boxEdgePairs(:, 1), 1), ...
+            boxCornersCT(boxEdgePairs(:, 2), 1), nan(12, 1)].';
+    boxY = [boxCornersCT(boxEdgePairs(:, 1), 2), ...
+            boxCornersCT(boxEdgePairs(:, 2), 2), nan(12, 1)].';
+    boxZ = [boxCornersCT(boxEdgePairs(:, 1), 3), ...
+            boxCornersCT(boxEdgePairs(:, 2), 3), nan(12, 1)].';
+
+    boxHandle = plot3(treeAxes, boxX(:), boxY(:), boxZ(:), ...
+        'Color', depthColors(depth + 1, :), ...
+        'LineWidth', 2.4 - 0.5 * depth);
+
+    % STEP 4: Give only the first box of each depth a legend entry. All boxes
+    % at that depth have the same meaning and colour, so repeated entries
+    % would add clutter without adding information.
+    if ~isgraphics(depthLegendHandles(depth + 1))
+        boxHandle.DisplayName = depthNames{depth + 1};
+        depthLegendHandles(depth + 1) = boxHandle;
+    else
+        boxHandle.HandleVisibility = 'off';
+    end
+
+    % STEP 5: For the root and its children, draw the direction along which
+    % that node was split. The builder defines local node X as the direction
+    % with the greatest spread of triangle centres. The arrow therefore
+    % shows the principal direction used to separate the left and right
+    % child face sets. Grandchild arrows are omitted to reduce clutter.
+    if depth <= 1
+        nodeOriginCT = node.T_node_CT(1:3, 4);
+        nodeXAxisCT  = node.T_node_CT(1:3, 1);
+        nodeDiagonalMm = norm(node.boundsMaxNode - node.boundsMinNode);
+        splitAxisLengthMm = 0.18 * nodeDiagonalMm;
+        quiver3(treeAxes, ...
+            nodeOriginCT(1), nodeOriginCT(2), nodeOriginCT(3), ...
+            splitAxisLengthMm * nodeXAxisCT(1), ...
+            splitAxisLengthMm * nodeXAxisCT(2), ...
+            splitAxisLengthMm * nodeXAxisCT(3), ...
+            0, ...
+            'Color', depthColors(depth + 1, :), ...
+            'LineWidth', 2, ...
+            'MaxHeadSize', 0.7, ...
+            'HandleVisibility', 'off');
+    end
+end
+
+title(treeAxes, sprintf('PD-tree Stage 2: depths 0-2 (%d nodes)', numel(displayNodeIndices)));
+legend(treeAxes, [treeBoneHandle; depthLegendHandles], 'Location', 'northeastoutside', 'Interpreter', 'none');
+rotate3d(treeFigure, 'on');
+drawnow;
+
+%%
