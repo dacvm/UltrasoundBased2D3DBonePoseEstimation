@@ -855,7 +855,9 @@ stage4NumericalMatch = ...
     stage4NormalDifference < 1e-12 && ...
     stage4SameWinningFace;
 
-if ~stage4NumericalMatch || ~stage4VisitedEveryNode || ~stage4VisitedEveryLeaf || ~stage4EvaluatedEveryFace || ~stage4UsedNoPruning
+if (~stage4NumericalMatch || ~stage4VisitedEveryNode || ...
+   ~stage4VisitedEveryLeaf || ~stage4EvaluatedEveryFace || ...
+   ~stage4UsedNoPruning)
     error('dev_PDTreeSearch:Stage4VerificationFailed', ...
           'The exhaustive PD-tree search did not match the Stage 3 reference.');
 end
@@ -878,3 +880,120 @@ fprintf('  Valid faces evaluated                  : %d / %d\n', stage4SearchDeta
 fprintf('  Nodes pruned                           : %d\n',      stage4SearchDetails.numberOfNodesPruned);
 fprintf('  Exhaustive tree-search time            : %.3f s\n',  stage4SearchDetails.elapsedSeconds);
 fprintf('  Tree result equals brute-force result  : PASS\n');
+
+
+%% STAGE 5: PRUNE NODES WITH THE PAPER'S POSITIONAL ELLIPSOID
+
+% -------------------------------------------------------------------------
+% PART 1: CHECK THE ELLIPSOID-BOX TEST WITH THREE OBVIOUS EXAMPLES
+%
+% Before allowing a node test to skip thousands of bone triangles, verify it
+% on one simple axis-aligned box. The box extends from -1 to +1 along every
+% axis and uses identity covariance, so Mahalanobis distance is ordinary
+% Euclidean distance and the expected answers are easy to understand.
+stage5TestNode = struct();
+stage5TestNode.T_node_CT     = eye(4);
+stage5TestNode.boundsMinNode = [-1, -1, -1];
+stage5TestNode.boundsMaxNode = [ 1,  1,  1];
+
+stage5TestPrecision3D = eye(3);
+
+% A point inside the box has zero distance to it. With zero allowed error,
+% the degenerate ellipsoid is just that point and still intersects the box.
+[stage5InsideIntersects, stage5InsideDistanceSquared] = ...
+    ellipsoidIntersectsOBB([0; 0; 0], stage5TestPrecision3D, 0, stage5TestNode);
+
+% A query at x=4 is three units from the nearest box face. Its squared
+% distance is nine, which is outside an ellipsoid whose Equation (8) limit is
+% 2*Ebest = 2. This node must therefore be rejected.
+[stage5OutsideIntersects, stage5OutsideDistanceSquared] = ...
+    ellipsoidIntersectsOBB([4; 0; 0], stage5TestPrecision3D, 1, stage5TestNode);
+
+% This last query is exactly sqrt(2) units beyond the x=1 box face. Its
+% squared distance is two, exactly equal to 2*Ebest. Touching the boundary is
+% an intersection, so the node must remain searchable.
+[stage5TangentIntersects, stage5TangentDistanceSquared] = ...
+    ellipsoidIntersectsOBB([1 + sqrt(2); 0; 0], stage5TestPrecision3D, 1, stage5TestNode);
+
+stage5SimpleIntersectionTestsPassed = ...
+    stage5InsideIntersects && ...
+    ~stage5OutsideIntersects && ...
+    stage5TangentIntersects && ...
+    abs(stage5InsideDistanceSquared) < 1e-12 && ...
+    abs(stage5OutsideDistanceSquared - 9) < 1e-12 && ...
+    abs(stage5TangentDistanceSquared - 2) < 1e-10;
+
+if ~stage5SimpleIntersectionTestsPassed
+    error('dev_PDTreeSearch:Stage5IntersectionTestFailed', ...
+          'The simple Stage 5 ellipsoid-versus-box checks did not pass.');
+end
+
+
+% -------------------------------------------------------------------------
+% PART 2: SEARCH THE REAL PD-TREE WITH PRUNING ENABLED
+%
+% Use exactly the same X, image orientation, covariance, and kappa as Stages
+% 3 and 4. The only new behavior is UsePruning=true. This makes the comparison
+% fair: a correct pruning rule must reduce the amount of work without changing
+% the best oriented model point or its Equation (7) error.
+stage5SearchOptions = struct();
+stage5SearchOptions.UsePruning = true;
+
+[Ystage5, E_stage5, stage5SearchDetails] = searchPDTree( ...
+    Xstage3, PsiCT, R_stage3Image_CT, ...
+    positionCovarianceImage, kappaStage3, stage5SearchOptions);
+
+
+% -------------------------------------------------------------------------
+% PART 3: PROVE THAT PRUNING PRESERVED THE STAGE 4 ANSWER
+%
+% Stage 4 visited every valid triangle and is therefore the trusted tree
+% reference. Stage 5 may visit far fewer nodes and faces, but it must return
+% the same winning face, position, normal, and match error.
+stage5ErrorDifference    = abs(E_stage5 - E_stage4);
+stage5PositionDifference = norm(Ystage5.position3D - Ystage4.position3D);
+stage5NormalDifference   = norm(Ystage5.normal3D - Ystage4.normal3D);
+stage5SameWinningFace    = Ystage5.faceIndex == Ystage4.faceIndex;
+
+stage5NumericalMatch = ...
+    stage5ErrorDifference < 1e-10 && ...
+    stage5PositionDifference < 1e-9 && ...
+    stage5NormalDifference < 1e-12 && ...
+    stage5SameWinningFace;
+
+% The controlled query has a perfect zero-error match. Once that match is
+% found, boxes that do not contain X can be discarded immediately. Require
+% at least one rejected node and fewer triangle evaluations so this stage
+% demonstrates actual pruning rather than only activating an unused option.
+stage5ReducedTreeWork = ...
+    stage5SearchDetails.numberOfNodesPruned > 0 && ...
+    stage5SearchDetails.numberOfFacesEvaluated ...
+    < stage4SearchDetails.numberOfFacesEvaluated;
+
+if ~stage5NumericalMatch || ~stage5ReducedTreeWork
+    error('dev_PDTreeSearch:Stage5VerificationFailed', ...
+          'The pruned PD-tree search changed the result or did not reduce the search work.');
+end
+
+% The Stage 3 figure already shows the correspondence that all three searches
+% must return. A duplicate figure would add no new geometric information, so
+% Stage 5 ends with a numerical report focused on correctness and saved work.
+fprintf('\nP-IMLOP Stage 5 pruned PD-tree search verification:\n');
+fprintf('  Point-inside-box test                  : PASS (distance^2 = %.3f)\n', stage5InsideDistanceSquared);
+fprintf('  Point-outside-ellipsoid test           : PASS (distance^2 = %.3f)\n', stage5OutsideDistanceSquared);
+fprintf('  Tangent-ellipsoid test                 : PASS (distance^2 = %.3f)\n', stage5TangentDistanceSquared);
+fprintf('  Exhaustive face index                  : %d\n',      Ystage4.faceIndex);
+fprintf('  Pruned-search face index               : %d\n',      Ystage5.faceIndex);
+fprintf('  Exhaustive E_match                     : %.12e\n',   E_stage4);
+fprintf('  Pruned-search E_match                  : %.12e\n',   E_stage5);
+fprintf('  Absolute E_match difference            : %.3e\n',    stage5ErrorDifference);
+fprintf('  Returned position difference           : %.3e mm\n', stage5PositionDifference);
+fprintf('  Returned normal difference             : %.3e\n',    stage5NormalDifference);
+fprintf('  Node intersection tests                : %d\n',      stage5SearchDetails.numberOfNodeIntersectionTests);
+fprintf('  Tree nodes visited                     : %d / %d\n', stage5SearchDetails.numberOfNodesVisited, PsiCT.pdTree.numberOfNodes);
+fprintf('  Nodes pruned                           : %d\n',      stage5SearchDetails.numberOfNodesPruned);
+fprintf('  Valid faces evaluated                  : %d / %d\n', stage5SearchDetails.numberOfFacesEvaluated, PsiCT.pdTree.numberOfDatums);
+fprintf('  Exhaustive tree-search time            : %.3f s\n',  stage4SearchDetails.elapsedSeconds);
+fprintf('  Pruned tree-search time                : %.3f s\n',  stage5SearchDetails.elapsedSeconds);
+fprintf('  Pruned result equals exhaustive result : PASS\n');
+fprintf('  Pruning reduced triangle evaluations   : PASS\n');

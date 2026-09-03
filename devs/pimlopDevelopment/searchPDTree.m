@@ -1,11 +1,11 @@
 function [Ybest, Ebest, searchDetails] = searchPDTree( ...
     X, Psi, R_p, positionCovarianceImage, kappa, options)
 %SEARCHPDTREE Find a P-IMLOP mesh match by traversing the prepared PD-tree.
-%   This Stage 4 implementation deliberately performs an exhaustive tree
-%   traversal: it visits every leaf and evaluates every valid triangle. It
-%   does not prune any node yet. This simple version proves that the tree
-%   structure, leaf contents, triangle matcher, and E_match calculation work
-%   together before Stage 5 adds the more delicate pruning rule.
+%   This function supports both development modes of the P-IMLOP search:
+%       UsePruning = false visits every leaf and provides the trusted Stage 4
+%       exhaustive reference;
+%       UsePruning = true applies the Stage 5 ellipsoid-versus-oriented-box
+%       test from Algorithm 2 and skips nodes that cannot improve Ebest.
 %
 %   The easiest way to understand this function is to imagine the PD-tree as
 %   a family tree of boxes:
@@ -21,21 +21,21 @@ function [Ybest, Ebest, searchDetails] = searchPDTree( ...
 %   search walks down this hierarchy until it reaches a leaf, then asks:
 %   "Which point on each triangle is the most likely match for X?"
 %
-%   Algorithm 2 in the P-IMLOP paper contains one additional decision before
-%   entering a node: it tests whether the current positional-error ellipsoid
-%   intersects the node's oriented bounding box. A non-intersecting node can
-%   be pruned. Stage 4 intentionally skips that decision. In other words, it
-%   behaves as though every node passes the intersection test. This makes the
-%   result slow, but it gives us a simple reference that must agree with the
-%   Stage 3 brute-force search before pruning is introduced.
+%   Algorithm 2 tests whether the current positional-error ellipsoid
+%   intersects each node's oriented bounding box. A non-intersecting node is
+%   pruned because its triangles cannot produce a smaller complete match
+%   error. The exhaustive option deliberately skips this decision, making it
+%   useful for checking that pruning has not changed the selected match.
 %
-%   At a high level, this function performs five steps:
+%   At a high level, this function performs six steps:
 %       1. Rotate the positional covariance into the shared 3D search frame.
 %       2. Put the root node on a list of nodes waiting to be visited.
 %       3. Repeatedly remove one waiting node.
-%       4. For an internal node, add its two children to the waiting list.
+%       4. When pruning is enabled, reject the node if its box lies completely
+%          outside the current Equation (8) search ellipsoid.
+%       5. For an internal node, add its two children to the waiting list.
 %          For a leaf, evaluate every triangle stored in that leaf.
-%       5. Keep the candidate having the smallest Equation (7) match error.
+%       6. Keep the candidate having the smallest Equation (7) match error.
 %
 %   Inputs
 %   ------
@@ -51,9 +51,9 @@ function [Ybest, Ebest, searchDetails] = searchPDTree( ...
 %   positionCovarianceImage : 3-by-3 position covariance in the local image
 %       X-Y-Z frame.
 %   kappa : Nonnegative von Mises concentration for orientation matching.
-%   options : Optional scalar structure. Stage 4 supports UsePruning=false
-%       only. Stage 5 can extend this option without changing the function's
-%       inputs or outputs.
+%   options : Optional scalar structure with UsePruning. True enables the
+%       Stage 5 node-pruning test and is the default. False preserves the
+%       exhaustive Stage 4 traversal for verification.
 %
 %   Outputs
 %   -------
@@ -64,35 +64,27 @@ function [Ybest, Ebest, searchDetails] = searchPDTree( ...
 %   Ebest : Smallest nonnegative Equation (7) match error found in the tree.
 %   searchDetails : Diagnostic structure containing traversal counts, elapsed
 %       time, the winning barycentric coordinates, and the winning E_match
-%       details. In this exhaustive stage, numberOfNodesPruned is always zero.
+%       details. numberOfNodesPruned is zero when UsePruning is false.
 %
 %   Example
 %   -------
-%       options.UsePruning = false;
+%       options.UsePruning = true;
 %       [YmatchCT, Ebest, details] = searchPDTree( ...
 %           XqueryCT, PsiCT, R_image_CT, SigmaImage, 50, options);
 
 % -------------------------------------------------------------------------
-% STEP 0: SELECT THE STAGE 4 SEARCH BEHAVIOUR
+% STEP 0: SELECT EXHAUSTIVE OR PRUNED SEARCH BEHAVIOUR
 %
-% Keep exhaustive traversal as the default. The option is already part of
-% the interface so Stage 5 can add pruning without changing existing calls.
-% A caller therefore does not need to know whether the internal search is the
-% simple Stage 4 traversal or the future accelerated traversal.
+% The completed correspondence search uses Algorithm 2 pruning by default.
+% Stage 4 still requests UsePruning=false explicitly, so the slow exhaustive
+% reference remains available without maintaining a second search function.
 if nargin < 6 || isempty(options)
     options = struct();
 end
 if ~isfield(options, 'UsePruning')
-    options.UsePruning = false;
+    options.UsePruning = true;
 end
-
-% Stage 4 must remain an easily trusted baseline. Silently accepting true
-% here would suggest that Algorithm 2's node-rejection test is active even
-% though it is not implemented in this function yet.
-if options.UsePruning
-    error('searchPDTree:PruningNotImplemented', ...
-          'Stage 4 supports only options.UsePruning = false.');
-end
+usePruning = logical(options.UsePruning);
 
 % The search requires the hierarchy prepared by buildPIMLOPPDTree. At this
 % point the mesh geometry and the tree are already stored together in Psi.
@@ -124,6 +116,12 @@ pdTree       = Psi.pdTree;
 positionCovariance3D = R_p * double(positionCovarianceImage) * R_p.';
 positionCovariance3D = 0.5 * (positionCovariance3D + positionCovariance3D.');
 
+% The node test repeatedly evaluates Mahalanobis distances. Compute the
+% inverse covariance once here rather than solving the same system again for
+% every visited node. Symmetrizing removes only numerical round-off.
+positionPrecision3D = positionCovariance3D \ eye(3);
+positionPrecision3D = 0.5 * (positionPrecision3D + positionPrecision3D.');
+
 % -------------------------------------------------------------------------
 % STEP 2: PREPARE AN EMPTY "BEST MATCH SO FAR"
 %
@@ -141,11 +139,12 @@ bestBarycentricCoordinates = nan(3, 1);
 bestMatchDetails = struct();
 
 % These counters do not affect the selected match. They provide visible proof
-% that Stage 4 really visited the complete tree. Later, they will also make it
-% easy to measure how much work Stage 5 pruning avoids.
+% that Stage 4 visited the complete tree and show how much work Stage 5 avoids.
 numberOfNodesVisited  = 0;
 numberOfLeavesVisited = 0;
 numberOfFacesEvaluated = 0;
+numberOfNodesPruned = 0;
+numberOfNodeIntersectionTests = 0;
 searchTimer = tic;
 
 % -------------------------------------------------------------------------
@@ -178,11 +177,32 @@ while numberOfPendingNodes > 0
     currentNode = pdTree.nodes(currentNodeIndex);
     numberOfNodesVisited = numberOfNodesVisited + 1;
 
-    % This is where the ellipsoid-versus-oriented-bounding-box test from
-    % Algorithm 2 will belong in Stage 5. If that test proves that a node
-    % cannot improve Ebest, the future search will skip the node and all of
-    % its descendants. Stage 4 performs no such test, so every popped node is
-    % processed and every branch remains searchable.
+    % ---------------------------------------------------------------------
+    % STAGE 5 NODE TEST: CAN THIS BOX STILL IMPROVE THE BEST MATCH?
+    %
+    % Equation (7) is a sum of nonnegative position and orientation terms.
+    % Following the paper, assume the best possible orientation error inside
+    % any node is zero. A candidate can beat Ebest only when its positional
+    % error is therefore smaller than Ebest.
+    %
+    % Equation (8) describes all positions that satisfy that requirement as
+    % an ellipsoid around X. If this ellipsoid does not touch the node's OBB,
+    % no triangle in the node can improve the current match. CONTINUE then
+    % skips both the node and every descendant below it.
+    %
+    % Before the first triangle is evaluated, Ebest is infinite and there is
+    % no finite ellipsoid yet. We simply enter nodes until the first leaf gives
+    % us a real candidate and a useful finite bound.
+    if usePruning && isfinite(Ebest)
+        numberOfNodeIntersectionTests = numberOfNodeIntersectionTests + 1;
+        nodeCanImproveBestMatch = ellipsoidIntersectsOBB(X.position3D, positionPrecision3D, Ebest, currentNode);
+
+        if ~nodeCanImproveBestMatch
+            numberOfNodesPruned = numberOfNodesPruned + 1;
+            continue;
+        end
+    end
+
     if ~currentNode.isLeaf
         % An internal node does not represent a final match candidate. Its
         % purpose is to guide us to two smaller spatial groups, so place both
@@ -192,9 +212,9 @@ while numberOfPendingNodes > 0
         % stack pops the most recently pushed item, the left child is visited
         % next. This ordering is chosen only to make traversal predictable;
         % without pruning, reversing it cannot change the final minimum.
-        numberOfPendingNodes = numberOfPendingNodes + 1;
+        numberOfPendingNodes            = numberOfPendingNodes + 1;
         nodeStack(numberOfPendingNodes) = currentNode.rightNodeIndex;
-        numberOfPendingNodes = numberOfPendingNodes + 1;
+        numberOfPendingNodes            = numberOfPendingNodes + 1;
         nodeStack(numberOfPendingNodes) = currentNode.leftNodeIndex;
         continue;
     end
@@ -216,7 +236,7 @@ while numberOfPendingNodes > 0
         % Convert the stored face index into the triangle's three 3D vertex
         % positions. faceIndex remains the original mesh face number, which
         % lets the returned Y point identify its source triangle.
-        faceIndex = currentNode.datumFaceIndices(datumNumber);
+        faceIndex          = currentNode.datumFaceIndices(datumNumber);
         triangleVertices3D = bonePoints3D(boneFaces(faceIndex, :), :);
 
         % The triangle centre used while building the PD-tree is only a
@@ -228,9 +248,7 @@ while numberOfPendingNodes > 0
         % Mahalanobis term over the complete triangle using Sigma_3D. The
         % returned barycentric coordinates describe where that point lies
         % relative to the triangle's three vertices.
-        [candidatePosition3D, candidateBarycentricCoordinates] = ...
-            findMostLikelyPointOnTriangle( ...
-            X.position3D, triangleVertices3D, positionCovariance3D);
+        [candidatePosition3D, candidateBarycentricCoordinates] = findMostLikelyPointOnTriangle(X.position3D, triangleVertices3D, positionCovariance3D);
 
         % Pair the candidate position with the triangle's face normal. This
         % produces one oriented model point Y, matching the paper's notation
@@ -246,8 +264,7 @@ while numberOfPendingNodes > 0
         % Equation (7) is nonnegative, and a perfect position-and-orientation
         % match has zero error. Lower candidateError therefore means a more
         % likely correspondence under the P-IMLOP noise model.
-        [candidateError, candidateDetails] = calculatePIMLOPMatchError( ...
-            X, Ycandidate, R_p, positionCovarianceImage, kappa);
+        [candidateError, candidateDetails] = calculatePIMLOPMatchError(X, Ycandidate, R_p, positionCovarianceImage, kappa);
         numberOfFacesEvaluated = numberOfFacesEvaluated + 1;
 
         % -----------------------------------------------------------------
@@ -271,17 +288,19 @@ end
 % -------------------------------------------------------------------------
 % PACKAGE THE SEARCH RESULT AND ITS VERIFICATION INFORMATION
 %
-% After the stack becomes empty, every reachable node has been processed and
-% Ebest is the minimum over every valid mesh triangle. Return compact evidence
-% about what the search actually did. For Stage 4, the visited counts should
-% equal the complete tree counts and numberOfNodesPruned must remain zero.
-% Later, a correct pruned search should return the same Ybest and Ebest while
-% visiting fewer nodes, leaves, and triangle datums.
+% After the stack becomes empty, every remaining searchable branch has been
+% processed. A pruned branch cannot beat Ebest because it failed the safe
+% positional lower-bound test. Return compact evidence about what the search
+% actually did. For Stage 4, the visited counts should equal the complete tree
+% counts and numberOfNodesPruned must remain zero. Stage 5 should return the
+% same Ybest and Ebest while evaluating fewer triangle datums.
 searchDetails = struct();
 searchDetails.numberOfNodesVisited          = numberOfNodesVisited;
 searchDetails.numberOfLeavesVisited         = numberOfLeavesVisited;
 searchDetails.numberOfFacesEvaluated        = numberOfFacesEvaluated;
-searchDetails.numberOfNodesPruned           = 0;
+searchDetails.numberOfNodesPruned           = numberOfNodesPruned;
+searchDetails.numberOfNodeIntersectionTests = numberOfNodeIntersectionTests;
+searchDetails.usePruning                    = usePruning;
 searchDetails.elapsedSeconds                = toc(searchTimer);
 searchDetails.barycentricCoordinates        = bestBarycentricCoordinates;
 searchDetails.matchDetails                  = bestMatchDetails;
