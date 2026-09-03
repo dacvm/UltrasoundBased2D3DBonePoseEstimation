@@ -807,3 +807,74 @@ legend(stage3Axes, [ ...
     'Location', 'northeastoutside', 'Interpreter', 'tex');
 rotate3d(stage3Figure, 'on');
 drawnow;
+
+
+%% STAGE 4: EXHAUSTIVE PD-TREE TRAVERSAL WITHOUT PRUNING
+
+% -------------------------------------------------------------------------
+% PART 1: SEARCH THE SAME MODEL THROUGH THE PD-TREE
+%
+% Stage 3 found the trusted answer by looping directly over every valid bone
+% triangle. Stage 4 must find that same answer by following the tree from its
+% root to every leaf. No node is discarded yet. This deliberate repetition
+% separates two questions that would otherwise be difficult to debug:
+%   1. Does tree traversal visit every triangle exactly once?
+%   2. Later, does the Stage 5 pruning rule discard only safe nodes?
+%
+% For this stage we answer only the first question.
+stage4SearchOptions = struct();
+stage4SearchOptions.UsePruning = false;
+
+[Ystage4, E_stage4, stage4SearchDetails] = searchPDTree( ...
+    Xstage3, PsiCT, R_stage3Image_CT, ...
+    positionCovarianceImage, kappaStage3, stage4SearchOptions);
+
+
+% -------------------------------------------------------------------------
+% PART 2: COMPARE THE TREE RESULT WITH THE STAGE 3 REFERENCE
+%
+% Both searches evaluated the same Equation (7) candidates. Their best face,
+% point, normal, and error must therefore agree. The known synthetic query has
+% one intended perfect face, so an equal face index is expected here as well.
+stage4ErrorDifference     = abs(E_stage4 - E_stage3);
+stage4PositionDifference  = norm(Ystage4.position3D - Ystage3.position3D);
+stage4NormalDifference    = norm(Ystage4.normal3D - Ystage3.normal3D);
+stage4SameWinningFace     = Ystage4.faceIndex == Ystage3.faceIndex;
+
+% Exhaustive traversal should visit every stored node and leaf. It should
+% evaluate only leaf datums, and Stage 2 already proved that those leaf lists
+% contain every valid face exactly once. No node may be reported as pruned.
+stage4VisitedEveryNode   = stage4SearchDetails.numberOfNodesVisited == PsiCT.pdTree.numberOfNodes;
+stage4VisitedEveryLeaf   = stage4SearchDetails.numberOfLeavesVisited == PsiCT.pdTree.numberOfLeaves;
+stage4EvaluatedEveryFace = stage4SearchDetails.numberOfFacesEvaluated == PsiCT.pdTree.numberOfDatums;
+stage4UsedNoPruning      = stage4SearchDetails.numberOfNodesPruned == 0;
+
+stage4NumericalMatch = ...
+    stage4ErrorDifference < 1e-10 && ...
+    stage4PositionDifference < 1e-9 && ...
+    stage4NormalDifference < 1e-12 && ...
+    stage4SameWinningFace;
+
+if ~stage4NumericalMatch || ~stage4VisitedEveryNode || ~stage4VisitedEveryLeaf || ~stage4EvaluatedEveryFace || ~stage4UsedNoPruning
+    error('dev_PDTreeSearch:Stage4VerificationFailed', ...
+          'The exhaustive PD-tree search did not match the Stage 3 reference.');
+end
+
+% Stage 3 already draws the winning correspondence. Since Stage 4 must return
+% that exact same Y, a second identical figure would not add new information.
+% This report instead focuses on the new evidence: complete traversal counts
+% and numerical equality with the brute-force reference.
+fprintf('\nP-IMLOP Stage 4 exhaustive PD-tree traversal verification:\n');
+fprintf('  Brute-force face index                 : %d\n',      Ystage3.faceIndex);
+fprintf('  PD-tree face index                     : %d\n',      Ystage4.faceIndex);
+fprintf('  Brute-force E_match                    : %.12e\n',   E_stage3);
+fprintf('  PD-tree E_match                        : %.12e\n',   E_stage4);
+fprintf('  Absolute E_match difference            : %.3e\n',    stage4ErrorDifference);
+fprintf('  Returned position difference           : %.3e mm\n', stage4PositionDifference);
+fprintf('  Returned normal difference             : %.3e\n',    stage4NormalDifference);
+fprintf('  Tree nodes visited                     : %d / %d\n', stage4SearchDetails.numberOfNodesVisited, PsiCT.pdTree.numberOfNodes);
+fprintf('  Tree leaves visited                    : %d / %d\n', stage4SearchDetails.numberOfLeavesVisited, PsiCT.pdTree.numberOfLeaves);
+fprintf('  Valid faces evaluated                  : %d / %d\n', stage4SearchDetails.numberOfFacesEvaluated, PsiCT.pdTree.numberOfDatums);
+fprintf('  Nodes pruned                           : %d\n',      stage4SearchDetails.numberOfNodesPruned);
+fprintf('  Exhaustive tree-search time            : %.3f s\n',  stage4SearchDetails.elapsedSeconds);
+fprintf('  Tree result equals brute-force result  : PASS\n');
