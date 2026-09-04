@@ -346,7 +346,8 @@ leafFaceIndices = vertcat(treeNodes(leafNodeIndices).datumFaceIndices);
 %   3. the leaf list contains no repeated face index.
 sortedValidFaces = sort(validFaceIndices(:));
 sortedLeafFaces  = sort(leafFaceIndices(:));
-everyFaceAppearsOnce = numel(sortedLeafFaces) == numel(sortedValidFaces) && ...
+everyFaceAppearsOnce = ...
+    numel(sortedLeafFaces) == numel(sortedValidFaces) && ...
     isequal(sortedLeafFaces, sortedValidFaces) && ...
     numel(unique(sortedLeafFaces)) == numel(sortedLeafFaces);
 
@@ -356,7 +357,7 @@ everyFaceAppearsOnce = numel(sortedLeafFaces) == numel(sortedValidFaces) && ...
 %   - every node has a valid local coordinate frame;
 %   - every node bounding box encloses its complete triangles;
 %   - every internal node divides its faces correctly between two children.
-allNodeFramesRigid      = true;
+allNodeFramesRigid        = true;
 allNodeBoundsContainFaces = true;
 childrenPartitionParents  = true;
 
@@ -423,7 +424,10 @@ leafFaceCounts = arrayfun( ...
     @(nodeIndex) numel(treeNodes(nodeIndex).datumFaceIndices), ...
     leafNodeIndices);
 
-if ~everyFaceAppearsOnce || ~childrenPartitionParents || ~allNodeBoundsContainFaces || ~allNodeFramesRigid
+if ~everyFaceAppearsOnce || ...
+        ~childrenPartitionParents || ...
+        ~allNodeBoundsContainFaces || ...
+        ~allNodeFramesRigid
     error('dev_PDTreeSearch:Stage2VerificationFailed', ...
           'The Stage 2 PD-tree did not pass its structural verification.');
 end
@@ -997,3 +1001,227 @@ fprintf('  Exhaustive tree-search time            : %.3f s\n',  stage4SearchDeta
 fprintf('  Pruned tree-search time                : %.3f s\n',  stage5SearchDetails.elapsedSeconds);
 fprintf('  Pruned result equals exhaustive result : PASS\n');
 fprintf('  Pruning reduced triangle evaluations   : PASS\n');
+
+
+%% STAGE 6: REAL ULTRASOUND-TO-CT CORRESPONDENCE
+
+% -------------------------------------------------------------------------
+% PART 1: EXPRESS THE REAL ULTRASOUND QUERY IN THE CT SEARCH FRAME
+%
+% The PD-tree and every model triangle remain fixed in CT coordinates. The
+% measured ultrasound point, however, was originally stored in ref. For the
+% current candidate bone pose, transform this one query from ref into CT.
+% This is the efficient "move the query" approach discussed during design:
+% the optimizer still describes the bone pose with T_CT_ref_candidate, but
+% the correspondence calculation can reuse the same CT-frame PD-tree.
+T_CT_ref_candidate = data.T_CT_ref_initial;
+
+% Invert the rigid transform directly. For a rigid rotation R and
+% translation t, the inverse is [R', -R'*t]. Writing that relationship here
+% makes the direction change explicit and avoids a general matrix inverse.
+R_CT_ref_candidate = T_CT_ref_candidate(1:3, 1:3);
+t_CT_ref_candidate = T_CT_ref_candidate(1:3, 4);
+T_ref_CT_candidate = eye(4);
+T_ref_CT_candidate(1:3, 1:3) = R_CT_ref_candidate.';
+T_ref_CT_candidate(1:3, 4)   = -R_CT_ref_candidate.' * t_CT_ref_candidate;
+
+% Compose the image-to-CT transform in the same order used throughout the
+% project:
+%       p_CT = T_ref_CT_candidate * T_image_ref * p_image.
+% Its rotation block is R_p for the P-IMLOP equations when X and Y are both
+% evaluated in CT coordinates.
+T_image_CT = T_ref_CT_candidate * selectedPlane.T_image_ref;
+R_image_CT = T_image_CT(1:3, 1:3);
+
+% XqueryCT keeps the two parts of the ultrasound measurement in the frames
+% where they naturally belong. The 3D position is transformed into CT, while
+% the measured 2D normal remains in the local ultrasound image X-Y plane.
+% R_image_CT later connects that 2D normal and its covariance to CT.
+XqueryCT = struct();
+XqueryCT.position3D    = applyRigidTransform(X.position3DRef.', T_ref_CT_candidate).';
+XqueryCT.normal2DImage = X.normal2DImage;
+
+% Reuse the simple ultrasound noise model used in the earlier development
+% stages. The covariance stays in image X-Y-Z coordinates; searchPDTree and
+% calculatePIMLOPMatchError rotate it into CT with R_image_CT.
+stage6PositionStandardDeviationImageMm = [1.0; 1.0; 1.5];
+stage6PositionCovarianceImage = diag(stage6PositionStandardDeviationImageMm .^ 2);
+stage6Kappa = 50;
+
+
+% -------------------------------------------------------------------------
+% PART 2: SEARCH THE FIXED CT PD-TREE
+%
+% Enable the Stage 5 pruning rule for the real measurement. The returned
+% YmatchCT is one oriented model point: its position may lie anywhere on the
+% winning triangle and its normal is that triangle's prepared face normal.
+stage6SearchOptions = struct();
+stage6SearchOptions.UsePruning = true;
+
+[YmatchCT, E_stage6, stage6SearchDetails] = searchPDTree( ...
+    XqueryCT, PsiCT, R_image_CT, ...
+    stage6PositionCovarianceImage, stage6Kappa, stage6SearchOptions);
+
+% Evaluate the returned pair once more with the standalone E_match function.
+% This is a direct consistency check between the search result and the
+% already verified Equation (7) implementation.
+[E_stage6Recalculated, stage6MatchDetails] = calculatePIMLOPMatchError( ...
+    XqueryCT, YmatchCT, R_image_CT, ...
+    stage6PositionCovarianceImage, stage6Kappa);
+
+
+% -------------------------------------------------------------------------
+% PART 3: VERIFY THE RETURNED MODEL POINT AND COORDINATE TRANSFORM
+%
+% The barycentric coordinates describe Y inside the winning triangle. They
+% must sum to one and remain nonnegative. Reconstructing Y from those weights
+% gives an intuitive check that the returned point really lies on that face.
+stage6Barycentric                = stage6SearchDetails.barycentricCoordinates;
+stage6WinningFaceIndex           = YmatchCT.faceIndex;
+stage6WinningTriangleVerticesCT  = bonePointsCT(boneFaces(stage6WinningFaceIndex, :), :);
+stage6ReconstructedYCT           = stage6WinningTriangleVerticesCT.' * stage6Barycentric;
+
+stage6BarycentricIsValid         = abs(sum(stage6Barycentric) - 1) < 1e-10 && all(stage6Barycentric >= -1e-10);
+stage6PointLiesOnWinningTriangle = norm(stage6ReconstructedYCT - YmatchCT.position3D) < 1e-9;
+stage6NormalMatchesWinningFace   = norm(YmatchCT.normal3D - PsiCT.faceNormals(stage6WinningFaceIndex, :).') < 1e-12;
+stage6ErrorIsConsistent          = abs(E_stage6Recalculated - E_stage6) < 1e-10;
+
+% Transform the CT query back into ref. Recovering the original measurement
+% confirms that the query was moved in the correct direction before search.
+stage6QueryRoundTripRef         = applyRigidTransform(XqueryCT.position3D.', T_CT_ref_candidate).';
+stage6QueryRoundTripErrorMm     = norm(stage6QueryRoundTripRef - X.position3DRef);
+stage6TransformRoundTripIsValid = stage6QueryRoundTripErrorMm < 1e-9;
+
+if ~stage6BarycentricIsValid || ...
+        ~stage6PointLiesOnWinningTriangle || ...
+        ~stage6NormalMatchesWinningFace || ...
+        ~stage6ErrorIsConsistent || ...
+        ~stage6TransformRoundTripIsValid
+    error('dev_PDTreeSearch:Stage6VerificationFailed', ...
+          'The real CT-frame correspondence did not pass Stage 6 verification.');
+end
+
+% Also express the selected model point in ref for a readable report. This
+% does not move or rebuild the PD-tree; it is only the forward transform of
+% the one correspondence returned by the CT search.
+YmatchRefPosition = applyRigidTransform( ...
+    YmatchCT.position3D.', T_CT_ref_candidate).';
+
+fprintf('\nP-IMLOP Stage 6 real ultrasound correspondence verification:\n');
+fprintf('  Ultrasound X in ref                    : [%.6f, %.6f, %.6f] mm\n', X.position3DRef);
+fprintf('  Query X transformed into CT            : [%.6f, %.6f, %.6f] mm\n', XqueryCT.position3D);
+fprintf('  Winning CT face index                  : %d\n',                    stage6WinningFaceIndex);
+fprintf('  Matched Y in CT                        : [%.6f, %.6f, %.6f] mm\n', YmatchCT.position3D);
+fprintf('  Matched Y transformed into ref         : [%.6f, %.6f, %.6f] mm\n', YmatchRefPosition);
+fprintf('  Barycentric coordinates                : [%.6f, %.6f, %.6f]\n',    stage6Barycentric);
+fprintf('  Euclidean X-to-Y distance              : %.6f mm\n',               stage6MatchDetails.euclideanDistanceMm);
+fprintf('  Projected-normal angle                 : %.6f deg\n',              stage6MatchDetails.orientationAngleDeg);
+fprintf('  Position error                         : %.6f\n',                  stage6MatchDetails.E_position);
+fprintf('  Orientation mismatch                   : %.6f\n',                  stage6MatchDetails.E_orientationMismatch);
+fprintf('  Total nonnegative E_match              : %.6f\n',                  E_stage6);
+fprintf('  Query transform round-trip error       : %.3e mm\n',               stage6QueryRoundTripErrorMm);
+fprintf('  Tree nodes visited                     : %d / %d\n',               stage6SearchDetails.numberOfNodesVisited, PsiCT.pdTree.numberOfNodes);
+fprintf('  Nodes pruned                           : %d\n',                    stage6SearchDetails.numberOfNodesPruned);
+fprintf('  Valid faces evaluated                  : %d / %d\n',               stage6SearchDetails.numberOfFacesEvaluated, PsiCT.pdTree.numberOfDatums);
+fprintf('  Pruned tree-search time                : %.3f s\n',                stage6SearchDetails.elapsedSeconds);
+fprintf('  Returned Y lies on winning triangle    : PASS\n');
+fprintf('  Search and E_match values agree        : PASS\n');
+fprintf('  Ref-to-CT query transform is consistent: PASS\n');
+
+
+% -------------------------------------------------------------------------
+% PART 4: VISUALLY INSPECT THE REAL CORRESPONDENCE IN CT
+%
+% This final figure shows every important object in the actual search frame:
+% the fixed CT bone and PD-tree model, the tracked ultrasound image plane
+% transformed into CT, the real query X, and the model point Y selected by
+% searchPDTree. A highlighted face makes Y's source triangle unambiguous.
+stage6Figure = figure('Name', 'P-IMLOP Stage 6: Real Correspondence in CT');
+stage6Axes = axes(stage6Figure);
+hold(stage6Axes, 'on');
+grid(stage6Axes, 'on');
+axis(stage6Axes, 'equal');
+view(stage6Axes, 35, 35);
+xlabel(stage6Axes, 'X_{CT} (mm)');
+ylabel(stage6Axes, 'Y_{CT} (mm)');
+zlabel(stage6Axes, 'Z_{CT} (mm)');
+
+% Draw the complete bone lightly so the winning face remains visible while
+% the viewer can still recognize where the correspondence lies anatomically.
+stage6BoneHandle = patch(stage6Axes, ...
+    'Faces', boneFaces, ...
+    'Vertices', bonePointsCT, ...
+    'FaceColor', [0.82, 0.82, 0.82], ...
+    'EdgeColor', 'none', ...
+    'FaceAlpha', 0.14, ...
+    'DisplayName', 'Complete CT bone mesh');
+
+% Draw the same ultrasound image used to select X, but use T_image_CT rather
+% than T_image_ref. The image, query, matched point, and model are therefore
+% displayed in one common coordinate system.
+stage6ImageHandle = display_image3D(stage6Axes, ...
+    selectedPlane.image, ...
+    T_image_CT, ...
+    'SwapXY', true, ...
+    'PixelSpacing', pixelSpacingXYMm, ...
+    'Tag', 'dev_pdtree_stage6_image_plane', ...
+    'Colormap', 'gray', ...
+    'FaceAlpha', 0.35);
+stage6ImageHandle.DisplayName = sprintf('Ultrasound plane %d in CT', planeIndex);
+
+% Highlight only the triangle that supplied YmatchCT. The stronger colour
+% and visible border separate it from the transparent surrounding surface.
+stage6TriangleHandle = patch(stage6Axes, ...
+    'Faces', boneFaces(stage6WinningFaceIndex, :), ...
+    'Vertices', bonePointsCT, ...
+    'FaceColor', [0.10, 0.75, 0.90], ...
+    'EdgeColor', [0.00, 0.20, 0.35], ...
+    'LineWidth', 2, ...
+    'DisplayName', 'Winning CT triangle');
+
+% Let the existing E_match display draw the covariance ellipsoid, X and Y,
+% both original normals, the projected model normal, and the position line.
+% These are the same quantities used numerically during search, not separate
+% display approximations. Labels are disabled to keep the real scene legible.
+stage6DisplayOptions = struct();
+stage6DisplayOptions.ShowDisplay        = true;
+stage6DisplayOptions.Axes               = stage6Axes;
+stage6DisplayOptions.NormalDisplayScale = normalDisplayScale;
+stage6DisplayOptions.ShowLabels         = false;
+
+[~, ~, stage6MatchGraphics] = calculatePIMLOPMatchError( ...
+    XqueryCT, YmatchCT, R_image_CT, ...
+    stage6PositionCovarianceImage, stage6Kappa, stage6DisplayOptions);
+
+% Focus the final view on the query and its selected triangle. The full bone
+% remains plotted for context, while this local crop makes a millimetre-scale
+% residual and the normal directions large enough to judge by eye.
+stage6FocusPointsCT = [ ...
+    stage6WinningTriangleVerticesCT; ...
+    XqueryCT.position3D.'; ...
+    YmatchCT.position3D.'];
+stage6ViewMinimumCT = min(stage6FocusPointsCT, [], 1);
+stage6ViewMaximumCT = max(stage6FocusPointsCT, [], 1);
+stage6ViewPaddingMm = max(5, 1.5 * normalDisplayScale);
+xlim(stage6Axes, [stage6ViewMinimumCT(1), stage6ViewMaximumCT(1)] + [-1, 1] * stage6ViewPaddingMm);
+ylim(stage6Axes, [stage6ViewMinimumCT(2), stage6ViewMaximumCT(2)] + [-1, 1] * stage6ViewPaddingMm);
+zlim(stage6Axes, [stage6ViewMinimumCT(3), stage6ViewMaximumCT(3)] + [-1, 1] * stage6ViewPaddingMm);
+
+title(stage6Axes, sprintf( ...
+    'Stage 6 real correspondence: face %d, E_{match} = %.3f', ...
+    stage6WinningFaceIndex, E_stage6), ...
+    'Interpreter', 'tex');
+legend(stage6Axes, [ ...
+    stage6BoneHandle; ...
+    stage6ImageHandle; ...
+    stage6TriangleHandle; ...
+    stage6MatchGraphics.xPoint; ...
+    stage6MatchGraphics.yPoint; ...
+    stage6MatchGraphics.xNormal; ...
+    stage6MatchGraphics.yNormal; ...
+    stage6MatchGraphics.positionResidual; ...
+    stage6MatchGraphics.projectedYNormal], ...
+    'Location', 'northeastoutside', ...
+    'Interpreter', 'tex');
+rotate3d(stage6Figure, 'on');
+drawnow;
