@@ -99,7 +99,10 @@ sourceGroupTemplate = struct( ...
 % visible as empty groups instead of disappearing from the output ordering.
 sourceGroups = repmat(sourceGroupTemplate, 1, numel(sourceDirectories));
 
-% Visit every source folder and read all of its coupled acquisition files.
+% Outer source-folder loop:
+% Visit each anatomical acquisition folder once. During one iteration we
+% classify the folder, pair its MHA and CSV files, validate every pair, and
+% store the completed folder record in sourceGroups.
 for snapshotIndex = 1:numel(sourceDirectories)
 
     sourceName = sourceDirectories(snapshotIndex).name;
@@ -151,7 +154,10 @@ for snapshotIndex = 1:numel(sourceDirectories)
         'rigidBodies', table()), ...
         1, numel(mhaFiles));
 
-    % Read the files at matching sorted positions as one acquisition pair.
+    % Inner file-pair loop for the current source folder:
+    % Read the MHA and CSV at each matching sorted position as one acquisition
+    % pair. The completed iteration stores both parsed streams together after
+    % their required rigid bodies and packet-to-row counts have been checked.
     for sequenceIndex = 1:numel(mhaFiles)
         mhaPath = fullfile(sourcePath, mhaFiles(sequenceIndex).name);
         csvPath = fullfile(sourcePath, csvFiles(sequenceIndex).name);
@@ -293,8 +299,10 @@ snapshotPlanes = repmat(planeGroupTemplate, 1, numel(sourceGroups));
 % The name follows the project convention: it maps ref-frame points to global.
 T_ref_global_override = [];
 
-% Convert every retained packet into a finite plane and preserve its complete
-% source identity for later pose matching.
+% Outer plane-preparation loop:
+% Process one source group at a time and build its complete array of ultrasound
+% planes. Working group-by-group preserves the folder hierarchy required by
+% snapshotPlanes and by the later visualization workflow.
 for snapshotIndex = 1:numel(sourceGroups)
 
     currentGroup = sourceGroups(snapshotIndex);
@@ -303,9 +311,17 @@ for snapshotIndex = 1:numel(sourceGroups)
     % advances even when static mode later omits an invalid packet.
     sourceIndex  = 0;
 
+    % Middle sequence-pair loop for the current source group:
+    % Visit every validated MHA/CSV pair. A static folder may contain several
+    % one-frame pairs, while a kinematic folder normally contains one pair with
+    % many synchronized packets and rows.
     for sequenceIndex = 1:numel(currentGroup.sequencePairs)
         currentPair = currentGroup.sequencePairs(sequenceIndex);
 
+        % Inner packet loop for the current MHA/CSV pair:
+        % Convert every MHA packet into one plane record and attach metadata from
+        % the CSV row at the identical packetIndex. This loop also applies the
+        % different static-versus-kinematic invalid-record retention policy.
         for packetIndex = 1:numel(currentPair.sequence.packets)
             sourceIndex = sourceIndex + 1;
             currentPacket = currentPair.sequence.packets(packetIndex);
@@ -489,8 +505,10 @@ validBonePoses = struct( ...
     'ctPostProcessedMatFile', string(fullfile_bonectpostprocess), ...
     'bonePoses', repmat(bonePoseTemplate, 1, numel(boneUnits)));
 
-% Prepare the femur and tibia independently. One pin may be invalid while the
-% other remains usable at the same acquisition time.
+% Outer bone loop:
+% Prepare one complete pose result for each coupled CT bone and selected pin.
+% Femur and tibia are independent, so a missing pin measurement for one bone
+% does not invalidate the other bone at the same acquisition time.
 for boneIndex = 1:numel(boneUnits)
 
     currentUnit      = boneUnits(boneIndex);
@@ -502,16 +520,26 @@ for boneIndex = 1:numel(boneUnits)
     pinRigidBodyName = sprintf('C_%s_%s', currentUnit.bone, currentUnit.selectedPinPlace);
     allPoseRows      = repmat(poseDataTemplate, 1, 0);
 
-    % Traverse groups, file pairs, and CSV rows in stable source order. The
-    % stored composite indices later reconnect a kinematic pose to its plane.
+    % Source-group loop for the current bone:
+    % Collect this bone's selected-pin pose from every source folder. The stable
+    % snapshotIndex becomes part of the composite key that later reconnects a
+    % perDataRow bone pose to its ultrasound plane.
     for snapshotIndex = 1:numel(sourceGroups)
 
         currentGroup = sourceGroups(snapshotIndex);
         sourceIndex = 0;
 
+        % Sequence-pair loop for the current bone and source group:
+        % Visit each paired acquisition without flattening its file boundary.
+        % This keeps sequenceIndex meaningful when a static folder contains
+        % several independent snapshot pairs.
         for sequenceIndex = 1:numel(currentGroup.sequencePairs)
             currentPair = currentGroup.sequencePairs(sequenceIndex);
 
+            % CSV-row loop for the current bone and acquisition pair:
+            % Read the reference and selected-pin measurements from one row,
+            % calculate their relative transform when both are valid, and append
+            % one pose record containing the exact identity of this source row.
             for rowIndex = 1:height(currentPair.rigidBodies)
 
                 sourceIndex     = sourceIndex + 1;
@@ -597,7 +625,10 @@ for boneIndex = 1:numel(boneUnits)
         quaternionRows   = zeros(numel(validPoses), 4);
         translationRows  = zeros(numel(validPoses), 3);
         
-        % Extract rotation and translation samples from every valid T_pin_ref.
+        % Valid-pose averaging loop:
+        % Extract one rotation quaternion and one translation vector from every
+        % valid per-row T_pin_ref. The arrays filled by this loop are averaged
+        % afterward so rotation and translation treatment stays explicit.
         for validIndex = 1:numel(validPoses)
             quaternionRows(validIndex, :)  = rotm2quat(validPoses(validIndex).T_pin_ref(1:3, 1:3));
             translationRows(validIndex, :) = validPoses(validIndex).T_pin_ref(1:3, 4).';
@@ -613,6 +644,7 @@ for boneIndex = 1:numel(boneUnits)
         T_pin_ref(1:3, 1:3) = quat2rotm(compact(meanQuaternion));
         T_pin_ref(1:3, 4)   = mean(translationRows, 1).';
 
+        % Store some necessary values
         selectedPoseData.T_pin_ref         = T_pin_ref;
         selectedPoseData.T_CT_ref          = T_pin_ref / currentPin.T_pin_CT;
         selectedPoseData.T_bone_ref        = selectedPoseData.T_CT_ref * currentBone.T_bone_CT;
@@ -697,6 +729,11 @@ intersections = repmat(intersectionGroupTemplate, 1, numel(snapshotPlanes));
 % Bone codes provide a stable lookup without assuming femur is item 1 or tibia
 % is item 2 in the CT MAT file.
 boneCodes = {validBonePoses.bonePoses.bone};
+
+% Outer intersection-group loop:
+% Visit every ultrasound source group and create a result group with identical
+% metadata and length. Completing one group at a time preserves alignment even
+% when the source group is empty.
 for groupIndex = 1:numel(snapshotPlanes)
 
     currentPlaneGroup = snapshotPlanes(groupIndex);
@@ -708,6 +745,10 @@ for groupIndex = 1:numel(snapshotPlanes)
     intersections(groupIndex).path = currentPlaneGroup.path;
     intersections(groupIndex).data = repmat(intersectionTemplate, 1, numel(currentPlaneGroup.data));
 
+    % Inner plane-intersection loop for the current source group:
+    % For each retained plane, find the correct static or per-row bone pose,
+    % transform the CT mesh into ref, compute the intersection, and store the
+    % result at the identical group-local planeIndex.
     for planeIndex = 1:numel(currentPlaneGroup.data)
         currentPlane        = currentPlaneGroup.data(planeIndex);
         currentIntersection = intersectionTemplate;
