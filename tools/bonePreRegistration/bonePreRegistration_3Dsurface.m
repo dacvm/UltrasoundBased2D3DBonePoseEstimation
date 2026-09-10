@@ -276,6 +276,10 @@ processingMode = lower(string(validBonePoses.processingMode));
 switch processingMode
     case "snapshot"
         % Continue with the existing Snapshot surface grouping below.
+    case "static"
+        % Continue with the existing Snapshot surface grouping below. This
+        % is the new standard naming. The "snapshot" case will be
+        % deprecated in the future
     case "kinematic"
         % TODO: Select synchronized surface data for Kinematic pre-registration.
         error('bonePreRegistration_onlyImage:KinematicNotImplemented', ...
@@ -318,7 +322,7 @@ for groupIndex = 1:numel(surfaceResults)
     % femur_mid refers to the femur shaft, so both names use the shaft field.
     nameParts = split(groupName, "_");
     regionName = nameParts(end);
-    if regionName == "mid"
+    if regionName == "mid" || regionName == "middle"
         regionName = "shaft";
     end
 
@@ -368,9 +372,17 @@ boneCorrespondences = repmat(struct( ...
     'regionLabels', strings(0, 1)), size(landmarks));
 
 % Use one color per bone for its CT mesh and landmarks. Correspondence lines
-% use region colors so medial, lateral, and shaft candidates can be separated.
-boneDisplayColors  = lines(max(numel(landmarks), 1));
-regionLineColors   = lines(numel(regionNames));
+% use three shades from the bone's color family: light for medial, medium for
+% lateral, and dark for shaft, following the order in regionNames above.
+boneDisplayColors = lines(max(numel(landmarks), 1));
+femurCorrespondenceColors = [ ...
+    0.38, 0.68, 0.90; ...  % Light blue: medial landmark.
+    0.00, 0.45, 0.74; ...  % Medium blue: lateral landmark.
+    0.00, 0.20, 0.45];     % Dark blue: shaft landmark.
+tibiaCorrespondenceColors = [ ...
+    1.00, 0.68, 0.30; ...  % Light orange: medial landmark.
+    0.90, 0.40, 0.05; ...  % Medium orange: lateral landmark.
+    0.55, 0.18, 0.01];     % Dark orange: shaft landmark.
 availableBoneCodes = upper(string({bones.bone}));
 
 % Loop for all landmarks
@@ -389,6 +401,20 @@ for boneIndex = 1:numel(landmarks)
               'Expected one CT mesh for bone code "%s", but found %d.', ...
               currentBoneCode, numel(meshBoneIndex));
     end
+
+    % Select the complete shade family by bone code instead of bone array
+    % order, so femur lines stay blue and tibia lines stay orange.
+    normalizedBoneCode = upper(string(currentBoneCode));
+    if normalizedBoneCode == "F"
+        boneCorrespondenceColors = femurCorrespondenceColors;
+    elseif normalizedBoneCode == "T"
+        boneCorrespondenceColors = tibiaCorrespondenceColors;
+    else
+        error('bonePreRegistration_onlyImage:UnsupportedCorrespondenceBone', ...
+              'No correspondence-line color family is defined for bone code "%s".', ...
+              currentBoneCode);
+    end
+
     currentBoneMesh = bones(meshBoneIndex).mesh;
     if ~isa(currentBoneMesh, 'triangulation')
         error('bonePreRegistration_onlyImage:InvalidBoneMesh', ...
@@ -466,7 +492,7 @@ for boneIndex = 1:numel(landmarks)
                 [landmarkPoint(2), surfacePoints(pointIndex, 2)], ...
                 [landmarkPoint(3), surfacePoints(pointIndex, 3)], ...
                 '-', ...
-                'Color', regionLineColors(regionIndex, :), ...
+                'Color', boneCorrespondenceColors(regionIndex, :), ...
                 'LineWidth', 0.25, ...
                 'HandleVisibility', 'off', ...
                 'Tag', 'regional_correspondence_candidate');
@@ -521,6 +547,18 @@ groundTruthRegistrations = repmat(struct( ...
     'T_CT_ref_gt', [], ...
     'T_bone_ref_gt', [], ...
     'boneMeshRef_gt', []), size(boneCorrespondences));
+
+% The current spatial-processing schema stores one CT-frame mesh beside the
+% pose data instead of repeating a transformed mesh inside every pose record.
+% Check the shared fields here so a mismatched MAT file fails with a clear
+% message before individual bones are displayed.
+requiredBonePoseFields = {'bone', 'meshCT', 'data'};
+if ~isstruct(validBonePoses.bonePoses) || ...
+        ~all(isfield(validBonePoses.bonePoses, requiredBonePoseFields))
+    error('bonePreRegistration:InvalidGroundTruthBonePoseSchema', ...
+          ['Each validBonePoses.bonePoses entry must contain bone, meshCT, ' ...
+           'and data. Rerun build_ultrasoundBone_intersectionData_poseModes.m.']);
+end
 validBoneCodes = upper(string({validBonePoses.bonePoses.bone}));
 
 % Use one fixed length in millimetres so every ground-truth bone ACS is
@@ -531,17 +569,79 @@ for boneIndex = 1:numel(boneCorrespondences)
     currentBoneCode = upper(string(boneCorrespondences(boneIndex).bone));
 
     % Match the saved ground truth to the coarse-registration bone by code.
-    validBoneIndex           = find(validBoneCodes == currentBoneCode, 1);
-    currentValidBonePoseData = validBonePoses.bonePoses(validBoneIndex).data;
-    if ~isfield(currentValidBonePoseData, 'T_bone_ref')
-        error('bonePreRegistration:MissingGroundTruthBoneAcsPose', ...
-            ['The saved pose for bone "%s" does not contain T_bone_ref. ' ...
-             'Rerun build_ultrasoundBone_intersectionData.m with the updated output schema.'], ...
-            currentBoneCode);
+    matchingValidBoneIndices = find(validBoneCodes == currentBoneCode);
+    if numel(matchingValidBoneIndices) ~= 1
+        error('bonePreRegistration:UnmatchedGroundTruthBonePose', ...
+              'Expected one saved ground-truth pose for bone "%s", but found %d.', ...
+              currentBoneCode, numel(matchingValidBoneIndices));
     end
-    T_CT_ref_gt     = currentValidBonePoseData.T_CT_ref;
-    T_bone_ref_gt   = currentValidBonePoseData.T_bone_ref;
-    boneMeshRef_gt  = currentValidBonePoseData.mesh;
+    currentValidBonePose     = validBonePoses.bonePoses(matchingValidBoneIndices);
+    currentValidBonePoseData = currentValidBonePose.data;
+
+    % Static pre-registration requires exactly one reduced pose per bone. A
+    % pose series belongs to the kinematic workflow, which is rejected above.
+    if ~isscalar(currentValidBonePoseData)
+        error('bonePreRegistration:NonScalarGroundTruthBonePose', ...
+              'The static ground-truth data for bone "%s" must contain exactly one pose.', ...
+              currentBoneCode);
+    end
+
+    % Both transforms are required by the comparison plot. isValid is part of
+    % the new schema and prevents unavailable poses containing NaNs from being
+    % treated as real ground truth.
+    requiredPoseDataFields = {'isValid', 'status', 'T_CT_ref', 'T_bone_ref'};
+    if ~all(isfield(currentValidBonePoseData, requiredPoseDataFields))
+        error('bonePreRegistration:MissingGroundTruthPoseData', ...
+              ['The saved pose for bone "%s" must contain isValid, status, ' ...
+               'T_CT_ref, and T_bone_ref. Rerun ' ...
+               'build_ultrasoundBone_intersectionData_poseModes.m.'], ...
+              currentBoneCode);
+    end
+    if ~currentValidBonePoseData.isValid
+        error('bonePreRegistration:InvalidGroundTruthBonePose', ...
+              'The saved ground-truth pose for bone "%s" is marked invalid: %s', ...
+              currentBoneCode, string(currentValidBonePoseData.status));
+    end
+
+    % The producer now stores the heavy triangulation once in CT coordinates.
+    % Move its vertices into ref with T_CT_ref and keep its face connectivity.
+    boneMeshCT = currentValidBonePose.meshCT;
+    if ~isa(boneMeshCT, 'triangulation')
+        error('bonePreRegistration:InvalidGroundTruthBoneMesh', ...
+              'The saved meshCT for bone "%s" must be a triangulation.', ...
+              currentBoneCode);
+    end
+    T_CT_ref_gt   = currentValidBonePoseData.T_CT_ref;
+    T_bone_ref_gt = currentValidBonePoseData.T_bone_ref;
+
+    % Reject malformed transforms before they are applied to thousands of
+    % vertices or used as coordinate axes in the result figure.
+    groundTruthTransforms = {T_CT_ref_gt, T_bone_ref_gt};
+    groundTruthTransformNames = {'T_CT_ref', 'T_bone_ref'};
+    for transformIndex = 1:numel(groundTruthTransforms)
+        currentTransform = groundTruthTransforms{transformIndex};
+        isFiniteMatrix = isnumeric(currentTransform) && isreal(currentTransform) && ...
+                         isequal(size(currentTransform), [4, 4]) && ...
+                         all(isfinite(currentTransform), 'all');
+        if ~isFiniteMatrix
+            error('bonePreRegistration:InvalidGroundTruthTransform', ...
+                  '%s for bone "%s" must be a finite real 4-by-4 matrix.', ...
+                  groundTruthTransformNames{transformIndex}, currentBoneCode);
+        end
+
+        rotationMatrix = currentTransform(1:3, 1:3);
+        isProperRigid = norm(currentTransform(4, :) - [0, 0, 0, 1], inf) <= 1e-9 && ...
+                        norm(rotationMatrix.' * rotationMatrix - eye(3), 'fro') <= 1e-6 && ...
+                        abs(det(rotationMatrix) - 1) <= 1e-6;
+        if ~isProperRigid
+            error('bonePreRegistration:InvalidGroundTruthTransform', ...
+                  '%s for bone "%s" must be a proper rigid transform.', ...
+                  groundTruthTransformNames{transformIndex}, currentBoneCode);
+        end
+    end
+
+    bonePointsRef_gt = applyRigidTransform(boneMeshCT.Points, T_CT_ref_gt);
+    boneMeshRef_gt   = triangulation(boneMeshCT.ConnectivityList, bonePointsRef_gt);
 
     groundTruthRegistrations(boneIndex).name           = boneCorrespondences(boneIndex).name;
     groundTruthRegistrations(boneIndex).bone           = currentBoneCode;
