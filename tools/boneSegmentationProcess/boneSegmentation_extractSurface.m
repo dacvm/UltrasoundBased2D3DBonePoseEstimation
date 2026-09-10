@@ -134,9 +134,10 @@ extractionMetadata.configurationFile          = configurationFilePath;
 %   keep each reviewed overlay matched to its source directory and frame.
 % - The extraction options and their file path explain which settings 
 %   produced the visible result.
-%- Metadata is passed separately because it must remain beside surfaceResults in
-%  an exported MAT-file, while the output directory tells the GUI where its
-%  user-triggered export belongs without making the user choose the folder again.
+% - Metadata is passed separately because it must remain beside surfaceResults
+%   in an exported MAT-file. The configured output directory becomes the
+%   initial folder in the export dialog, where the user can confirm or change
+%   both the destination and filename before anything is saved.
 reviewFigureHandle = createBoneSurfaceReviewGUI( ...
     surfaceResults, segmentationResults, ultrasoundSequence, ...
     extractionOptions, configurationFilePath, extractionMetadata, ...

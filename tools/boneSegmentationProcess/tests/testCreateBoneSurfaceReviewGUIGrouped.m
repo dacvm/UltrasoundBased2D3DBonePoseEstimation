@@ -27,13 +27,19 @@ function setupOnce(testCase)
 testDirectory = fileparts(mfilename('fullpath'));
 projectDirectory = fileparts(fileparts(fileparts(testDirectory)));
 displayDirectory = fullfile(projectDirectory, 'functions', 'display');
+dialogHelperDirectory = fullfile(testDirectory, 'helpers');
 testCase.TestData.displayDirectory = displayDirectory;
+testCase.TestData.dialogHelperDirectory = dialogHelperDirectory;
 pathEntries = strsplit(path, pathsep);
 testCase.TestData.addedDisplayDirectory = ...
     ~any(strcmp(pathEntries, displayDirectory));
 if testCase.TestData.addedDisplayDirectory
     addpath(displayDirectory);
 end
+
+% Put deterministic dialog replacements first so export callbacks can be
+% exercised without opening modal UI during the batch test run.
+addpath(dialogHelperDirectory, '-begin');
 testCase.TestData.options = struct( ...
     'imageEvidence', struct('gaussianSigmaMm', 0.5));
 testCase.TestData.configurationPath = 'synthetic_config.json';
@@ -57,6 +63,7 @@ function teardownOnce(testCase)
 if testCase.TestData.addedDisplayDirectory
     rmpath(testCase.TestData.displayDirectory);
 end
+rmpath(testCase.TestData.dialogHelperDirectory);
 end
 
 
@@ -74,6 +81,17 @@ unusedTestCase = testCase; %#ok<NASGU>
 reviewFigures = findall(groot, 'Type', 'figure', ...
     'Tag', 'bone_surface_review_gui');
 delete(reviewFigures);
+
+% Remove destinations and captured picker inputs owned by an export test so
+% one callback cannot influence the next test's dialog behavior.
+surfaceExportPathKey = 'BoneSurfaceTestExportPath';
+surfacePickerInputsKey = 'BoneSurfaceTestPickerInputs';
+if isappdata(groot, surfaceExportPathKey)
+    rmappdata(groot, surfaceExportPathKey);
+end
+if isappdata(groot, surfacePickerInputsKey)
+    rmappdata(groot, surfacePickerInputsKey);
+end
 drawnow;
 end
 
@@ -320,20 +338,32 @@ exportButton = findall(reviewFigure, ...
 verifyEqual(testCase, exportButton.Text, 'Export Surface Results');
 verifyEqual(testCase, string(exportButton.Enable), "on");
 
-% Invoke the same callback used by a real button press, then inspect the saved
-% variables rather than relying only on the visible success state.
+% Direct the dialog replacement to a user-selected name that differs from the
+% timestamped suggestion, then invoke the real Export callback.
+selectedExportPath = fullfile( ...
+    temporaryDirectory, 'reviewer_selected_surface.mat');
+setappdata(groot, 'BoneSurfaceTestExportPath', selectedExportPath);
 exportCallback = exportButton.ButtonPushedFcn;
 exportCallback(exportButton, struct());
 drawnow;
 
-exportedFiles = dir(fullfile(temporaryDirectory, 'boneSurface_*.mat'));
-verifyNumElements(testCase, exportedFiles, 1);
-savedArtifact = load(fullfile( ...
-    exportedFiles(1).folder, exportedFiles(1).name));
+verifyTrue(testCase, isfile(selectedExportPath));
+savedArtifact = load(selectedExportPath);
 verifyEqual(testCase, savedArtifact.surfaceResults, surfaceGroups);
 verifyEqual(testCase, savedArtifact.extractionMetadata, extractionMetadata);
 verifyEqual(testCase, exportButton.Text, 'Exported');
 verifyEqual(testCase, string(exportButton.Enable), "off");
+
+% The initial suggestion must use the configured directory and retain the
+% standard timestamped MAT-file name even though the user chose another name.
+pickerInputs = getappdata(groot, 'BoneSurfaceTestPickerInputs');
+suggestedOutputPath = pickerInputs{3};
+[suggestedDirectory, suggestedBaseName, suggestedExtension] = ...
+    fileparts(suggestedOutputPath);
+verifyEqual(testCase, suggestedDirectory, temporaryDirectory);
+verifyMatches(testCase, suggestedBaseName, ...
+    '^boneSurface_[0-9]{8}_[0-9]{6}$');
+verifyEqual(testCase, suggestedExtension, '.mat');
 end
 
 
@@ -350,6 +380,10 @@ function testExportFailureLeavesButtonAvailable(testCase)
 
 temporaryDirectory = tempname;
 mkdir(temporaryDirectory);
+[~, temporaryDirectoryName] = fileparts(temporaryDirectory);
+selectedExportPath = fullfile( ...
+    temporaryDirectory, [temporaryDirectoryName, '.mat']);
+setappdata(groot, 'BoneSurfaceTestExportPath', selectedExportPath);
 [surfaceGroups, segmentationGroups, ultrasoundGroups] = makeReviewFixture();
 reviewFigure = createBoneSurfaceReviewGUI( ...
     surfaceGroups, segmentationGroups, ultrasoundGroups, ...
