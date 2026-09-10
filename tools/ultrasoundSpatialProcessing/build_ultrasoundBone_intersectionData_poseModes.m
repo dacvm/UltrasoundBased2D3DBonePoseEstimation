@@ -42,21 +42,26 @@ helperDirectory    = fullfile(scriptDirectory, 'helpers');
 addpath(genpath(functionsDirectory));
 addpath(helperDirectory);
 
-% Keep the development settings in a separate JSON file so testing a new
-% pose mode cannot silently change the established snapshot configuration.
+% Keep reusable inputs, processing settings, and the export location in one
+% structured JSON file so a new measurement does not require script edits.
 configurationPath = fullfile(scriptDirectory, 'configs', 'ultrasoundBone_intersectionData_poseModesConfig.json');
 configuration     = readPoseModeProcessConfiguration(configurationPath);
 
 % Copy validated configuration values into short, descriptive names used by
 % the processing sections below. processingMode is derived from bonePoseMode:
 % average/first/last are static, while perDataRow is kinematic.
-acquisitionDirectory       = configuration.acquisitionDirectory;
-fullfile_fcalconfig        = configuration.fcalConfigFile;
-fullfile_bonectpostprocess = configuration.ctPostProcessedMatFile;
-pinSelection               = configuration.pinSelection;
-bonePoseMode               = configuration.bonePoseMode;
-processingMode             = configuration.processingMode;
-requiredRigidBodyNames     = configuration.requiredRigidBodyNames;
+acquisitionDirectory             = configuration.input.acquisitionDirectory;
+fullfile_fcalconfig              = fullfile( ...
+                                   configuration.input.fcalConfigFilePath, ...
+                                   configuration.input.fcalConfigFileName);
+fullfile_bonectpostprocess       = fullfile( ...
+                                   configuration.input.ctPostProcessedMatFilePath, ...
+                                   configuration.input.ctPostProcessedMatFileName);
+pinSelection                     = configuration.pinSelection;
+bonePoseMode                     = configuration.bonePoseMode;
+processingMode                   = configuration.processingMode;
+requiredRigidBodyNames           = configuration.requiredRigidBodyNames;
+ultrasoundIntersectionOutputPath = configuration.output.ultrasoundIntersectionOutputPath;
 
 fprintf('Preparing ultrasound and bone data in %s mode (%s)...\n', ...
     processingMode, bonePoseMode);
@@ -873,7 +878,8 @@ end
 % and leaves all prepared variables available while the browser remains open.
 figIntersectionBrowser = displaySnapshotSequenceIntersectionBrowser( ...
     snapshotPlanes, intersections, validBonePoses, ...
-    'Mode', 'review');
+    'Mode', 'review', ...
+    'OutputDirectory', ultrasoundIntersectionOutputPath);
 
 fprintf(['Preparation complete: snapshotPlanes, intersections, ' ...
     'validBonePoses, and figIntersectionBrowser are available in the workspace.\n']);

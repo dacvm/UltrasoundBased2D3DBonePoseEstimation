@@ -4,7 +4,7 @@
 
 This MATLAB tool combines tracked ultrasound images with CT-derived femur and tibia meshes. It places the images and bones in one reference frame, calculates the mesh intersections with the ultrasound planes, and opens an interactive browser for inspection and review.
 
-The recommended entry point is `build_ultrasoundBone_intersectionData_poseModes.m`. It reads `configs/ultrasoundBone_intersectionData_poseModesConfig.json` and supports two acquisition types through `bonePoseMode`:
+The recommended entry point is `build_ultrasoundBone_intersectionData_poseModes.m`. Its configuration keeps file locations in `input` and `output`, while `pinSelection` and `bonePoseMode` are top-level settings. The script supports two acquisition types through `bonePoseMode`:
 
 - `average`, `first`, or `last`: static mode with one selected pose per bone.
 - `perDataRow`: kinematic mode with a pose for every synchronized acquisition row.
@@ -66,12 +66,15 @@ Edit `configs/ultrasoundBone_intersectionData_poseModesConfig.json`:
 
 | Setting | Meaning |
 | --- | --- |
-| `acquisitionDirectory` | Root containing the femur and tibia source folders. |
-| `fcalConfigFile` | fCal XML path. |
-| `ctPostProcessedMatFile` | CT post-processing MAT-file path. |
+| `input.acquisitionDirectory` | Root containing the femur and tibia source folders. |
+| `input.fcalConfigFilePath` | Directory containing the fCal XML file. |
+| `input.fcalConfigFileName` | Filename of the fCal XML file. |
+| `input.ctPostProcessedMatFilePath` | Directory containing the CT post-processing MAT file. |
+| `input.ctPostProcessedMatFileName` | Filename of the CT post-processing MAT file. |
 | `pinSelection.F` | Femur pin location, such as `PRO`. |
 | `pinSelection.T` | Tibia pin location, such as `DIS`. |
 | `bonePoseMode` | `average`, `first`, `last`, or `perDataRow`. |
+| `output.ultrasoundIntersectionOutputPath` | Existing directory initially opened by the review browser's export dialog. |
 
 The pin selections imply the required CSV names. For example, `F = PRO` and `T = DIS` require `B_N_REF`, `C_F_PRO`, and `C_T_DIS`.
 
@@ -82,7 +85,7 @@ The pin selections imply the required CSV names. For example, `F = PRO` and `T =
 | `last` | Static. Uses each bone's latest valid pose by CSV timestamp across all source folders. |
 | `perDataRow` | Kinematic. Keeps each CSV row and matches it by source-folder, pair, and row indices. |
 
-Paths may be absolute or relative. Relative paths resolve from the configuration file's directory, not MATLAB's current folder.
+Directory paths may be absolute or relative. Relative paths resolve from the configuration file's directory, not MATLAB's current folder. The fCal and CT filenames are joined to their corresponding configured directories before the files and their extensions are validated. The configured output directory must already exist.
 
 ## Processing workflow
 
@@ -96,7 +99,7 @@ Paths may be absolute or relative. Relative paths resolve from the configuration
 ## Running the project
 
 1. Prepare the acquisition folders, fCal XML, and CT MAT file.
-2. Edit `configs/ultrasoundBone_intersectionData_poseModesConfig.json`.
+2. Edit `input`, `pinSelection`, `bonePoseMode`, and `output` in `configs/ultrasoundBone_intersectionData_poseModesConfig.json`.
 3. Run from the project root:
 
    ```matlab
@@ -105,7 +108,7 @@ Paths may be absolute or relative. Relative paths resolve from the configuration
 
    From another current folder, pass the absolute script path.
 
-4. Inspect the browser, mark acceptable records, and click **Export Selected**. MATLAB asks for a destination and suggests `validSnapshots_yyyyMMdd_HHmmss.mat`.
+4. Inspect the browser, mark acceptable records, and click **Export Selected**. MATLAB opens the save dialog in `output.ultrasoundIntersectionOutputPath` and suggests `validSnapshots_yyyyMMdd_HHmmss.mat`.
 
 The script opens the browser in review mode and leaves `snapshotPlanes`, `intersections`, `validBonePoses`, and `figIntersectionBrowser` in the workspace. Static selections apply per snapshot. In `perDataRow`, decisions are synchronized by CSV row across source tabs, so one decision represents the same time frame wherever that row exists. The browser stays open after export.
 
@@ -113,7 +116,7 @@ The project `functions` tree and this tool's `helpers` directory are added to th
 
 ## Output MAT-file structure
 
-**Export Selected** writes a MATLAB v7.3 file after at least one record is approved. The in-memory arrays remain aligned by group and local index:
+**Export Selected** writes a MATLAB v7.3 file after at least one record is approved. Its save dialog initially opens in the configured `output.ultrasoundIntersectionOutputPath`. The in-memory arrays remain aligned by group and local index:
 
 ```text
 snapshotPlanes(1..G)                 intersections(1..G)
@@ -233,6 +236,7 @@ Empty geometry can mean a valid calculation found no crossing. Use `isValid` and
 - A CSV is missing `B_N_REF` or a rigid body implied by `pinSelection`.
 - A source-folder name lacks `femur` or `tibia`.
 - `bonePoseMode` does not match the acquisition layout.
+- A configured input or output directory does not exist, or a configured filename has the wrong extension.
 - A selected pin does not match CT `bonepins` or Qualisys names.
 - A static dataset has no valid reference/pin pose for a bone.
 - The fCal XML does not contain exactly one `ImageToProbe` transform.
