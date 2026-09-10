@@ -311,7 +311,7 @@ end
 % Empty groups do not need a legend entry. After all objects are present, fit
 % the limits to the complete scene while preserving equal physical axis scale.
 if any(hasVisibleSurfaceGroup)
-    legend(ax1, 'show', 'Location', 'best');
+    legend(ax1, 'show', 'Location', 'best', 'Interpreter', 'none');
 end
 
 axis(ax1, 'tight');
@@ -326,8 +326,7 @@ fprintf('Recovered %d bone-surface point(s) from %d record(s) in ref.\n', totalR
 % in the configured output directory while the original extraction metadata
 % stays unchanged.
 recoveryTimestamp = char(datetime('now', 'Format', 'yyyyMMdd_HHmmss'));
-recoveredSurfaceOutputFilePath = fullfile( ...
-    boneSurface3DOutputPath, ['boneSurface_', recoveryTimestamp, '.mat']);
+recoveredSurfaceOutputFilePath = fullfile(boneSurface3DOutputPath, ['boneSurface_', recoveryTimestamp, '.mat']);
 
 % surfaceResults now contains the recovered reference-frame coordinates. Keep
 % extractionMetadata with it so the processing provenance is not separated from

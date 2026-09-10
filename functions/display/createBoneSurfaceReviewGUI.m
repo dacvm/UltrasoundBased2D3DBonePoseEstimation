@@ -15,7 +15,8 @@ function reviewFigure = createBoneSurfaceReviewGUI( ...
 %   extractionOptions     : Scalar struct decoded from the extraction JSON.
 %   configurationFilePath : Path of the JSON file shown in the GUI.
 %   extractionMetadata    : Scalar provenance struct saved with surfaceResults.
-%   outputDirectory       : Existing directory used for the optional MAT export.
+%   outputDirectory       : Existing directory initially shown by the optional
+%                           MAT-file export dialog.
 %
 % Outputs:
 %   reviewFigure          : Handle to the non-blocking review uifigure.
@@ -382,8 +383,22 @@ resultsTabGroup.SelectionChangedFcn = @handleTabSelection;
         % the user's save action rather than the earlier extraction or GUI launch.
         exportTimestamp = char(datetime('now', ...
             'Format', 'yyyyMMdd_HHmmss'));
-        outputFileName = sprintf('boneSurface_%s.mat', exportTimestamp);
-        outputFilePath = fullfile(outputDirectory, outputFileName);
+        defaultOutputFileName = sprintf( ...
+            'boneSurface_%s.mat', exportTimestamp);
+        defaultOutputFilePath = fullfile( ...
+            outputDirectory, defaultOutputFileName);
+
+        % Show the configured output folder as the initial location, while
+        % still letting the reviewer change both the folder and filename.
+        % Cancelling is a normal choice and must not save or disable Export.
+        [selectedFileName, selectedDirectory] = uiputfile( ...
+            {'*.mat', 'MAT-files (*.mat)'}, ...
+            'Export bone surface results', ...
+            defaultOutputFilePath);
+        if isequal(selectedFileName, 0) || isequal(selectedDirectory, 0)
+            return;
+        end
+        outputFilePath = fullfile(selectedDirectory, selectedFileName);
 
         % Save the original grouped input, not the aligned flat arrays used only
         % for fast table navigation and rendering inside this GUI.

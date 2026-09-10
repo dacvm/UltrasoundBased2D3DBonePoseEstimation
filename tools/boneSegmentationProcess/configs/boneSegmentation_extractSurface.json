@@ -1,9 +1,9 @@
 {
   "input": {
     "segmentationFilePath": "../outputs",
-    "segmentationFileName": "boneSegmentation_20260819_192406.mat",
+    "segmentationFileName": "boneSegmentation_20260910_175214.mat",
     "ultrasoundSequenceFilePath": "../../ultrasoundSpatialProcessing/outputs",
-    "ultrasoundSequenceFileName": "validSnapshots_20260812_160247.mat",
+    "ultrasoundSequenceFileName": "validSnapshots_20260910_172849.mat",
     "configurationFilePath": ".",
     "configurationFileName": "boneSurfaceExtraction.json"
   },
