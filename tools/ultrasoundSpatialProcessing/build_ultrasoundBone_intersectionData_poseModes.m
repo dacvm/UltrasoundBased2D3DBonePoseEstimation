@@ -12,9 +12,10 @@ clear; clc;
 % This file is intentionally separate from
 % build_ultrasoundBone_intersectionData.m. The original script is the working
 % snapshot workflow, while this file is where static/kinematic support is
-% developed. This preparation script is also headless: it creates no figures,
-% opens no browser, and leaves snapshotPlanes, intersections, and
-% validBonePoses in the MATLAB workspace for inspection.
+% developed. After preparation, the script opens the sequence-aware browser so
+% the static or row-specific kinematic result can be inspected immediately. It
+% also leaves snapshotPlanes, intersections, validBonePoses, and the browser
+% figure handle in the MATLAB workspace for further inspection.
 %
 % Coordinate-frame convention used throughout this script:
 %   p_target = T_source_target * p_source
@@ -861,6 +862,18 @@ for groupIndex = 1:numel(snapshotPlanes)
     end
 end
 
-% The three variables remain in the script workspace. The later visualization
-% phase can consume them without repeating file I/O or intersection geometry.
-fprintf('Preparation complete: snapshotPlanes, intersections, and validBonePoses are available in the workspace.\n');
+%% DISPLAY THE PREPARED STATIC OR KINEMATIC RESULTS
+% Open the sequence-aware browser only after every aligned intersection record
+% has been prepared. The browser reads validBonePoses.poseHandlingMode itself:
+% - average, first, and last keep the established single-mesh static display;
+% - perDataRow reconstructs the mesh belonging to the selected table row and
+%   adds the valid row-1 baseline when the selected time is later than row 1.
+%
+% Display mode is intentionally non-blocking. The script therefore finishes
+% and leaves all prepared variables available while the browser remains open.
+figIntersectionBrowser = displaySnapshotSequenceIntersectionBrowser( ...
+    snapshotPlanes, intersections, validBonePoses, ...
+    'Mode', 'review');
+
+fprintf(['Preparation complete: snapshotPlanes, intersections, ' ...
+    'validBonePoses, and figIntersectionBrowser are available in the workspace.\n']);
