@@ -1,193 +1,153 @@
-# Ultrasound Snapshot Processing
+# Ultrasound Spatial Processing
 
 ## Short summary
 
-This MATLAB tool combines tracked ultrasound snapshots with CT-derived femur and tibia meshes. It places the ultrasound images and CT bones in the same reference coordinate system, calculates where each bone mesh crosses its ultrasound image plane, and opens an interactive browser for inspecting the results.
+This MATLAB tool combines tracked ultrasound images with CT-derived femur and tibia meshes. It places the images and bones in one reference frame, calculates the mesh intersections with the ultrasound planes, and opens an interactive browser for inspection and review.
 
-The recommended entry point is `build_ultrasoundBone_intersectionData.m`. It reads experiment paths and settings from `tools/ultrasoundSpatialProcessing/configs/ultrasoundBone_intersectionData_snapshotConfig.json`. In review mode, the browser also lets the user select useful snapshots and export them to a MAT file for later processing. The export dialog starts in `tools/ultrasoundSpatialProcessing/outputs/`.
+The recommended entry point is `build_ultrasoundBone_intersectionData_poseModes.m`. It reads `configs/ultrasoundBone_intersectionData_poseModesConfig.json` and supports two acquisition types through `bonePoseMode`:
 
-The `legacy/extra_snapshotProcess.m` script is the older version with experiment-specific paths written directly in the MATLAB file. It is kept for reference, but the config-driven script is easier to reuse with a new dataset.
+- `average`, `first`, or `last`: static mode with one selected pose per bone.
+- `perDataRow`: kinematic mode with a pose for every synchronized acquisition row.
+
+The browser can export approved snapshots or time frames for later processing. The retired snapshot-only script and configuration remain in `legacy/` and `configs/legacy/` for reference.
 
 ## Experiment setup
 
-This workflow was developed for a knee-phantom flexion experiment. A similar setup can also be used with a cadaver leg. The experiment contains:
+This workflow was developed for static and flexion knee-phantom experiments. A similar setup can be used with a cadaver leg. It requires femur and tibia bone pins with optical markers, a fixed reference rigid body, a tracked ultrasound probe, static snapshots or kinematic sequences, and a CT scan of the bones, pins, and markers.
 
-- Femur and tibia bone pins with optical marker rigid bodies.
-- A fixed reference rigid body used as the common experiment coordinate frame.
-- A tracked ultrasound probe.
-- Ultrasound snapshots recorded near the femur and tibia.
-- A CT scan of the bones, bone pins, and optical markers.
+Each Plus sequence file stores ultrasound images with tracked probe and reference poses. Its paired Qualisys CSV stores reference and bone-pin poses. fCal connects image coordinates to probe coordinates, while the processed CT data connects each bone mesh to its pin.
 
-The ultrasound acquisition stores the image together with the tracked probe and reference poses in a Plus sequence image file. A matching Qualisys CSV file stores the reference and bone-pin rigid-body poses. Probe calibration from fCal connects ultrasound image coordinates to probe coordinates. The processed CT data connects each CT bone mesh to the corresponding bone-pin coordinate system.
-
-The rigid-body names and coordinate-frame definitions used by Qualisys must match the definitions used when the CT data is prepared. If the marker order, pin name, axis direction, or handedness is different, the CT bones will not align correctly with the ultrasound images.
+Qualisys and CT preparation must use matching rigid-body definitions. Different marker order, pin names, axes, or handedness will misalign the bones and images.
 
 ## Required input data
 
-### Ultrasound snapshots and tracking data
+### Ultrasound images and tracking data
 
-Provide one root directory containing separate snapshot-group folders. Each folder name should contain `femur` or `tibia`, because the script uses this text to select the matching CT bone mesh. For example:
+Provide an acquisition root with separate source folders whose names contain `femur` or `tibia`:
 
 ```text
-measurement_02/
-+-- femur_snapshot_01/
-|   +-- snapshot_001.mha
-|   +-- snapshot_001.csv
-|   +-- snapshot_002.mha
-|   +-- snapshot_002.csv
-+-- tibia_snapshot_01/
-    +-- snapshot_001.mha
-    +-- snapshot_001.csv
+measurement_01/
++-- femur_medial/
+|   +-- acquisition_001.mha
+|   +-- acquisition_001.csv
+|   +-- acquisition_002.mha   # Static mode only
+|   +-- acquisition_002.csv   # Static mode only
++-- tibia_medial/
+    +-- acquisition_001.mha
+    +-- acquisition_001.csv
 ```
 
-Each nonempty snapshot-group folder must contain:
+MHA and CSV names are sorted separately and paired by position. Every nonempty folder must contain equal numbers of both file types. Empty folders remain represented as empty result groups.
 
-- Plus sequence image files (`.mha`) and the same number of Qualisys rigid-body snapshot files (`.csv`).
+| Mode | `bonePoseMode` | Input contract per source folder |
+| --- | --- | --- |
+| Static | `average`, `first`, `last` | Zero or more pairs; every MHA contains exactly one packet and its CSV exactly one row. |
+| Kinematic | `perDataRow` | At most one pair; the MHA packet count must equal the CSV row count. |
 
-The script sorts the MHA and CSV filenames separately and pairs files at the same position. Use consistent filenames so both sorted lists describe the same acquisition order. Each CSV file must contain exactly one data row and every rigid body listed in `rigidBodyNamesToAverage`. An empty snapshot-group folder is allowed and remains represented by an empty group in the results, although the overall dataset still needs rigid-body samples for registration.
+MHA packet `n` is coupled to CSV row `n` before validity checks. Every CSV must contain `B_N_REF` plus the selected femur and tibia pin rigid bodies.
 
-Packets without a valid probe transform are skipped. Packets without a valid reference transform are also skipped by default. For an exceptional acquisition recorded without the reference object, `T_ref_global_override` near the start of the image-display section can be set to a finite 4-by-4 Reference-to-Tracker transform; this is a script-level override and is not a JSON setting.
+Static mode omits packets with invalid probe or reference tracking and reduces only valid Qualisys reference/pin pairs. Kinematic mode preserves every time index; unusable images or transforms remain aligned with `isValid = false` and an explanatory status.
 
-The standard Plus sequence file format is described in the [Plus File Sequence documentation](https://pluslib.readthedocs.io/en/latest/file-formats/FileSequenceFile.html).
+Normally the reference pose comes from the MHA packet. For an acquisition without a tracked reference, `T_ref_global_override` in the script can hold a finite 4-by-4 Reference-to-Tracker transform. This is not a JSON setting.
+
+See the [Plus File Sequence documentation](https://pluslib.readthedocs.io/en/latest/file-formats/FileSequenceFile.html) for the MHA format.
 
 ### Ultrasound probe calibration
 
-Provide an fCal/PLUS XML calibration file containing exactly one transform named `ImageToProbe`. The script uses this transform to place the ultrasound image relative to the tracked probe. The scale stored in this transform is also used to convert image pixels to physical image-plane dimensions.
+Provide an fCal/PLUS XML file containing exactly one `ImageToProbe` transform. The script uses its closest proper rotation for the rigid transform and its original column lengths for physical pixel spacing.
 
 ### Post-processed CT scan data
 
-Provide a MAT file containing variables named `bones` and `bonepins`. This file is produced by the sibling [Knee Phantom Processing tool](../ctkneePostProcess/README.md) in `tools/ctkneePostProcess/`.
+Provide a MAT file containing `bones` and `bonepins`, produced by the sibling [Knee Phantom Processing tool](../ctkneePostProcess/README.md). It supplies the CT meshes, anatomical bone frames, and CT-side pin frames. Use data from the same physical pins and markers as the ultrasound experiment.
 
-Run the CT knee post-processing tool first if this MAT file is not available. Its output supplies:
+### Pose-mode configuration
 
-- The femur and tibia CT meshes.
-- The anatomical coordinate system of each bone.
-- The CT-side coordinate system of each femur and tibia bone pin.
-
-Use CT data from the same physical pin and marker setup as the ultrasound experiment. The selected femur and tibia pins must exist in both the CT output and the Qualisys tracking data.
-
-### Snapshot configuration
-
-Edit `tools/ultrasoundSpatialProcessing/configs/ultrasoundBone_intersectionData_snapshotConfig.json`. It contains these settings:
+Edit `configs/ultrasoundBone_intersectionData_poseModesConfig.json`:
 
 | Setting | Meaning |
 | --- | --- |
-| `snapshotDirectory` | Root directory containing the femur and tibia snapshot-group folders. |
-| `fcalConfigFile` | Path to the fCal XML calibration file. |
-| `ctPostProcessedMatFile` | Path to the MAT file produced by `tools/ctkneePostProcess/`. |
-| `pinSelection.F` | Femur pin location used in the experiment, such as `PRO`. |
-| `pinSelection.T` | Tibia pin location used in the experiment, such as `DIS`. |
-| `rigidBodyNamesToAverage` | Qualisys rigid bodies used to register the CT data to the experiment. |
-| `displayMode` | Browser mode: `display` or `review`. |
+| `acquisitionDirectory` | Root containing the femur and tibia source folders. |
+| `fcalConfigFile` | fCal XML path. |
+| `ctPostProcessedMatFile` | CT post-processing MAT-file path. |
+| `pinSelection.F` | Femur pin location, such as `PRO`. |
+| `pinSelection.T` | Tibia pin location, such as `DIS`. |
+| `bonePoseMode` | `average`, `first`, `last`, or `perDataRow`. |
 
-`rigidBodyNamesToAverage` must include the fixed reference rigid body `B_N_REF` and the selected femur and tibia pin names. For example, femur pin `PRO` and tibia pin `DIS` require:
+The pin selections imply the required CSV names. For example, `F = PRO` and `T = DIS` require `B_N_REF`, `C_F_PRO`, and `C_T_DIS`.
 
-```json
-"rigidBodyNamesToAverage": [
-  "B_N_REF",
-  "C_F_PRO",
-  "C_T_DIS"
-]
-```
+| `bonePoseMode` | Behavior |
+| --- | --- |
+| `average` | Static. Averages valid row-wise pin-to-reference poses: arithmetic translation mean and rotation-aware orientation mean. |
+| `first` | Static. Uses each bone's earliest valid pose by CSV timestamp across all source folders. |
+| `last` | Static. Uses each bone's latest valid pose by CSV timestamp across all source folders. |
+| `perDataRow` | Kinematic. Keeps each CSV row and matches it by source-folder, pair, and row indices. |
 
-Configuration paths may be absolute or relative. Relative paths are resolved from the directory containing `ultrasoundBone_intersectionData_snapshotConfig.json`, not from MATLAB's current folder.
+Paths may be absolute or relative. Relative paths resolve from the configuration file's directory, not MATLAB's current folder.
 
 ## Processing workflow
 
-1. **Read and pair the snapshot files.** The script finds the femur and tibia snapshot-group folders, sorts their MHA and CSV files, checks that each MHA file has one CSV partner, and reads the ultrasound images and tracking data.
-
-2. **Calibrate and place the ultrasound images.** The `ImageToProbe` transform from the fCal XML file connects each image to the tracked probe. The tracked probe and reference poses are then used to place every valid image plane in the reference coordinate system.
-
-3. **Load the processed CT data.** The script loads the `bones` and `bonepins` structures created by the CT knee post-processing tool and selects the configured femur and tibia pins.
-
-4. **Register the CT bones to the reference frame.** The configured Qualisys rigid-body measurements are averaged. The tracked bone-pin poses are matched with their CT-side pin poses so the femur and tibia meshes can be transformed from CT coordinates into the same reference frame as the ultrasound images.
-
-5. **Calculate mesh-image intersections.** For each snapshot, the script intersects the correct bone mesh with the finite ultrasound image plane. It records the intersection pixels and keeps the mesh segments whose surface orientation is within the fixed 25-degree tolerance of the probe-facing direction.
-
-6. **Display and review the results.** An interactive browser creates one table tab per source directory and shows the selected ultrasound image, its intersection overlay, and the related 3D geometry. Review mode allows accepted snapshots to be selected across all tabs and exported.
+1. **Read and align pairs.** Find, sort, pair, and validate MHA/CSV files using the mode-specific rules.
+2. **Place ultrasound planes.** Combine `ImageToProbe` with tracked probe and reference poses. Static mode omits unusable planes; kinematic mode preserves their rows and statuses.
+3. **Load CT data.** Load `bones` and `bonepins`, then select the configured pins.
+4. **Calculate bone poses.** First calculate each pin pose relative to the reference. Reduce valid poses for `average`, `first`, or `last`, or retain the aligned series for `perDataRow`.
+5. **Calculate intersections.** Transform the matching CT mesh with `T_CT_ref`, intersect it with each finite image plane, and retain the raw result plus faces within 25 degrees of the probe-facing direction.
+6. **Review results.** Use the established browser for static poses or the synchronized time-row browser for kinematic data.
 
 ## Running the project
 
-1. Prepare the ultrasound snapshot folders, fCal XML file, and post-processed CT MAT file.
-2. Edit `tools/ultrasoundSpatialProcessing/configs/ultrasoundBone_intersectionData_snapshotConfig.json` and set the paths, selected pins, rigid-body names, and display mode.
-3. Start MATLAB. The script can be launched from any current folder because it locates the project and its `functions` directory from its own file path.
-4. Run the recommended script:
+1. Prepare the acquisition folders, fCal XML, and CT MAT file.
+2. Edit `configs/ultrasoundBone_intersectionData_poseModesConfig.json`.
+3. Run from the project root:
 
    ```matlab
-   run('tools/ultrasoundSpatialProcessing/build_ultrasoundBone_intersectionData.m')
+   run('tools/ultrasoundSpatialProcessing/build_ultrasoundBone_intersectionData_poseModes.m')
    ```
 
-   If MATLAB is not currently in the project root, pass the absolute script path to `run` instead.
+   From another current folder, pass the absolute script path.
 
-5. Follow the progress messages in the MATLAB Command Window and inspect the figures and final snapshot browser.
+4. Inspect the browser, mark acceptable records, and click **Export Selected**. MATLAB asks for a destination and suggests `validSnapshots_yyyyMMdd_HHmmss.mat`.
 
-Set `displayMode` to `display` when the results only need to be inspected. Set it to `review` to mark acceptable snapshots and export them. In review mode, click **Export Selected** and choose an output filename when MATLAB asks. The save dialog starts in `tools/ultrasoundSpatialProcessing/outputs/`. The exported MAT file contains `validSnapshots`, with the selected image planes and mesh-intersection results, and `validBonePoses`, with the registered CT bone poses and meshes used to calculate those intersections.
+The script opens the browser in review mode and leaves `snapshotPlanes`, `intersections`, `validBonePoses`, and `figIntersectionBrowser` in the workspace. Static selections apply per snapshot. In `perDataRow`, decisions are synchronized by CSV row across source tabs, so one decision represents the same time frame wherever that row exists. The browser stays open after export.
 
-The script adds the project `functions` directory, its subdirectories, and this tool's `helpers` directory to the MATLAB path automatically.
+The project `functions` tree and this tool's `helpers` directory are added to the MATLAB path automatically.
 
 ## Output MAT-file structure
 
-In `review` mode, the **Export Selected** button writes a MATLAB v7.3 MAT-file to the chosen location. The suggested destination is `tools/ultrasoundSpatialProcessing/outputs/`, and the default filename follows `validSnapshots_yyyyMMdd_HHmmss.mat`. At least one snapshot must be marked valid before the file can be exported.
-
-The processing script keeps its two main result variables grouped by source directory. Both variables use the same outer metadata and aligned `data` arrays:
+**Export Selected** writes a MATLAB v7.3 file after at least one record is approved. The in-memory arrays remain aligned by group and local index:
 
 ```text
 snapshotPlanes(1..G)                 intersections(1..G)
-+-- name                             +-- name
-+-- bone                             +-- bone
-+-- path                             +-- path
++-- name, bone, path                 +-- name, bone, path
 +-- data(1..N)                       +-- data(1..N)
-    +-- plane fields                     +-- intersection fields
 ```
 
-For every group `g` and local acquisition `k`, `snapshotPlanes(g).data(k)` and `intersections(g).data(k)` describe the same ultrasound image. Groups remain present even when no packet in that directory has valid tracking, in which case both `data` arrays are empty.
-
-The output file contains two variables: `validSnapshots` and `validBonePoses`. `validSnapshots` preserves every source-directory group in the same order as the processing variables. Only records selected as valid are copied into each group's `data` field; a group with no selection has empty `data`:
+The exported file contains `validSnapshots` and `validBonePoses`:
 
 ```text
 validSnapshots(1..G)
-+-- name
-+-- bone
-+-- path
++-- name, bone, path
 +-- data(1..N_selected)
     +-- sourceIndex
     +-- plane
-    |   +-- T_image_ref
-    |   +-- p0, ex, ey, n, W, H
-    |   +-- nRows, nCols, image
-    |   +-- timestamp, bone, snapshotName
-    |   +-- snapshotIndex, sequenceIndex, packetIndex
     +-- intersection
-        +-- mask, pixelList
-        +-- segments3D, segmentsUV, segmentFaceIdx
-        +-- probeFacingSegmentMask
-        +-- probeFacingSegments3D, probeFacingSegmentsUV
-        +-- probeFacingPixels, segmentFacingScore
-        +-- timestamp, status
-```
 
-`validBonePoses` stores the registration result used for the intersections. It is not filtered by the snapshot checkboxes because each pose is calculated by pooling and averaging all available Qualisys rows for the configured reference and bone-pin rigid bodies:
-
-```text
 validBonePoses
 +-- processingMode
++-- poseHandlingMode
 +-- ctPostProcessedMatFile
 +-- bonePoses(1..B)
     +-- bone
-    +-- data
-        +-- sourceIndex
-        +-- T_CT_ref
-        +-- T_bone_ref
-        +-- mesh
+    +-- meshCT
+    +-- T_bone_CT
+    +-- data(1..P)
+    +-- baselineData       # perDataRow export only
 ```
 
-Load both output variables with:
+Every source group is preserved even if its exported `data` is empty. Static pose `data` has one record per bone. A `perDataRow` export filters pose `data` to the approved source groups and time rows; `baselineData` separately retains row 1 as visualization context without approving it.
 
 ```matlab
-loadedOutput = load( ...
-    'validSnapshots_yyyyMMdd_HHmmss.mat', ...
-    'validSnapshots', ...
-    'validBonePoses');
+loadedOutput = load('validSnapshots_yyyyMMdd_HHmmss.mat', ...
+    'validSnapshots', 'validBonePoses');
 validSnapshots = loadedOutput.validSnapshots;
 validBonePoses = loadedOutput.validBonePoses;
 ```
@@ -196,85 +156,84 @@ validBonePoses = loadedOutput.validBonePoses;
 
 | Field | Explanation |
 | --- | --- |
-| `name` | Name of the source snapshot directory, also used as the browser tab title. |
-| `bone` | Bone code assigned from the directory name: `F`, `T`, or `U`. |
-| `path` | Absolute path of the source snapshot directory. |
-| `data` | Selected records from this directory in their original local acquisition order. This is empty when the group has no selected snapshots. |
+| `name` | Source-directory name and browser tab title. |
+| `bone` | `F` or `T`, assigned from the directory name. |
+| `path` | Absolute source-directory path. |
+| `data` | Approved records in original acquisition order; empty if none were selected. |
 
 ### Fields in each selected `data` record
 
 | Field | Explanation |
 | --- | --- |
-| `sourceIndex` | Local index of this result in `snapshotPlanes(groupIndex).data` and `intersections(groupIndex).data` before browser selection is applied. |
-| `plane` | Struct containing the ultrasound image, its finite-plane geometry, and source metadata. |
-| `intersection` | Struct containing the raw mesh-plane intersection and the subset produced by probe-facing mesh faces. |
+| `sourceIndex` | Local index in the retained processed group before browser selection. |
+| `plane` | Ultrasound image, finite-plane geometry, validity, and provenance. |
+| `intersection` | Processing status, raw intersection, and probe-facing subset. |
 
 ### Fields in `validBonePoses`
 
 | Field | Explanation |
 | --- | --- |
-| `processingMode` | Processing mode that produced the registration. This workflow stores `"snapshot"`. |
-| `ctPostProcessedMatFile` | Absolute path of the CT MAT file used to build the registered meshes and poses. Downstream processing can use this to load the matching CT anatomy. |
-| `bonePoses` | One aggregate registration record per processed bone, normally femur and tibia. |
+| `processingMode` | `static` or `kinematic`, derived from `poseHandlingMode`. |
+| `poseHandlingMode` | `average`, `first`, `last`, or `perDataRow`. |
+| `ctPostProcessedMatFile` | Absolute path of the source CT MAT file. |
+| `bonePoses` | One record per processed bone. |
 
-Each `bonePoses` item has a `bone` code and one `data` struct:
+Each bone record contains `bone`, the CT-coordinate `triangulation` `meshCT`, `T_bone_CT`, and pose `data`. A kinematic export also has `baselineData`. Pose records contain:
 
 | Field | Explanation |
 | --- | --- |
-| `bone` | Bone code identifying the registration, such as `F` or `T`. |
-| `data.sourceIndex` | Empty in snapshot mode because the aggregate registration is averaged from all CSV rows rather than taken from one acquisition. |
-| `data.T_CT_ref` | 4-by-4 rigid transform mapping CT-frame points into the common reference frame. This is the transform applied to the CT mesh vertices. |
-| `data.T_bone_ref` | 4-by-4 rigid transform mapping the bone anatomical coordinate system into the common reference frame. This is different from `T_CT_ref`. |
-| `data.mesh` | MATLAB `triangulation` of the complete bone surface after its vertices have been transformed into the common reference frame. |
+| `sourceIndex` | Raw row index in its source group; the averaged pose keeps its template value. |
+| `snapshotIndex`, `sequenceIndex` | Source-folder and MHA/CSV-pair indices. |
+| `packetIndex`, `rigidBodyRowIndex` | Coupled MHA packet and CSV row indices. |
+| `rigidBodyTimestamp` | CSV timestamp used by endpoint modes. |
+| `sourceSampleCount` | Valid source count for an average, or `1` for a valid unreduced row. |
+| `isValid`, `status` | Pose usability and explanation. |
+| `T_pin_ref` | Pin-to-reference 4-by-4 transform. |
+| `T_CT_ref` | CT-to-reference transform applied to `meshCT.Points`. |
+| `T_bone_ref` | Anatomical-bone-to-reference transform. |
 
 ### Fields in `plane`
 
 | Field | Explanation |
 | --- | --- |
-| `T_image_ref` | 4-by-4 rigid-body transform that maps points from the ultrasound image frame into the common reference coordinate system. Its rotation columns and translation match `ex`, `ey`, `n`, and `p0`. |
-| `p0` | 3D position of the image plane's top-left corner in the common reference coordinate system. |
-| `ex` | 3D unit direction in which image column numbers increase. |
-| `ey` | 3D unit direction in which image row numbers increase. |
-| `n` | 3D normal direction of the image plane. |
-| `W` | Physical width of the image plane. Its unit follows the calibration and mesh coordinate units. |
-| `H` | Physical height of the image plane. Its unit follows the calibration and mesh coordinate units. |
-| `nRows` | Number of rows in `image`. |
-| `nCols` | Number of columns in `image`. |
-| `image` | Ultrasound image pixel array for this plane. |
-| `timestamp` | Acquisition timestamp read from the source ultrasound packet. |
-| `bone` | Bone code assigned from the snapshot folder name: `F` for femur, `T` for tibia, or `U` when unknown. |
-| `snapshotName` | Name of the source snapshot-group folder. |
-| `snapshotIndex` | Position of that snapshot group in the script's sorted snapshot-directory list. |
-| `sequenceIndex` | Position of the source MHA sequence within its snapshot group. |
-| `packetIndex` | Position of the source image packet within its MHA sequence. |
+| `sourceIndex` | Raw packet index across the source group's pairs. |
+| `T_image_ref` | Image-to-reference 4-by-4 transform. |
+| `p0`, `ex`, `ey`, `n` | Plane origin, image-axis directions, and normal in the reference frame. |
+| `W`, `H` | Physical image width and height across pixel-center intervals. |
+| `nRows`, `nCols`, `image` | Raster dimensions and ultrasound pixels. |
+| `timestamp`, `rigidBodyTimestamp` | MHA and paired CSV timestamps. |
+| `bone`, `snapshotName` | Bone code and owning source folder. |
+| `snapshotIndex`, `sequenceIndex` | Source-folder and pair indices. |
+| `packetIndex`, `rigidBodyRowIndex` | Coupled packet and CSV row indices. |
+| `isValid`, `status` | Plane usability and explanation. Invalid kinematic geometry is `NaN`. |
 
-The plane uses the parameterization `x = p0 + u*ex + v*ey`, with `0 <= u <= W` and `0 <= v <= H`.
+The plane uses `x = p0 + u*ex + v*ey`, with `0 <= u <= W` and `0 <= v <= H`.
 
 ### Fields in `intersection`
 
 | Field | Explanation |
 | --- | --- |
-| `mask` | `nRows`-by-`nCols` logical mask. A true pixel is touched by the rasterized raw mesh-plane intersection. |
-| `pixelList` | K-by-2 array of raw intersection pixels stored as `[row, column]`. |
-| `segments3D` | Cell array of raw intersection segments. Each cell contains a 2-by-3 array holding the two segment endpoints in the common 3D reference coordinate system. |
-| `segmentsUV` | Cell array aligned with `segments3D`. Each cell contains a 2-by-2 array of `[u, v]` endpoints clipped to the finite image plane. |
-| `segmentFaceIdx` | Numeric vector aligned with the raw segment arrays. Each value is the mesh-face index that produced that segment. |
-| `probeFacingSegmentMask` | Logical vector aligned with the raw segments. A true value marks a segment whose source mesh face is within 25 degrees of the probe-facing direction. |
-| `probeFacingSegments3D` | Subset of `segments3D` that passes the probe-facing test. |
-| `probeFacingSegmentsUV` | Corresponding subset of `segmentsUV` that passes the probe-facing test. |
-| `probeFacingPixels` | P-by-2 array of `[row, column]` pixels rasterized from the probe-facing segments. |
-| `segmentFacingScore` | Score for every raw segment, calculated as the dot product of its mesh-face normal with `-plane.ey`. Larger values point more strongly in the selected probe-facing direction. |
-| `timestamp` | Copy of the source ultrasound image timestamp, included to keep the intersection linked to its plane. |
-| `status` | Processing result text, normally `Computed`; skipped records contain a message explaining why no intersection was calculated. |
+| `mask`, `pixelList` | Rasterized raw intersection mask and `[row, column]` pixels. |
+| `segments3D`, `segmentsUV` | Raw segments in reference coordinates and finite-plane coordinates. |
+| `segmentFaceIdx` | CT mesh-face index for each raw segment. |
+| `probeFacingSegmentMask` | Raw segments passing the 25-degree facing test. |
+| `probeFacingSegments3D`, `probeFacingSegmentsUV` | Facing segment subsets. |
+| `probeFacingPixels` | Rasterized `[row, column]` pixels from facing segments. |
+| `segmentFacingScore` | Dot product of each source face normal with `-plane.ey`. |
+| `timestamp` | Copy of the MHA timestamp. |
+| `isValid`, `status` | Whether geometry was computed and, if skipped, why. |
 
-The raw fields retain every finite mesh-plane intersection. The `probeFacing...` fields retain only the surface-facing subset used for the filtered overlay. Empty arrays or cell arrays mean that no matching intersection was found. Individual `validSnapshots` records contain only the intersection geometry needed for that image; the complete registered bone meshes are stored once in `validBonePoses`.
+Empty geometry can mean a valid calculation found no crossing. Use `isValid` and `status` to distinguish that from a skipped row.
 
 ## Common input problems
 
-- A snapshot folder contains different numbers of MHA and CSV files.
-- The sorted MHA and CSV filenames do not represent the same acquisition order.
-- A CSV file contains more than one row or is missing a configured rigid body.
-- A snapshot-group folder name does not contain `femur` or `tibia`.
-- A selected pin name does not match the CT `bonepins` data or the Qualisys rigid-body name.
-- The fCal XML file does not contain exactly one `ImageToProbe` transform.
+- Unequal MHA and CSV file counts, or independently sorted names that do not describe the same order.
+- A static pair has anything other than one packet and one CSV row.
+- A kinematic folder has multiple pairs, or its packet and CSV row counts differ.
+- A CSV is missing `B_N_REF` or a rigid body implied by `pinSelection`.
+- A source-folder name lacks `femur` or `tibia`.
+- `bonePoseMode` does not match the acquisition layout.
+- A selected pin does not match CT `bonepins` or Qualisys names.
+- A static dataset has no valid reference/pin pose for a bone.
+- The fCal XML does not contain exactly one `ImageToProbe` transform.
 - The CT MAT file does not contain both `bones` and `bonepins`.
