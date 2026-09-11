@@ -1,29 +1,32 @@
 clear; clc; close all;
 
-%% BATCHED P-IMLOP PD-TREE SEARCH: ONE IMAGE WITH ALL MEASUREMENT POINTS
+%% BATCHED P-IMLOP PD-TREE SEARCH: ONE IMAGE WITH A DISTRIBUTED POINT SUBSET
 %
-% This script extends the one-point demonstration to the complete set of
-% oriented bone-surface measurements extracted from one ultrasound image:
+% This script extends the one-point demonstration to a distributed subset of
+% the oriented bone-surface measurements extracted from one ultrasound image:
 %
 %   1. load one tracked ultrasound image and all of its valid surface points;
 %   2. prepare the complete tibia mesh and its reusable CT-frame PD-tree;
-%   3. transform every measured point from ref into the fixed CT search frame;
-%   4. search the fixed PD-tree for all X_i in bounded numerical batches;
-%   5. collect one most-likely oriented model point Y_i for every X_i;
-%   6. transform the selected model points back to ref and display them.
+%   3. retain an evenly distributed fraction of the valid measurements;
+%   4. transform the retained points from ref into the fixed CT search frame;
+%   5. search the fixed PD-tree for all X_i in bounded numerical batches;
+%   6. collect one most-likely oriented model point Y_i for every X_i;
+%   7. transform the selected model points back to ref and display them.
 %
 % Scope of this example
 % ---------------------
-% The setup contains one ultrasound image in ref, every measurement point in
-% that image having a valid estimated normal, and the complete pre-registered
-% tibia mesh that intersects the image plane. The script computes many
-% correspondences, but it still does not optimize or update the bone pose.
-% It evaluates only the saved initial pre-registration.
+% The setup contains one ultrasound image in ref, an evenly distributed
+% subset of its measurement points having valid estimated normals, and the
+% complete pre-registered tibia mesh that intersects the image plane. The
+% script computes many correspondences, but it still does not optimize or
+% update the bone pose. It evaluates only the saved initial pre-registration.
 %
 % Batching shares covariance preparation, projected face normals, node tests,
 % and triangle arithmetic. It does not use parfor or a parallel pool. Each
 % measurement still has its own correspondence and best cost. Different image
 % orientations or covariance models should be submitted as separate groups.
+% Subsampling only reduces how many measurements enter the search; it does not
+% change the P-IMLOP cost, the model mesh, or the PD-tree search equations.
 %
 % The result is an indexed pair of sets:
 %
@@ -117,7 +120,47 @@ end
 % floating-point drift from entering the orientation comparison.
 measurementNormals2DImage = measurementNormals2DImage ./ measurementNormalLengths;
 
-% X represents the complete measured oriented-point set for this image. Row
+%% 2A. RETAIN AN EVENLY DISTRIBUTED FRACTION OF THE VALID MEASUREMENTS
+
+% This is the one user-facing subsampling setting. Use a value greater than
+% zero and no larger than one:
+%
+%       1.000 keeps every valid measurement;
+%       0.500 keeps approximately half;
+%       0.333 keeps approximately one third.
+%
+% A value of zero is not accepted because P-IMLOP cannot search an empty
+% measurement set. The default below keeps half of the dense image samples.
+measurementSubsampleFraction = 0.3;
+validateattributes(measurementSubsampleFraction, {'numeric'}, ...
+    {'real', 'finite', 'scalar', '>', 0, '<=', 1}, mfilename, ...
+    'measurementSubsampleFraction');
+
+% The ultrasound measurements form an ordered surface curve. Choose equally
+% spaced row positions along that complete valid sequence, rather than taking
+% one consecutive block. For nine points and fraction 0.5, this produces the
+% indices [1, 3, 5, 7, 9], matching the intended distributed sampling rule.
+numberOfValidMeasurementsBeforeSubsampling = size(measurementPositionsRef, 1);
+numberOfMeasurementsToKeep = max(1, round(measurementSubsampleFraction * numberOfValidMeasurementsBeforeSubsampling));
+if numberOfMeasurementsToKeep == 1
+    % A single retained sample cannot include both curve endpoints. Use the
+    % middle sample so this extreme setting still represents the whole curve.
+    subsampleIndicesWithinValidSet = round((numberOfValidMeasurementsBeforeSubsampling + 1) / 2);
+else
+    % With two or more retained samples, LINSPACE includes both endpoints and
+    % distributes every intermediate selection across the full valid curve.
+    subsampleIndicesWithinValidSet = round( ...
+        linspace(1, numberOfValidMeasurementsBeforeSubsampling, numberOfMeasurementsToKeep)).';
+end
+
+% Apply exactly the same retained rows to positions, normals, and original
+% source indices. This preserves every X_i's position-normal pairing and lets
+% a result still be traced to its original row in the extracted image curve.
+measurementPositionsRef   = measurementPositionsRef(subsampleIndicesWithinValidSet, :);
+measurementNormals2DImage = measurementNormals2DImage(subsampleIndicesWithinValidSet, :);
+validMeasurementIndices   = validMeasurementIndices(subsampleIndicesWithinValidSet);
+
+% X represents the retained measured oriented-point set for this image. Row
 % i of position3DRef and normal2DImage belongs to the same measurement X_i.
 % sourcePointIndices preserves the corresponding row in the original surface
 % extraction, which is useful when a result needs to be traced back later.
@@ -230,7 +273,9 @@ averageFacesEvaluatedPercent = 100 * averageFacesEvaluated / PsiCT.pdTree.number
 
 fprintf('\nP-IMLOP one-image, many-point BATCHED PD-tree demo\n');
 fprintf('  Ultrasound image plane          : %d\n',                     planeIndex);
-fprintf('  Measurements with valid normals : %d\n',                     numberOfMeasurements);
+fprintf('  Valid measurements before sample: %d\n',                     numberOfValidMeasurementsBeforeSubsampling);
+fprintf('  Requested subsampling fraction  : %.3f\n',                   measurementSubsampleFraction);
+fprintf('  Measurements used in search     : %d (%.2f%%)\n',            numberOfMeasurements, 100 * numberOfMeasurements / numberOfValidMeasurementsBeforeSubsampling);
 fprintf('  Valid model triangles           : %d\n',                     PsiCT.pdTree.numberOfDatums);
 fprintf('  PD-tree nodes / leaves          : %d / %d\n',                PsiCT.pdTree.numberOfNodes, PsiCT.pdTree.numberOfLeaves);
 fprintf('  Unique selected model faces     : %d\n',                     numel(uniqueMatchedFaceIndices));
