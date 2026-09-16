@@ -290,30 +290,82 @@ fprintf('  Total / amortized search time   : %.3f s / %.3f ms per point\n\n', to
 
 %% 7. DISPLAY ALL X-to-Y CORRESPONDENCES IN ref
 
-% The search took place in CT. Transform the complete model mesh and every
-% returned Y_i into ref for presentation beside the tracked ultrasound image.
-% The PD-tree itself remains fixed in CT and is never transformed or rebuilt.
+% This figure is intended to explain the complete one-image correspondence
+% result in one common physical coordinate frame. It contains:
+%
+%   1. The pre-registered tibia mesh, drawn transparently in beige.
+%   2. The selected tracked ultrasound image at its pose in ref.
+%   3. Mesh triangles containing at least one selected Y_i, drawn in cyan.
+%   4. Ultrasound measurements X_i and their normals, drawn in red.
+%   5. Most-likely model correspondences Y_i and their normals, in blue.
+%   6. A grey line joining every indexed pair X_i -> Y_i.
+%
+% The left panel will show the complete anatomical setup. The right panel
+% will show exactly the same scene, but zoomed around the correspondence
+% region so individual points, normals, and connecting lines are easier to
+% inspect.
+%
+% Before drawing these elements together, every displayed 3-D position and
+% direction must be expressed in ref. Measurement positions X_i already live
+% in ref. The CT mesh and selected Y_i must be moved from CT to ref, while the
+% measured 2-D normals must be lifted through the selected image's pose.
+
+% 7A. Transform the CT-side geometry into the display frame ===============
+%
+% The PD-tree search was deliberately performed in the fixed CT frame. The
+% mesh and returned model correspondences therefore still use CT coordinates.
+% T_CT_ref_candidate is the candidate bone pose evaluated by the search:
+%
+%   p_ref = T_CT_ref_candidate * p_CT
+%
+% Positions require the complete rigid transform because both rotation and
+% translation determine their location. Normals are directions, not points,
+% so translation must not be applied. With the row-vector representation used
+% here, the corresponding normal conversion is:
+%
+%   n_ref = n_CT * R_CT_ref_candidate'
+%
+% Only display copies are transformed. PsiCT and its PD-tree remain fixed in
+% CT and are neither modified nor rebuilt.
 boneFaces          = PsiCT.mesh.ConnectivityList;
 bonePointsRef      = applyRigidTransform(PsiCT.mesh.Points, T_CT_ref_candidate);
 YmatchPositionsRef = applyRigidTransform(YmatchPositionsCT, T_CT_ref_candidate);
 YmatchNormalsRef   = YmatchNormalsCT * R_CT_ref_candidate.';
 
-% Lift all measured 2D normals into the 3D ref image plane. Row-vector
-% multiplication by R_image_ref' is the batch equivalent of
-% n_ref = R_image_ref * [n_x; n_y; 0] for one column normal.
+% 7B. Lift the measured 2-D normals into 3-D ref coordinates ===============
+%
+% Each measured normal is stored as [n_x, n_y] in the local ultrasound-image
+% plane. Append a zero third component to embed it in that local 3-D frame:
+%
+%   n_image = [n_x, n_y, 0]
+%
+% The zero states that the direction lies inside the ultrasound plane. Then
+% rotate the direction from image -> ref using R_image_ref. Translation is
+% intentionally excluded because it cannot change a direction. Since this
+% demo uses only one ultrasound image, the same R_image_ref correctly applies
+% to every measurement normal.
 R_image_ref = selectedPlane.T_image_ref(1:3, 1:3);
 measurementNormals3DRef = [X.normal2DImage, zeros(numberOfMeasurements, 1)] * R_image_ref.';
 
-% With hundreds of arrows, use a shorter display scale than the one-point
-% demo. This changes only the drawing; every stored normal remains unit length.
+% 7C. Prepare display-only sizes and correspondence line geometry ==========
+%
+% Unit normals would appear very short relative to the image and bone. Give
+% every arrow one common visible length based on the ultrasound-image extent.
+% This scale changes only the rendered arrows; it does not modify any stored
+% normal or the orientation term used by P-IMLOP.
 imageExtentMm      = max([selectedPlane.W, selectedPlane.H]);
 normalDisplayScale = 0.04 * imageExtentMm;
+
+% display_image3D needs the physical spacing between neighboring pixels. The
+% max(...,1) safeguard avoids division by zero for a one-pixel dimension.
 pixelSpacingXYMm   = [ ...
     selectedPlane.W / max(selectedPlane.nCols - 1, 1), ...
     selectedPlane.H / max(selectedPlane.nRows - 1, 1)];
 
-% Prepare all correspondence segments as one polyline separated by NaNs.
-% One plot object is much lighter than creating hundreds of individual lines.
+% Each match should appear as an independent line from X_i to Y_i. NaN rows
+% separate successive segments inside one long polyline. This gives the same
+% visual result as hundreds of individual plot3 calls while using only one
+% graphics object, making the figure faster to draw and rotate.
 correspondenceX = reshape([ ...
     X.position3DRef(:, 1), YmatchPositionsRef(:, 1), nan(numberOfMeasurements, 1)].', [], 1);
 correspondenceY = reshape([ ...
@@ -321,9 +373,11 @@ correspondenceY = reshape([ ...
 correspondenceZ = reshape([ ...
     X.position3DRef(:, 3), YmatchPositionsRef(:, 3), nan(numberOfMeasurements, 1)].', [], 1);
 
-% Use two views. The left panel gives the complete anatomical setup. The
-% right panel magnifies the measured curve and all selected model points so
-% their normals and correspondence lines can be inspected more easily.
+% 7D. Create two coordinated views of the same correspondence result =======
+%
+% The first axes is the overview. Equal axis scaling is important because it
+% prevents the bone, image plane, and correspondence distances from being
+% visually stretched along one coordinate direction.
 demoFigure = figure( ...
     'Name', 'P-IMLOP one-image, many-point BATCHED PD-tree search demo', ...
     'Position', [80, 80, 1550, 700]);
@@ -340,8 +394,11 @@ xlabel(setupAxes, 'X_{ref} (mm)');
 ylabel(setupAxes, 'Y_{ref} (mm)');
 zlabel(setupAxes, 'Z_{ref} (mm)');
 
-% Draw the complete pre-registered tibia lightly. Its transparency lets the
-% tracked image and selected correspondences remain visible through it.
+% 7E. Draw the anatomical context: bone mesh and ultrasound image ===========
+%
+% Draw the complete candidate tibia pose lightly in beige. Transparency keeps
+% the anatomy recognizable while allowing image pixels and correspondences on
+% the far side of the surface to remain visible.
 boneHandle = patch(setupAxes, ...
     'Faces', boneFaces, ...
     'Vertices', bonePointsRef, ...
@@ -350,7 +407,9 @@ boneHandle = patch(setupAxes, ...
     'FaceAlpha', 0.24, ...
     'DisplayName', 'Pre-registered tibia mesh');
 
-% Draw the one tracked ultrasound image at its original pose in ref.
+% Draw the selected ultrasound image at its tracked pose in ref.
+% display_image3D uses T_image_ref to place the local image pixels correctly
+% in the same frame as the bone and correspondence points.
 imageHandle = display_image3D(setupAxes, ...
     selectedPlane.image, selectedPlane.T_image_ref, ...
     'SwapXY', true, ...
@@ -360,9 +419,12 @@ imageHandle = display_image3D(setupAxes, ...
     'FaceAlpha', 0.45);
 imageHandle.DisplayName = sprintf('Ultrasound plane %d', planeIndex);
 
-% Highlight every unique mesh face selected by at least one measurement.
-% Several neighboring X points may choose the same triangle, so plotting the
-% unique face list avoids drawing identical triangles repeatedly.
+% 7F. Highlight the model surface regions selected by the search ===========
+%
+% Every Y_i lies on one triangle of the CT mesh. Draw the selected triangles
+% in cyan to reveal which parts of the bone surface supplied correspondences.
+% Neighboring measurements may select the same triangle, so the unique face
+% list prevents the same triangle from being drawn repeatedly.
 matchedFacesHandle = patch(setupAxes, ...
     'Faces', boneFaces(uniqueMatchedFaceIndices, :), ...
     'Vertices', bonePointsRef, ...
@@ -372,8 +434,11 @@ matchedFacesHandle = patch(setupAxes, ...
     'LineWidth', 0.8, ...
     'DisplayName', 'Selected model triangles');
 
-% Plot all measured points and their image-plane normals in red. These are
-% the complete X set supplied by the selected ultrasound image.
+% 7G. Draw the measurement side of every correspondence in red =============
+%
+% Red dots are the retained ultrasound measurements X_i. Red arrows show the
+% measured in-plane normals after Block 7B rotated them from image into ref.
+% Each arrow starts at its own measurement point.
 xPointHandle = scatter3(setupAxes, ...
     X.position3DRef(:, 1), X.position3DRef(:, 2), X.position3DRef(:, 3), ...
     22, [0.90, 0.05, 0.05], 'filled', ...
@@ -386,8 +451,11 @@ xNormalHandle = quiver3(setupAxes, ...
     0, 'Color', [0.90, 0.05, 0.05], 'LineWidth', 0.8, ...
     'MaxHeadSize', 0.35, 'DisplayName', 'Measured normals');
 
-% Plot every selected model point and face normal in blue. The i-th blue
-% point is the most-likely oriented correspondence Y_i of the i-th red point.
+% 7H. Draw the selected model side of every correspondence in blue =========
+%
+% Blue dots are the most-likely model points Y_i returned by the PD-tree
+% search. Blue arrows are their surface normals. Row ordering is preserved,
+% so the i-th blue point and normal belong to the i-th red measurement X_i.
 yPointHandle = scatter3(setupAxes, ...
     YmatchPositionsRef(:, 1), YmatchPositionsRef(:, 2), YmatchPositionsRef(:, 3), ...
     28, [0.05, 0.30, 0.95], 'filled', ...
@@ -400,13 +468,17 @@ yNormalHandle = quiver3(setupAxes, ...
     0, 'Color', [0.05, 0.30, 0.95], 'LineWidth', 0.8, ...
     'MaxHeadSize', 0.35, 'DisplayName', 'Selected model normals');
 
-% Join every paired X_i and Y_i with a thin grey segment. Together these
-% lines make the complete set of indexed correspondence pairs easy to recognize.
+% 7I. Connect every X_i to its corresponding Y_i ===========================
+%
+% Each thin grey segment starts at a red measurement X_i and ends at its blue
+% model match Y_i. A long or unexpected segment can therefore be judged in
+% relation to the image plane, selected triangle, and the two normal arrows.
 correspondenceHandle = plot3(setupAxes, ...
     correspondenceX, correspondenceY, correspondenceZ, ...
     '-', 'Color', [0.25, 0.25, 0.25], 'LineWidth', 0.65, ...
     'DisplayName', 'X_i-to-Y_i correspondences');
 
+% 7J. Label the overview and explain its visual encoding ===================
 title(setupAxes, 'Complete tracked setup in ref', 'Interpreter', 'tex');
 legend(setupAxes, [ ...
     boneHandle; imageHandle; matchedFacesHandle; ...
@@ -417,9 +489,12 @@ legend(setupAxes, [ ...
     'FontSize', 8, ...
     'Interpreter', 'tex');
 
-% Copy the exact scene into the second axes, then focus its limits on the
-% measured and selected point sets. This avoids performing a second search or
-% accidentally drawing a result different from the full-setup panel.
+% 7K. Create a close-up without recomputing or redrawing the result =========
+%
+% Copy the completed overview scene into the second axes, then restrict its
+% limits around the X_i and Y_i point sets. Because the graphics objects are
+% copied, both panels show exactly the same search result; no second PD-tree
+% search is performed and no correspondence can accidentally differ.
 closeupAxes = nexttile(demoLayout, 2);
 copyobj(allchild(setupAxes), closeupAxes);
 hold(closeupAxes, 'on');
@@ -439,12 +514,16 @@ ylim(closeupAxes, [closeupMinimumRef(2), closeupMaximumRef(2)] + [-1, 1] * close
 zlim(closeupAxes, [closeupMinimumRef(3), closeupMaximumRef(3)] + [-1, 1] * closeupPaddingMm);
 title(closeupAxes, 'Close-up of all selected X_i-to-Y_i matches', 'Interpreter', 'tex');
 
+% 7L. Add the overall result summary and enable interactive inspection =====
+%
+% The shared title reports the number of displayed measurements, how many
+% distinct model faces they selected, and the mean match cost for this pose.
 sgtitle(demoFigure, sprintf( ...
     'P-IMLOP: %d measurements, %d selected model faces, mean E_{match} = %.3f', ...
     numberOfMeasurements, numel(uniqueMatchedFaceIndices), mean(EMatchValues)), ...
     'Interpreter', 'tex', ...
     'FontWeight', 'bold');
 
-% Enable interactive rotation so the user can inspect the ultrasound plane,
-% tibia surface, selected model points, and all normals from different views.
+% Rotation is enabled for inspecting overlapping points, surface triangles,
+% normals, and correspondence lines from different viewpoints.
 rotate3d(demoFigure, 'on');
