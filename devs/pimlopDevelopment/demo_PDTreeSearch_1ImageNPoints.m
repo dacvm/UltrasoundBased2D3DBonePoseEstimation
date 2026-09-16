@@ -192,6 +192,7 @@ YmatchesCT = repmat(emptyModelPoint, numberOfMeasurements, 1);
 EMatchValues = zeros(numberOfMeasurements, 1);
 euclideanDistancesMm = zeros(numberOfMeasurements, 1);
 orientationAnglesDeg = zeros(numberOfMeasurements, 1);
+projectedYNormals2DImage = zeros(numberOfMeasurements, 2);
 facesEvaluatedPerMeasurement = zeros(numberOfMeasurements, 1);
 nodesPrunedPerMeasurement = zeros(numberOfMeasurements, 1);
 searchSecondsPerMeasurement = zeros(numberOfMeasurements, 1);
@@ -223,6 +224,8 @@ for measurementNumber = 1:numberOfMeasurements
         currentSearchDetails.matchDetails.orientationAngleDeg;
     projectionIsDefined(measurementNumber) = ...
         currentSearchDetails.matchDetails.projectionIsDefined;
+    projectedYNormals2DImage(measurementNumber, :) = ...
+        currentSearchDetails.matchDetails.projectedYNormal2DImage.';
     facesEvaluatedPerMeasurement(measurementNumber) = ...
         currentSearchDetails.numberOfFacesEvaluated;
     nodesPrunedPerMeasurement(measurementNumber) = ...
@@ -294,7 +297,8 @@ fprintf('  Total / average search time        : %.3f s / %.3f ms per point\n\n',
 %   3. Mesh triangles containing at least one selected Y_i, drawn in cyan.
 %   4. Ultrasound measurements X_i and their normals, drawn in red.
 %   5. Most-likely model correspondences Y_i and their normals, in blue.
-%   6. A grey line joining every indexed pair X_i -> Y_i.
+%   6. Each model normal projected into the ultrasound plane, in green.
+%   7. A grey line joining every indexed pair X_i -> Y_i.
 %
 % The left panel will show the complete anatomical setup. The right panel
 % will show exactly the same scene, but zoomed around the correspondence
@@ -304,7 +308,8 @@ fprintf('  Total / average search time        : %.3f s / %.3f ms per point\n\n',
 % Before drawing these elements together, every displayed 3-D position and
 % direction must be expressed in ref. Measurement positions X_i already live
 % in ref. The CT mesh and selected Y_i must be moved from CT to ref, while the
-% measured 2-D normals must be lifted through the selected image's pose.
+% measured and projected 2-D normals must be lifted through the selected
+% image's pose.
 
 % 7A. Transform the CT-side geometry into the display frame ===============
 %
@@ -328,7 +333,7 @@ bonePointsRef   = applyRigidTransform(PsiCT.mesh.Points, T_CT_ref_candidate);
 YmatchPositionsRef = applyRigidTransform(YmatchPositionsCT, T_CT_ref_candidate);
 YmatchNormalsRef   = YmatchNormalsCT * R_CT_ref_candidate.';
 
-% 7B. Lift the measured 2-D normals into 3-D ref coordinates ===============
+% 7B. Lift the measured and projected normals into 3-D ref coordinates =====
 %
 % Each measured normal is stored as [n_x, n_y] in the local ultrasound-image
 % plane. Append a zero third component to embed it in that local 3-D frame:
@@ -343,6 +348,20 @@ YmatchNormalsRef   = YmatchNormalsCT * R_CT_ref_candidate.';
 R_image_ref = selectedPlane.T_image_ref(1:3, 1:3);
 measurementNormals3DRef = ...
     [X.normal2DImage, zeros(numberOfMeasurements, 1)] * R_image_ref.';
+
+% projectedYNormals2DImage contains the normalized projection of each chosen
+% model normal onto the local ultrasound image X-Y plane. These are the exact
+% projected directions used in the orientation part of E_match. As above,
+% append a zero image-Z component and rotate image -> ref for display:
+%
+%   projected n_ref = [projected n_x, projected n_y, 0] * R_image_ref'
+%
+% The resulting green directions lie in the tracked ultrasound plane. They
+% will be drawn from X_i, because that is where each projected model normal is
+% compared against the corresponding red measured normal.
+projectedYNormals3DRef = ...
+    [projectedYNormals2DImage, zeros(numberOfMeasurements, 1)] * ...
+    R_image_ref.';
 
 % 7C. Prepare display-only sizes and correspondence line geometry ==========
 %
@@ -465,7 +484,27 @@ yNormalHandle = quiver3(setupAxes, ...
     0, 'Color', [0.05, 0.30, 0.95], 'LineWidth', 0.8, ...
     'MaxHeadSize', 0.35, 'DisplayName', 'Selected model normals');
 
-% 7I. Connect every X_i to its corresponding Y_i ===========================
+% 7I. Draw the projected model-normal directions in green ==================
+%
+% The green arrow at X_i is the selected model normal after projection and
+% renormalization in the ultrasound image plane. It therefore lies exactly in
+% that plane. Comparing the green arrow with the red arrow at the same origin
+% reveals the angular disagreement that contributes to E_match.
+%
+% A projection is undefined when a model normal has essentially no component
+% inside the image plane. Draw only rows marked as defined by the same match
+% calculation used during the PD-tree search.
+projectedYNormalHandle = quiver3(setupAxes, ...
+    X.position3DRef(projectionIsDefined, 1), ...
+    X.position3DRef(projectionIsDefined, 2), ...
+    X.position3DRef(projectionIsDefined, 3), ...
+    projectedYNormals3DRef(projectionIsDefined, 1) * normalDisplayScale, ...
+    projectedYNormals3DRef(projectionIsDefined, 2) * normalDisplayScale, ...
+    projectedYNormals3DRef(projectionIsDefined, 3) * normalDisplayScale, ...
+    0, 'Color', [0.05, 0.70, 0.20], 'LineWidth', 1.0, ...
+    'MaxHeadSize', 0.35, 'DisplayName', 'Projected model normals');
+
+% 7J. Connect every X_i to its corresponding Y_i ===========================
 %
 % Each thin grey segment starts at a red measurement X_i and ends at its blue
 % model match Y_i. A long or unexpected segment can therefore be judged in
@@ -475,18 +514,18 @@ correspondenceHandle = plot3(setupAxes, ...
     '-', 'Color', [0.25, 0.25, 0.25], 'LineWidth', 0.65, ...
     'DisplayName', 'X_i-to-Y_i correspondences');
 
-% 7J. Label the overview and explain its visual encoding ===================
+% 7K. Label the overview and explain its visual encoding ===================
 title(setupAxes, 'Complete tracked setup in ref', 'Interpreter', 'tex');
 legend(setupAxes, [ ...
     boneHandle; imageHandle; matchedFacesHandle; ...
     xPointHandle; xNormalHandle; yPointHandle; yNormalHandle; ...
-    correspondenceHandle], ...
+    projectedYNormalHandle; correspondenceHandle], ...
     'Location', 'northwest', ...
     'NumColumns', 2, ...
     'FontSize', 8, ...
     'Interpreter', 'tex');
 
-% 7K. Create a close-up without recomputing or redrawing the result =========
+% 7L. Create a close-up without recomputing or redrawing the result =========
 %
 % Copy the completed overview scene into the second axes, then restrict its
 % limits around the X_i and Y_i point sets. Because the graphics objects are
@@ -511,7 +550,7 @@ ylim(closeupAxes, [closeupMinimumRef(2), closeupMaximumRef(2)] + [-1, 1] * close
 zlim(closeupAxes, [closeupMinimumRef(3), closeupMaximumRef(3)] + [-1, 1] * closeupPaddingMm);
 title(closeupAxes, 'Close-up of all selected X_i-to-Y_i matches', 'Interpreter', 'tex');
 
-% 7L. Add the overall result summary and enable interactive inspection =====
+% 7M. Add the overall result summary and enable interactive inspection =====
 %
 % The shared title reports the number of displayed measurements, how many
 % distinct model faces they selected, and the mean match cost for this pose.
