@@ -4,10 +4,11 @@
     "ultrasoundImageFileName": "validSnapshots_20260910_172849.mat",
     "boneSurfaceFilePath": "../../boneSegmentationProcess/outputs",
     "boneSurfaceFileName": "boneSurface_20260910_180217.mat",
-    "boneLandmarksFilePath": "../outputs",
-    "boneLandmarksFileName": "boneLandmarks_20260810_174351.mat"
+    "boneLandmarksFilePath": "../outputs/boneLandmarks",
+    "boneLandmarksFileName": "boneLandmarks_20260916_114006.mat"
   },
   "output": {
+    "saveResults": true,
     "coarseRegistrationOutputPath": "../outputs"
   }
 }

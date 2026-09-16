@@ -39,6 +39,7 @@ filename_ultrasoundimage = configuration.input.ultrasoundImageFileName;
 fullfile_ultrasoundimage = fullfile(filepath_ultrasoundimage, filename_ultrasoundimage);
 % Grab the output path
 boneSurface3DOutputPath  = configuration.output.boneSurface3DOutputPath;
+saveResult               = configuration.output.saveResult;
 
 %% PREPARE THE REQUIRED FUNCTION PATHS
 
@@ -322,14 +323,17 @@ fprintf('Recovered %d bone-surface point(s) from %d record(s) in ref.\n', totalR
 
 %% SAVE THE RECOVERED BONE SURFACES
 
-% Use the same timestamped filename convention as the extraction step. Save
-% in the configured output directory while the original extraction metadata
-% stays unchanged.
-recoveryTimestamp = char(datetime('now', 'Format', 'yyyyMMdd_HHmmss'));
-recoveredSurfaceOutputFilePath = fullfile(boneSurface3DOutputPath, ['boneSurface_', recoveryTimestamp, '.mat']);
+% Keep the recovered surfaces and metadata in the workspace for every run,
+% but only create a new MAT-file when the configuration enables saving.
+if saveResult
+    % Use the same timestamped filename convention as the extraction step. Save
+    % in the configured output directory while the original extraction metadata
+    % stays unchanged.
+    recoveryTimestamp = char(datetime('now', 'Format', 'yyyyMMdd_HHmmss'));
+    recoveredSurfaceOutputFilePath = fullfile(boneSurface3DOutputPath, ['boneSurface_', recoveryTimestamp, '.mat']);
 
-% surfaceResults now contains the recovered reference-frame coordinates. Keep
-% extractionMetadata with it so the processing provenance is not separated from
-% the numerical result.
-save(recoveredSurfaceOutputFilePath, 'surfaceResults', 'extractionMetadata', '-v7.3');
-fprintf('Saved recovered bone surfaces to:\n%s\n', recoveredSurfaceOutputFilePath);
+    % surfaceResults contains the recovered reference-frame coordinates. Keep
+    % extractionMetadata beside it so provenance stays with the numerical result.
+    save(recoveredSurfaceOutputFilePath, 'surfaceResults', 'extractionMetadata', '-v7.3');
+    fprintf('Saved recovered bone surfaces to:\n%s\n', recoveredSurfaceOutputFilePath);
+end
