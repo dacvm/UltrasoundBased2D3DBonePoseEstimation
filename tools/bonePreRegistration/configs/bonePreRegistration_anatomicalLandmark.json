@@ -4,14 +4,14 @@
     "ctPostProcessedFileName": "kneephantom_bones_and_bonepins.mat"
   },
   "output": {
-    "boneLandmarkOutputPath": "../outputs"
+    "boneLandmarkOutputPath": "../outputs/boneLandmarks"
   },
   "parameters": {
     "kneeSide": "left",
     "femur": {
       "femur_epicondyleProximalOffset_mm": 0,
       "femur_epicondyleAnteriorAngleOffset_deg": 20,
-      "femur_shaftProximalOffset_mm": 120,
+      "femur_shaftProximalOffset_mm": 40,
       "femur_shaftAnteriorAngleOffset_deg": 0
     },
     "tibia": {

@@ -186,6 +186,7 @@ Edit `tools/bonePreRegistration/configs/bonePreRegistration_3Dsurface.json`:
 | `input.boneLandmarksFilePath` | Directory containing the Part 1 landmark MAT-file. |
 | `input.boneLandmarksFileName` | Landmark MAT-file name only. |
 | `output.coarseRegistrationOutputPath` | Directory in which the coarse-registration MAT-file is saved. |
+| `output.saveResults` | Boolean that controls whether the coarse-registration MAT-file is saved. |
 
 Paths may be absolute or relative. Relative paths are resolved from the directory containing `bonePreRegistration_3Dsurface.json`. Missing output directories are created automatically; missing input directories or files stop the workflow.
 

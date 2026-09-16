@@ -34,6 +34,7 @@ filename_bonesurface         = configuration.input.boneSurfaceFileName;
 filepath_bonelandmarks       = configuration.input.boneLandmarksFilePath;
 filename_bonelandmarks       = configuration.input.boneLandmarksFileName;
 coarseRegistrationOutputPath = configuration.output.coarseRegistrationOutputPath;
+saveResults                  = configuration.output.saveResults;
 
 %% REQUIRED PATH
 
@@ -800,20 +801,9 @@ drawnow;
 
 %% SAVE THE COARSE REGISTRATION
 
-% Give each run a timestamped MAT filename so results from different input
-% configurations remain separate inside the configured output directory.
-outputTimestamp = char(datetime('now', 'Format', 'yyyyMMdd_HHmmss'));
-coarseRegistrationOutputFilePath = fullfile( coarseRegistrationOutputPath, ['coarseRegistration_', outputTimestamp, '.mat']);
-
-% Avoid silently replacing a result if the workflow is run twice within the
-% same second and therefore produces the same timestamped filename.
-if isfile(coarseRegistrationOutputFilePath)
-    error('bonePreRegistration:OutputFileAlreadyExists', ...
-          'Coarse-registration output already exists: %s', coarseRegistrationOutputFilePath);
-end
-
-% Record each input file and the variables loaded from it. Keeping these
-% fields flat makes the saved provenance easy to inspect and extend.
+% Record each input file and the variables loaded from it. Build this
+% structure for every run so it remains available in the workspace even when
+% saving is disabled.
 coarseRegistrationMetadata = struct();
 coarseRegistrationMetadata.createdAt                    = char(datetime('now'));
 coarseRegistrationMetadata.sourceUltrasoundFile         = ultrasoundFilePath;
@@ -826,10 +816,27 @@ coarseRegistrationMetadata.sourceBoneLandmarksFile      = bonelandmarksFullPath;
 coarseRegistrationMetadata.sourceBoneLandmarksVariables = ["landmarks", "intersectionDiagnostics"];
 coarseRegistrationMetadata.configurationFile            = configurationFilePath;
 
-% Save the result and its provenance together. Version 7.3 supports the
-% registered meshes stored inside coarseRegistration.
-save(coarseRegistrationOutputFilePath, 'coarseRegistration', 'coarseRegistrationMetadata', '-v7.3');
+% Only create a result file when the configuration explicitly enables it.
+% This lets users inspect the figures and workspace without producing a new
+% timestamped MAT file.
+if saveResults
+    % Give each saved run a timestamped MAT filename so results from different
+    % input configurations remain separate inside the configured output directory.
+    outputTimestamp = char(datetime('now', 'Format', 'yyyyMMdd_HHmmss'));
+    coarseRegistrationOutputFilePath = fullfile( coarseRegistrationOutputPath, ['coarseRegistration_', outputTimestamp, '.mat']);
 
-% Print the resolved path so the generated artifact is easy to locate after
-% the figures and processing steps have completed.
-fprintf('Saved coarse-registration output to:\n%s\n', coarseRegistrationOutputFilePath);
+    % Avoid silently replacing a result if the workflow is run twice within the
+    % same second and therefore produces the same timestamped filename.
+    if isfile(coarseRegistrationOutputFilePath)
+        error('bonePreRegistration:OutputFileAlreadyExists', ...
+              'Coarse-registration output already exists: %s', coarseRegistrationOutputFilePath);
+    end
+
+    % Save the result and its provenance together. Version 7.3 supports the
+    % registered meshes stored inside coarseRegistration.
+    save(coarseRegistrationOutputFilePath, 'coarseRegistration', 'coarseRegistrationMetadata', '-v7.3');
+
+    % Print the resolved path so the generated artifact is easy to locate after
+    % the figures and processing steps have completed.
+    fprintf('Saved coarse-registration output to:\n%s\n', coarseRegistrationOutputFilePath);
+end
