@@ -1,6 +1,6 @@
 {
   "input": {
-    "acquisitionDirectory": "D:/Documents/BELANDA/SonoSkin/data/dennis_data/2026-09-15_phantomstaticagain/measurement_02",
+    "acquisitionDirectory": "D:/Documents/BELANDA/SonoSkin/data/dennis_data/2026-09-15_phantomstaticagain/measurement_01",
     "fcalConfigFilePath": "../../../data",
     "fcalConfigFileName": "PlusDeviceSet_fCal_Epiphan_NDIPolaris_UTNML__20260915_141242.xml",
     "ctPostProcessedMatFilePath": "../../ctkneePostProcess/outputs/kneephantom",
@@ -10,7 +10,7 @@
     "F": "PRO",
     "T": "DIS"
   },
-  "bonePoseMode": "perDataRow",
+  "bonePoseMode": "average",
   "output": {
     "ultrasoundIntersectionOutputPath": "../outputs"
   }

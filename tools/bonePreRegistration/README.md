@@ -239,6 +239,8 @@ coarseRegistration(1..B)
 +-- T_bone_ref_init
 +-- boneMeshRef_init
 +-- T_delta_ref_icp
++-- T_bone_ref_icp
++-- boneMeshRef_icp
 +-- icpRMSE_mm
 +-- icpStatus
 +-- T_CT_ref_est
@@ -269,6 +271,7 @@ coarseRegistrationMetadata
 | `status` | `registered` means a rigid transform was estimated successfully. A value beginning with `skipped:` explains why the bone was retained without a transform, currently because it had fewer than three non-collinear correspondence points. |
 | `T_CT_ref_init`, `T_bone_ref_init`, `boneMeshRef_init` | Initialization result produced from the anatomical-region correspondences before ICP refinement. |
 | `T_delta_ref_icp` | Incremental 4-by-4 ICP correction applied in `ref` after initialization. The final composition is `T_delta_ref_icp * T_CT_ref_init`. |
+| `T_bone_ref_icp`, `boneMeshRef_icp` | Anatomical bone pose and transformed mesh immediately after the ICP correction. They mirror the initialization fields and contain the same values as the corresponding final `_est` fields. |
 | `icpRMSE_mm` | Final point-to-point RMSE reported by `pcregistericp`. It is `NaN` when ICP fails and the initialization is used instead. |
 | `icpStatus` | `completed` for a successful ICP call, or a fallback message containing the reason that ICP failed. |
 | `T_CT_ref_est` | Final 4-by-4 rigid transform from CT coordinates to the common reference frame after initialization and ICP. Apply it as `p_ref = T_CT_ref_est * p_CT` for homogeneous column-vector points. |

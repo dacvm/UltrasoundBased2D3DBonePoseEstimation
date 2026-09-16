@@ -8,7 +8,7 @@
     "boneLandmarksFileName": "boneLandmarks_20260916_114006.mat"
   },
   "output": {
-    "saveResults": false,
+    "saveResults": true,
     "coarseRegistrationOutputPath": "../outputs"
   }
 }
