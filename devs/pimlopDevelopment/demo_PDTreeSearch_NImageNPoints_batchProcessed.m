@@ -45,7 +45,7 @@ load(setupFilePath, 'data');
 % Keep the experiment controls together. Fraction 1 uses all valid points;
 % 0.3 keeps approximately 30 percent independently within every image.
 % The shared covariance remains expressed in each image's LOCAL axes.
-measurementSubsampleFraction = 1;
+measurementSubsampleFraction = 0.5;
 positionStandardDeviationImageMm = [1.0; 1.0; 1.5];
 positionCovarianceImage = diag(positionStandardDeviationImageMm .^ 2);
 kappa = 50;
@@ -77,28 +77,34 @@ emptyResult = struct('imageIndex',0,'status',"pending",'skipReason',"", ...
     'EMatchValues',[],'batchSearchDetails',struct(),'totalSearchSeconds',0);
 resultsByImage = repmat(emptyResult,numberOfImages,1);
 
+% Loop for all image planes
 for planeIndex = 1:numberOfImages
+
+    % Get the current selected image plane
     selectedPlane              = data.imagePlanesRef(planeIndex);
     selectedSurfaceMeasurement = data.boneSurfaceMeasurements(planeIndex);
     resultsByImage(planeIndex).imageIndex = planeIndex;
 
     % This demo uses the tibia model. Reject another bone association rather
     % than silently searching that image's measurements against the tibia.
-    if ~isfield(selectedPlane,'bone') || ~isfield(selectedSurfaceMeasurement,'bone') ...
+    if ~isfield(selectedPlane,'bone') ...
+            || ~isfield(selectedSurfaceMeasurement,'bone') ...
             || ~strcmpi(string(selectedPlane.bone),"T") ...
             || ~strcmpi(string(selectedSurfaceMeasurement.bone),"T")
         error('demo_PDTreeSearch_NImageNPoints_batchProcessed:BoneMismatch', ...
-            'Image %d and its measurements must both be associated with tibia (T).',planeIndex);
+            'Image %d and its measurements must both be associated with tibia (T).', planeIndex);
     end
 
     % A valid rigid image pose is needed even if its measurements are empty,
     % because all image planes will still be shown in the final overview.
     T_image_ref = selectedPlane.T_image_ref;
-    if ~isequal(size(T_image_ref),[4 4]) || any(~isfinite(T_image_ref),'all') ...
+    if ~isequal(size(T_image_ref),[4 4]) ...
+            || any(~isfinite(T_image_ref),'all') ...
             || norm(T_image_ref(4,:)-[0 0 0 1]) > 1e-10 ...
             || norm(T_image_ref(1:3,1:3).'*T_image_ref(1:3,1:3)-eye(3),'fro') > 1e-6 ...
             || abs(det(T_image_ref(1:3,1:3))-1) > 1e-6
-        error('demo_PDTreeSearch_NImageNPoints_batchProcessed:InvalidImagePose','Image %d has an invalid rigid pose.',planeIndex);
+        error('demo_PDTreeSearch_NImageNPoints_batchProcessed:InvalidImagePose', ...
+              'Image %d has an invalid rigid pose.', planeIndex);
     end
 
     % Preserve the original extraction identifiers as metadata, not as a
@@ -119,18 +125,19 @@ for planeIndex = 1:numberOfImages
         'surfaceNormalMask'};
     if ~all(isfield(selectedSurfaceMeasurement, requiredMeasurementFields))
         error('demo_PDTreeSearch_NImageNPoints_batchProcessed:MissingMeasurementFields', ...
-              'Image %d lacks positions, normals, or a normal-validity mask.',planeIndex);
+              'Image %d lacks positions, normals, or a normal-validity mask.', planeIndex);
     end
 
-    allMeasurementPositionsRef = double(selectedSurfaceMeasurement.surfaceCoordinatesXYZRef);
+    allMeasurementPositionsRef   = double(selectedSurfaceMeasurement.surfaceCoordinatesXYZRef);
     allMeasurementNormals2DImage = double(selectedSurfaceMeasurement.surfaceNormalXY);
-    surfaceNormalMask = logical(selectedSurfaceMeasurement.surfaceNormalMask(:));
+    surfaceNormalMask            = logical(selectedSurfaceMeasurement.surfaceNormalMask(:));
 
     % An extraction with no surface may store plain [] instead of 0-by-3
     % positions and 0-by-2 normals. Give that genuinely empty record its
     % expected shapes so it reaches the documented skip path below. A
     % partially missing record still fails the row-alignment check.
-    if isempty(allMeasurementPositionsRef) && isempty(allMeasurementNormals2DImage) ...
+    if isempty(allMeasurementPositionsRef) ...
+            && isempty(allMeasurementNormals2DImage) ...
             && isempty(surfaceNormalMask)
         allMeasurementPositionsRef = zeros(0,3);
         allMeasurementNormals2DImage = zeros(0,2);
@@ -140,12 +147,12 @@ for planeIndex = 1:numberOfImages
     % extracted surface sample. A row-count mismatch would destroy the X_i-to-Y_i
     % correspondence that the later registration cost depends upon.
     numberOfStoredMeasurements = size(allMeasurementPositionsRef, 1);
-    if size(allMeasurementPositionsRef, 2) ~= 3 || ...
-            size(allMeasurementNormals2DImage, 2) ~= 2 || ...
-            size(allMeasurementNormals2DImage, 1) ~= numberOfStoredMeasurements || ...
-            numel(surfaceNormalMask) ~= numberOfStoredMeasurements
+    if size(allMeasurementPositionsRef, 2) ~= 3 ...
+            || size(allMeasurementNormals2DImage, 2) ~= 2 ...
+            || size(allMeasurementNormals2DImage, 1) ~= numberOfStoredMeasurements ...
+            || numel(surfaceNormalMask) ~= numberOfStoredMeasurements
         error('demo_PDTreeSearch_NImageNPoints_batchProcessed:InconsistentMeasurementSizes', ...
-              'Image %d has inconsistent position, normal, or mask dimensions.',planeIndex);
+              'Image %d has inconsistent position, normal, or mask dimensions.', planeIndex);
     end
 
     validMeasurementIndices = find(surfaceNormalMask);
@@ -160,12 +167,12 @@ for planeIndex = 1:numberOfImages
     % Keep only measurements whose normal estimator marked them as valid. Check
     % the retained values instead of silently discarding unexpected nonfinite or
     % zero normals, because such data would make E_match impossible to interpret.
-    measurementPositionsRef = allMeasurementPositionsRef(validMeasurementIndices, :);
+    measurementPositionsRef   = allMeasurementPositionsRef(validMeasurementIndices, :);
     measurementNormals2DImage = allMeasurementNormals2DImage(validMeasurementIndices, :);
-    measurementNormalLengths = vecnorm(measurementNormals2DImage, 2, 2);
-    if any(~isfinite(measurementPositionsRef), 'all') || ...
-            any(~isfinite(measurementNormals2DImage), 'all') || ...
-            any(measurementNormalLengths <= 1e-12)
+    measurementNormalLengths  = vecnorm(measurementNormals2DImage, 2, 2);
+    if any(~isfinite(measurementPositionsRef), 'all') ...
+            || any(~isfinite(measurementNormals2DImage), 'all') ...
+            || any(measurementNormalLengths <= 1e-12)
         error('demo_PDTreeSearch_NImageNPoints_batchProcessed:InvalidMeasurement', ...
               'Image %d has an invalid position or normal marked as valid.',planeIndex);
     end
@@ -194,8 +201,7 @@ for planeIndex = 1:numberOfImages
     else
         % With two or more retained samples, LINSPACE includes both endpoints and
         % distributes every intermediate selection across the full valid curve.
-        subsampleIndicesWithinValidSet = round( ...
-            linspace(1, numberOfValidMeasurementsBeforeSubsampling, numberOfMeasurementsToKeep)).';
+        subsampleIndicesWithinValidSet = round(linspace(1, numberOfValidMeasurementsBeforeSubsampling, numberOfMeasurementsToKeep)).';
     end
 
     % Apply exactly the same retained rows to positions, normals, and original
@@ -223,11 +229,11 @@ for planeIndex = 1:numberOfImages
     resultsByImage(planeIndex).status = "ready";
 end
 
-processedImageMask = [resultsByImage.status] == "ready";
+processedImageMask    = [resultsByImage.status] == "ready";
 processedPlaneIndices = find(processedImageMask);
 if isempty(processedPlaneIndices)
     error('demo_PDTreeSearch_NImageNPoints_batchProcessed:NoValidMeasurements', ...
-        'No image contains a measurement with a valid normal.');
+          'No image contains a measurement with a valid normal.');
 end
 
 
@@ -254,7 +260,8 @@ PsiCT.pdTree = buildPIMLOPPDTree_batchedProcess(PsiCT.mesh, PsiCT.validFaceMask)
 
 % Use the saved pre-registration as the one candidate pose evaluated here.
 T_CT_ref_candidate = data.T_CT_ref_initial;
-if ~isequal(size(T_CT_ref_candidate),[4 4]) || any(~isfinite(T_CT_ref_candidate),'all') ...
+if ~isequal(size(T_CT_ref_candidate),[4 4]) ...
+        || any(~isfinite(T_CT_ref_candidate),'all') ...
         || norm(T_CT_ref_candidate(4,:)-[0 0 0 1]) > 1e-10 ...
         || norm(T_CT_ref_candidate(1:3,1:3).'*T_CT_ref_candidate(1:3,1:3)-eye(3),'fro') > 1e-6 ...
         || abs(det(T_CT_ref_candidate(1:3,1:3))-1) > 1e-6
@@ -279,7 +286,7 @@ for planeIndex = processedPlaneIndices
     R_image_CT = T_image_CT(1:3,1:3);
     measurementPositionsCT = applyRigidTransform(X.position3DRef,T_ref_CT_candidate);
     XqueriesCT = struct();
-    XqueriesCT.position3D = measurementPositionsCT;
+    XqueriesCT.position3D    = measurementPositionsCT;
     XqueriesCT.normal2DImage = X.normal2DImage;
 
     resultsByImage(planeIndex).T_image_CT = T_image_CT;
@@ -299,11 +306,10 @@ for planeIndex = processedPlaneIndices
     XqueriesCT = resultsByImage(planeIndex).XqueriesCT;
     R_image_CT = resultsByImage(planeIndex).R_image_CT;
     numberOfMeasurements = resultsByImage(planeIndex).numberOfMeasurements;
-    fprintf('Searching image %d / %d: %d retained measurements...\n', ...
-        planeIndex,numberOfImages,numberOfMeasurements);
+    fprintf('Searching image %d / %d: %d retained measurements...\n', planeIndex,numberOfImages,numberOfMeasurements);
+
     allSearchTimer = tic;
-    [YmatchesCT,EMatchValues,batchSearchDetails] = searchPDTree_batchedProcess( ...
-        XqueriesCT,PsiCT,R_image_CT,positionCovarianceImage,kappa,searchOptions);
+    [YmatchesCT,EMatchValues,batchSearchDetails] = searchPDTree_batchedProcess(XqueriesCT,PsiCT,R_image_CT,positionCovarianceImage,kappa,searchOptions);
     totalSearchSeconds = toc(allSearchTimer);
 
     resultsByImage(planeIndex).YmatchesCT = YmatchesCT;
@@ -322,8 +328,7 @@ X = struct();
 X.position3DRef = vertcat(Xsets.position3DRef);
 X.normal2DImage = vertcat(Xsets.normal2DImage);
 X.sourcePointIndices = vertcat(Xsets.sourcePointIndices);
-X.imageIndex = repelem(processedPlaneIndices(:), ...
-    [resultsByImage(processedImageMask).numberOfMeasurements].');
+X.imageIndex = repelem(processedPlaneIndices(:), [resultsByImage(processedImageMask).numberOfMeasurements].');
 YmatchesCT = struct();
 YmatchesCT.position3D = vertcat(Ysets.position3D);
 YmatchesCT.normal3D = vertcat(Ysets.normal3D);
@@ -334,8 +339,7 @@ numberOfMeasurements = size(X.position3DRef,1);
 % The combined 2D normals retain X.imageIndex because their rows belong to
 % different LOCAL frames. The explicit index table is convenient for tracing
 % any plotted pair to data.boneSurfaceMeasurements(imageIndex)'s source row.
-correspondenceIndex = table(X.imageIndex,X.sourcePointIndices, ...
-    'VariableNames',{'imageIndex','sourcePointIndex'});
+correspondenceIndex = table(X.imageIndex,X.sourcePointIndices, 'VariableNames',{'imageIndex','sourcePointIndex'});
 searchDetailsByImage = [resultsByImage(processedImageMask).batchSearchDetails];
 matchDetailsByImage = [searchDetailsByImage.matchDetails];
 euclideanDistancesMm = vertcat(matchDetailsByImage.euclideanDistanceMm);
@@ -371,22 +375,22 @@ end
 % Global means are over POINTS, not means of image means. An image containing
 % more retained measurements contributes more rows. The summed cost describes
 % this fixed pose and selected point set; subsampling changes that sum's scale.
-numberOfProcessedImages = nnz(processedImageMask);
-numberOfSkippedImages = numberOfImages-numberOfProcessedImages;
+numberOfProcessedImages      = nnz(processedImageMask);
+numberOfSkippedImages        = numberOfImages-numberOfProcessedImages;
 numberOfValidMeasurementsBeforeSubsampling = sum([resultsByImage.numberOfValidMeasurementsBeforeSubsampling]);
-totalSearchSeconds = sum([resultsByImage.totalSearchSeconds]);
-averageFacesEvaluated = mean(facesEvaluatedPerMeasurement);
+totalSearchSeconds           = sum([resultsByImage.totalSearchSeconds]);
+averageFacesEvaluated        = mean(facesEvaluatedPerMeasurement);
 averageFacesEvaluatedPercent = 100*averageFacesEvaluated/PsiCT.pdTree.numberOfDatums;
 fprintf('\n  Images processed / skipped       : %d / %d\n',numberOfProcessedImages,numberOfSkippedImages);
 fprintf('  Valid / retained measurements    : %d / %d (fraction %.3f)\n', ...
-    numberOfValidMeasurementsBeforeSubsampling,numberOfMeasurements,measurementSubsampleFraction);
+    numberOfValidMeasurementsBeforeSubsampling, numberOfMeasurements, measurementSubsampleFraction);
 fprintf('  Valid model triangles            : %d\n',PsiCT.pdTree.numberOfDatums);
-fprintf('  PD-tree nodes / leaves           : %d / %d\n',PsiCT.pdTree.numberOfNodes,PsiCT.pdTree.numberOfLeaves);
+fprintf('  PD-tree nodes / leaves           : %d / %d\n',PsiCT.pdTree.numberOfNodes, PsiCT.pdTree.numberOfLeaves);
 fprintf('  Unique selected model faces      : %d\n',numel(uniqueMatchedFaceIndices));
-fprintf('  X-to-Y distance, mean / max       : %.3f / %.3f mm\n',mean(euclideanDistancesMm),max(euclideanDistancesMm));
-fprintf('  Normal angle, mean / max          : %.2f / %.2f deg\n',mean(orientationAnglesDeg),max(orientationAnglesDeg));
-fprintf('  E_match, total / mean / max       : %.3f / %.3f / %.3f\n',sum(EMatchValues),mean(EMatchValues),max(EMatchValues));
-fprintf('  Average faces tested per point   : %.1f (%.2f%% of model)\n',averageFacesEvaluated,averageFacesEvaluatedPercent);
+fprintf('  X-to-Y distance, mean / max       : %.3f / %.3f mm\n',mean(euclideanDistancesMm), max(euclideanDistancesMm));
+fprintf('  Normal angle, mean / max          : %.2f / %.2f deg\n', mean(orientationAnglesDeg), max(orientationAnglesDeg));
+fprintf('  E_match, total / mean / max       : %.3f / %.3f / %.3f\n', sum(EMatchValues), mean(EMatchValues), max(EMatchValues));
+fprintf('  Average faces tested per point   : %.1f (%.2f%% of model)\n', averageFacesEvaluated, averageFacesEvaluatedPercent);
 fprintf('  Average nodes pruned per point   : %.1f\n',mean(nodesPrunedPerMeasurement));
 fprintf('  Defined projected model normals  : %d / %d\n',nnz(projectionIsDefined),numberOfMeasurements);
 fprintf('  Total / amortized search time    : %.3f s / %.3f ms per point\n\n', ...
