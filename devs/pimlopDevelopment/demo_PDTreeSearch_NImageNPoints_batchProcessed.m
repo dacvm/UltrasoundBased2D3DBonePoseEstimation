@@ -252,43 +252,113 @@ PsiCT.pdTree = buildPIMLOPPDTree_batchedProcess(PsiCT.mesh, PsiCT.validFaceMask)
 
 %% 4. EXPRESS ALL QUERIES IN THE FIXED CT SEARCH FRAME
 %
-% The ultrasound measurements begin in ref while PsiCT and its tree are in
-% CT. The search therefore uses the inverse candidate bone pose to transform
-% only the query positions into CT. This does not undo the pre-registration:
-% T_CT_ref_candidate still describes where the CT bone lies in ref, and this
-% demo simply evaluates that candidate pose from the model's fixed frame.
+% The PD-tree was built once in the CT coordinate frame, so every query must
+% also be expressed in CT before the search can begin. There are two related
+% coordinate-frame paths in this section:
+%
+%   Measurement positions:  ref   --T_ref_CT_candidate--> CT
+%
+%   Image orientation:      image --T_image_ref---------> ref
+%                                 --T_ref_CT_candidate--> CT
+%
+% The second path is needed because each 2-D measurement normal is stored in
+% its own ultrasound-image coordinates. Later, the search uses R_image_CT to
+% relate that local 2-D direction to candidate surface normals from the CT
+% model.
 
-% Use the saved pre-registration as the one candidate pose evaluated here.
+% 4A. Select and validate the candidate bone pose =========================
+%
+% T_CT_ref_candidate maps a point from CT into ref:
+%
+%   p_ref = T_CT_ref_candidate * p_CT
+%
+% In this demonstration, the saved pre-registration is the single candidate
+% pose being evaluated. During pose optimization, the optimizer will provide
+% a different T_CT_ref_candidate at every cost-function evaluation.
 T_CT_ref_candidate = data.T_CT_ref_initial;
-if ~isequal(size(T_CT_ref_candidate),[4 4]) ...
-        || any(~isfinite(T_CT_ref_candidate),'all') ...
-        || norm(T_CT_ref_candidate(4,:)-[0 0 0 1]) > 1e-10 ...
-        || norm(T_CT_ref_candidate(1:3,1:3).'*T_CT_ref_candidate(1:3,1:3)-eye(3),'fro') > 1e-6 ...
-        || abs(det(T_CT_ref_candidate(1:3,1:3))-1) > 1e-6
-    error('demo_PDTreeSearch_NImageNPoints_batchProcessed:InvalidBonePose','The candidate bone pose must be a finite rigid transform.');
+
+candidatePoseHasExpectedSize = isequal(size(T_CT_ref_candidate), [4 4]);
+if ~candidatePoseHasExpectedSize
+    error('demo_PDTreeSearch_NImageNPoints_batchProcessed:InvalidBonePose', ...
+          'The candidate bone pose must be a finite rigid transform.');
 end
 
-% For a rigid transform [R,t], the inverse is [R',-R'*t]. Construct it
-% explicitly so the source and target frames remain clear in the code.
 R_CT_ref_candidate = T_CT_ref_candidate(1:3, 1:3);
 t_CT_ref_candidate = T_CT_ref_candidate(1:3, 4);
+
+candidatePoseIsFinite              = all(isfinite(T_CT_ref_candidate), 'all');
+candidatePoseHasHomogeneousLastRow = norm(T_CT_ref_candidate(4,:) - [0 0 0 1]) <= 1e-10;
+candidateRotationIsOrthonormal     = norm(R_CT_ref_candidate.' * R_CT_ref_candidate - eye(3), 'fro') <= 1e-6;
+candidateRotationIsProper          = abs(det(R_CT_ref_candidate) - 1) <= 1e-6;
+if ~candidatePoseIsFinite ...
+        || ~candidatePoseHasHomogeneousLastRow ...
+        || ~candidateRotationIsOrthonormal ...
+        || ~candidateRotationIsProper
+    error('demo_PDTreeSearch_NImageNPoints_batchProcessed:InvalidBonePose', ...
+          'The candidate bone pose must be a finite rigid transform.');
+end
+
+% 4B. Invert the candidate pose once for all ultrasound images ============
+%
+% The model pose above maps CT -> ref, but the fixed PD-tree requires the
+% opposite direction, ref -> CT. For a rigid transform [R,t], its inverse is
+% [R', -R'*t]. We construct that inverse explicitly so the direction of the
+% transformation remains visible in the variable name and in the code:
+%
+%   p_CT = T_ref_CT_candidate * p_ref
+%
+% This inverse is shared by every ultrasound image because all measurements
+% use the same ref frame and are evaluated against the same candidate bone
+% pose.
 T_ref_CT_candidate = eye(4);
 T_ref_CT_candidate(1:3, 1:3) = R_CT_ref_candidate.';
 T_ref_CT_candidate(1:3, 4)   = -R_CT_ref_candidate.' * t_CT_ref_candidate;
 
-% Only the image-specific part of Section 4 moves into a loop. The inverse
-% bone pose above is shared. Every R_image_CT below describes a different
-% local image frame relative to the same fixed CT model.
+% 4C. Propagate every image and its measurements into CT ==================
+%
+% Only the image-specific work belongs inside this loop. Each image has its
+% own pose in ref, while T_ref_CT_candidate is common to all images.
 for planeIndex = processedPlaneIndices
+
+    % Retrieve this image plane and the measurement set prepared from it.
+    % X.position3DRef is already expressed in ref. X.normal2DImage remains a
+    % 2-D direction in the local coordinate system of this ultrasound image.
     selectedPlane = data.imagePlanesRef(planeIndex);
     X = resultsByImage(planeIndex).X;
-    T_image_CT = T_ref_CT_candidate * selectedPlane.T_image_ref;
-    R_image_CT = T_image_CT(1:3,1:3);
-    measurementPositionsCT = applyRigidTransform(X.position3DRef,T_ref_CT_candidate);
+
+    % ----- Propagate the ultrasound-image frame into CT -----------------
+    % T_image_ref maps image -> ref, and T_ref_CT_candidate maps ref -> CT.
+    % Matrix transformations compose from right to left, so their product is
+    %
+    %   p_CT = T_ref_CT_candidate * T_image_ref * p_image
+    %        = T_image_CT * p_image.
+    %
+    % This two-step propagation is the important connection between an
+    % image-local normal and the fixed CT model. The translation is relevant
+    % to image points, while the rotation R_image_CT is the part later needed
+    % to compare directions and normals.
+    T_image_ref = selectedPlane.T_image_ref;
+    T_image_CT  = T_ref_CT_candidate * T_image_ref;
+    R_image_CT  = T_image_CT(1:3,1:3);
+
+    % ----- Transform the measurement positions from ref into CT --------
+    % These points have already been converted from image coordinates to ref
+    % earlier in the script. Therefore, apply only the remaining ref -> CT
+    % transform here. Applying T_image_CT would incorrectly repeat the
+    % image -> ref step.
+    measurementPositionsCT = applyRigidTransform(X.position3DRef, T_ref_CT_candidate);
+
+    % ----- Assemble the CT-frame query batch ----------------------------
+    % Query positions are now in the PD-tree's CT frame. The measured normal
+    % components deliberately stay in their original 2-D image coordinates;
+    % searchPDTreePIMLOP_batchedProcess receives R_image_CT separately and
+    % uses it to perform the required orientation comparison consistently.
     XqueriesCT = struct();
     XqueriesCT.position3D    = measurementPositionsCT;
     XqueriesCT.normal2DImage = X.normal2DImage;
 
+    % Save all image-specific CT-frame quantities together. Section 5 can
+    % then perform the batched search without repeating any transformations.
     resultsByImage(planeIndex).T_image_CT = T_image_CT;
     resultsByImage(planeIndex).R_image_CT = R_image_CT;
     resultsByImage(planeIndex).XqueriesCT = XqueriesCT;
@@ -297,21 +367,62 @@ end
 
 %% 5. FIND ONE MOST-LIKELY MODEL POINT Y_i FOR EVERY X_i IN EACH IMAGE
 
-% The function calls are exactly those of the single-image batched demo.
-% What changes is which XqueriesCT and R_image_CT enter each call. PsiCT,
-% kappa, and the LOCAL image covariance are reused across all image groups.
-% Do not concatenate all queries into one search with a single R_image_CT:
-% that would incorrectly use the same image plane to project every normal.
+% 5A. Search each ultrasound image with its own orientation ================
+%
+% All query positions and all model triangles are now expressed in CT, but
+% the measured normals are still 2-D directions in their respective image
+% frames. Consequently, each image must be searched with its own R_image_CT.
+% That rotation tells the search how this particular ultrasound image is
+% oriented relative to the fixed CT model.
+%
+% This is why the measurements are processed one image batch at a time. If
+% measurements from every image were concatenated first and searched using
+% one R_image_CT, normals from the other images would be projected using the
+% wrong image-plane orientation. Their orientation costs, and therefore
+% possibly their selected correspondences, would be incorrect.
+%
+% The following quantities do remain common to every image batch:
+%
+%   PsiCT                  - the fixed CT mesh and its fixed PD-tree
+%   positionCovarianceImage - positional uncertainty defined in image axes
+%   kappa                  - concentration of the measured normal direction
+%   searchOptions          - numerical and traversal settings
+%
+% The loop changes only XqueriesCT and R_image_CT for the current image.
 for planeIndex = processedPlaneIndices
+
+    % ----- Retrieve the current image-specific search inputs ------------
+    % XqueriesCT.position3D is already in CT. Its normal2DImage rows still
+    % belong to this image's local 2-D frame. R_image_CT is therefore the
+    % required bridge between those local directions and the CT-frame model
+    % normals evaluated by the correspondence search.
     XqueriesCT = resultsByImage(planeIndex).XqueriesCT;
     R_image_CT = resultsByImage(planeIndex).R_image_CT;
     numberOfMeasurements = resultsByImage(planeIndex).numberOfMeasurements;
-    fprintf('Searching image %d / %d: %d retained measurements...\n', planeIndex,numberOfImages,numberOfMeasurements);
 
+    % Give the user visible progress because a separate batched PD-tree
+    % traversal is performed for every retained ultrasound image.
+    fprintf('Searching image %d / %d: %d retained measurements...\n', planeIndex, numberOfImages, numberOfMeasurements);
+
+    % ----- Find one most-likely model correspondence for every X_i ------
+    % The batched search evaluates the P-IMLOP match cost while traversing
+    % the fixed PD-tree. For every measurement X_i, it returns:
+    %
+    %   YmatchesCT(i)       - the selected point and normal on the CT mesh
+    %   EMatchValues(i)     - the winning P-IMLOP correspondence cost
+    %   batchSearchDetails  - diagnostics describing the completed search
+    %
+    % No rigid transformation is estimated here. We are evaluating the one
+    % candidate pose chosen in Section 4 and finding its correspondences.
     allSearchTimer = tic;
-    [YmatchesCT,EMatchValues,batchSearchDetails] = searchPDTree_batchedProcess(XqueriesCT,PsiCT,R_image_CT,positionCovarianceImage,kappa,searchOptions);
+    [YmatchesCT, EMatchValues, batchSearchDetails] = ...
+        searchPDTree_batchedProcess(XqueriesCT, PsiCT, R_image_CT,positionCovarianceImage, kappa, searchOptions);
     totalSearchSeconds = toc(allSearchTimer);
 
+    % ----- Keep this image's outputs grouped with its original inputs ----
+    % Storing results by image preserves the local-frame association. It
+    % also makes per-image inspection possible before results are combined
+    % for the global report and visualization below.
     resultsByImage(planeIndex).YmatchesCT = YmatchesCT;
     resultsByImage(planeIndex).EMatchValues = EMatchValues;
     resultsByImage(planeIndex).batchSearchDetails = batchSearchDetails;
@@ -319,36 +430,73 @@ for planeIndex = processedPlaneIndices
     resultsByImage(planeIndex).status = "processed";
 end
 
-% Combine rows only AFTER searching with the correct image-specific rotations.
-% Vertcat preserves image order, then original retained-row order within each
-% image. Keep the familiar X and YmatchesCT names for the combined result.
+% 5B. Combine the completed per-image correspondence sets =================
+%
+% Concatenation is safe only AFTER every image has been searched with its own
+% R_image_CT. The combined arrays are convenient for computing whole-dataset
+% statistics and for drawing all correspondences in one figure.
+%
+% The comma-separated structure expansion below follows processed image
+% order. vertcat then preserves that image order and, within each image, the
+% original order of its retained measurements. Thus row i remains aligned
+% across X, YmatchesCT, EMatchValues, and the diagnostic arrays assembled
+% later in this section.
 Xsets = [resultsByImage(processedImageMask).X];
 Ysets = [resultsByImage(processedImageMask).YmatchesCT];
+
+% Combine all measurement-side quantities. The 3-D positions share the ref
+% frame, but normal2DImage contains local 2-D components from several image
+% frames. X.imageIndex records which local frame belongs to every row.
 X = struct();
-X.position3DRef = vertcat(Xsets.position3DRef);
-X.normal2DImage = vertcat(Xsets.normal2DImage);
+X.position3DRef      = vertcat(Xsets.position3DRef);
+X.normal2DImage      = vertcat(Xsets.normal2DImage);
 X.sourcePointIndices = vertcat(Xsets.sourcePointIndices);
-X.imageIndex = repelem(processedPlaneIndices(:), [resultsByImage(processedImageMask).numberOfMeasurements].');
+measurementsPerProcessedImage = [resultsByImage(processedImageMask).numberOfMeasurements].';
+X.imageIndex         = repelem(processedPlaneIndices(:), measurementsPerProcessedImage);
+
+% Combine the corresponding model-side quantities. All Y_i positions and
+% normals are expressed in the single fixed CT frame, so they can be placed
+% directly into common arrays without any additional transformation.
 YmatchesCT = struct();
 YmatchesCT.position3D = vertcat(Ysets.position3D);
-YmatchesCT.normal3D = vertcat(Ysets.normal3D);
-YmatchesCT.faceIndex = vertcat(Ysets.faceIndex);
+YmatchesCT.normal3D   = vertcat(Ysets.normal3D);
+YmatchesCT.faceIndex  = vertcat(Ysets.faceIndex);
+
+% EMatchValues uses exactly the same row order as X and YmatchesCT. The
+% number of combined measurements is retained under the familiar variable
+% name used by the reporting and visualization sections.
 EMatchValues = vertcat(resultsByImage(processedImageMask).EMatchValues);
 numberOfMeasurements = size(X.position3DRef,1);
 
-% The combined 2D normals retain X.imageIndex because their rows belong to
-% different LOCAL frames. The explicit index table is convenient for tracing
-% any plotted pair to data.boneSurfaceMeasurements(imageIndex)'s source row.
-correspondenceIndex = table(X.imageIndex,X.sourcePointIndices, 'VariableNames',{'imageIndex','sourcePointIndex'});
-searchDetailsByImage = [resultsByImage(processedImageMask).batchSearchDetails];
-matchDetailsByImage = [searchDetailsByImage.matchDetails];
-euclideanDistancesMm = vertcat(matchDetailsByImage.euclideanDistanceMm);
-orientationAnglesDeg = vertcat(matchDetailsByImage.orientationAngleDeg);
-projectionIsDefined = vertcat(matchDetailsByImage.projectionIsDefined);
+% 5C. Create a traceability table for every combined row ==================
+%
+% A row number in a combined array is not enough to identify its source.
+% correspondenceIndex maps each row back to both the ultrasound image and
+% the original point row in data.boneSurfaceMeasurements. This is useful
+% when a suspicious correspondence seen in a figure needs to be inspected
+% in the source data.
+correspondenceIndex = table(X.imageIndex, X.sourcePointIndices, 'VariableNames', {'imageIndex','sourcePointIndex'});
+
+% 5D. Combine search diagnostics in the same correspondence order =========
+%
+% Search details are first collected by image and then concatenated by
+% measurement. Because this uses the same processed-image order as Block 5B,
+% every diagnostic row remains paired with the same X_i and Y_i.
+searchDetailsByImage         = [resultsByImage(processedImageMask).batchSearchDetails];
+matchDetailsByImage          = [searchDetailsByImage.matchDetails];
+euclideanDistancesMm         = vertcat(matchDetailsByImage.euclideanDistanceMm);
+orientationAnglesDeg         = vertcat(matchDetailsByImage.orientationAngleDeg);
+projectionIsDefined          = vertcat(matchDetailsByImage.projectionIsDefined);
 facesEvaluatedPerMeasurement = vertcat(searchDetailsByImage.numberOfFacesEvaluated);
-nodesPrunedPerMeasurement = vertcat(searchDetailsByImage.numberOfNodesPruned);
+nodesPrunedPerMeasurement    = vertcat(searchDetailsByImage.numberOfNodesPruned);
+
+% 5E. Prepare concise aliases used by later reports and figures ===========
+%
+% These variables do not transform or recompute the selected model points.
+% They simply give later sections short, descriptive names for commonly used
+% fields and identify the unique mesh faces containing the selected Y_i.
 YmatchPositionsCT = YmatchesCT.position3D;
-YmatchNormalsCT = YmatchesCT.normal3D;
+YmatchNormalsCT   = YmatchesCT.normal3D;
 YmatchFaceIndices = YmatchesCT.faceIndex;
 uniqueMatchedFaceIndices = unique(YmatchFaceIndices,'stable');
 
@@ -381,58 +529,118 @@ numberOfValidMeasurementsBeforeSubsampling = sum([resultsByImage.numberOfValidMe
 totalSearchSeconds           = sum([resultsByImage.totalSearchSeconds]);
 averageFacesEvaluated        = mean(facesEvaluatedPerMeasurement);
 averageFacesEvaluatedPercent = 100*averageFacesEvaluated/PsiCT.pdTree.numberOfDatums;
-fprintf('\n  Images processed / skipped       : %d / %d\n',numberOfProcessedImages,numberOfSkippedImages);
-fprintf('  Valid / retained measurements    : %d / %d (fraction %.3f)\n', ...
-    numberOfValidMeasurementsBeforeSubsampling, numberOfMeasurements, measurementSubsampleFraction);
-fprintf('  Valid model triangles            : %d\n',PsiCT.pdTree.numberOfDatums);
-fprintf('  PD-tree nodes / leaves           : %d / %d\n',PsiCT.pdTree.numberOfNodes, PsiCT.pdTree.numberOfLeaves);
-fprintf('  Unique selected model faces      : %d\n',numel(uniqueMatchedFaceIndices));
-fprintf('  X-to-Y distance, mean / max       : %.3f / %.3f mm\n',mean(euclideanDistancesMm), max(euclideanDistancesMm));
-fprintf('  Normal angle, mean / max          : %.2f / %.2f deg\n', mean(orientationAnglesDeg), max(orientationAnglesDeg));
-fprintf('  E_match, total / mean / max       : %.3f / %.3f / %.3f\n', sum(EMatchValues), mean(EMatchValues), max(EMatchValues));
-fprintf('  Average faces tested per point   : %.1f (%.2f%% of model)\n', averageFacesEvaluated, averageFacesEvaluatedPercent);
-fprintf('  Average nodes pruned per point   : %.1f\n',mean(nodesPrunedPerMeasurement));
-fprintf('  Defined projected model normals  : %d / %d\n',nnz(projectionIsDefined),numberOfMeasurements);
-fprintf('  Total / amortized search time    : %.3f s / %.3f ms per point\n\n', ...
-    totalSearchSeconds,1000*totalSearchSeconds/numberOfMeasurements);
+fprintf('\n  Images processed / skipped       : %d / %d\n',                    numberOfProcessedImages,numberOfSkippedImages);
+fprintf('  Valid / retained measurements    : %d / %d (fraction %.3f)\n',      numberOfValidMeasurementsBeforeSubsampling, numberOfMeasurements, measurementSubsampleFraction);
+fprintf('  Valid model triangles            : %d\n',                           PsiCT.pdTree.numberOfDatums);
+fprintf('  PD-tree nodes / leaves           : %d / %d\n',                      PsiCT.pdTree.numberOfNodes, PsiCT.pdTree.numberOfLeaves);
+fprintf('  Unique selected model faces      : %d\n',                           numel(uniqueMatchedFaceIndices));
+fprintf('  X-to-Y distance, mean / max      : %.3f / %.3f mm\n',               mean(euclideanDistancesMm), max(euclideanDistancesMm));
+fprintf('  Normal angle, mean / max         : %.2f / %.2f deg\n',              mean(orientationAnglesDeg), max(orientationAnglesDeg));
+fprintf('  E_match, total / mean / max      : %.3f / %.3f / %.3f\n',           sum(EMatchValues), mean(EMatchValues), max(EMatchValues));
+fprintf('  Average faces tested per point   : %.1f (%.2f%% of model)\n',       averageFacesEvaluated, averageFacesEvaluatedPercent);
+fprintf('  Average nodes pruned per point   : %.1f\n',                         mean(nodesPrunedPerMeasurement));
+fprintf('  Defined projected model normals  : %d / %d\n',                      nnz(projectionIsDefined), numberOfMeasurements);
+fprintf('  Total / amortized search time    : %.3f s / %.3f ms per point\n\n', totalSearchSeconds, 1000*totalSearchSeconds/numberOfMeasurements);
 % Search time sums the batched calls, including their shared preparation.
 % It excludes one-time mesh/tree building, input selection, and plotting.
 
 
 %% 7. DISPLAY ALL X-to-Y CORRESPONDENCES IN ref
 
-% Return model positions and normals to ref exactly as in the one-image demo.
-% Translation moves points; only rotation changes a normal's direction.
-boneFaces = PsiCT.mesh.ConnectivityList;
-bonePointsRef = applyRigidTransform(PsiCT.mesh.Points,T_CT_ref_candidate);
-YmatchPositionsRef = applyRigidTransform(YmatchPositionsCT,T_CT_ref_candidate);
-YmatchNormalsRef = YmatchNormalsCT*R_CT_ref_candidate.';
+% This figure is intended to show the complete correspondence problem in one
+% common physical coordinate frame. It contains the following elements:
+%
+%   1. The pre-registered tibia mesh, drawn transparently in beige.
+%   2. Every tracked ultrasound image plane, drawn semi-transparently.
+%   3. The mesh triangles containing at least one selected Y_i, in cyan.
+%   4. Retained ultrasound measurements X_i and their normals, in red.
+%   5. Most-likely model correspondences Y_i and their normals, in blue.
+%   6. A grey line joining each indexed pair X_i -> Y_i.
+%
+% For these elements to overlay correctly, every displayed 3-D position and
+% normal direction must first be expressed in ref. Measurement positions X_i
+% already live in ref. The CT mesh and selected Y_i must be moved from CT to
+% ref, while every measured 2-D normal must be lifted through the pose of the
+% particular ultrasound image from which it came.
 
-% Each measurement normal must be lifted through ITS OWN image rotation.
-% Fill the combined row ranges in image order and retain each image's ref
-% results for later inspection without needing to repeat the search.
+% 7A. Transform the CT-side geometry into the display frame ===============
+%
+% The mesh and selected model correspondences were kept in CT during the
+% PD-tree search. T_CT_ref_candidate is the candidate bone pose evaluated by
+% the search, and maps their positions back into ref:
+%
+%   p_ref = T_CT_ref_candidate * p_CT
+%
+% A position is affected by both rotation and translation. A normal is a
+% direction rather than a location, so translation must not be applied to
+% it. With the row-vector convention used by the stored normal arrays, the
+% corresponding direction conversion is:
+%
+%   n_ref = n_CT * R_CT_ref_candidate'
+%
+% After this block, the mesh vertices, Y_i positions, and Y_i normals all use
+% the same ref frame as X.position3DRef.
+boneFaces          = PsiCT.mesh.ConnectivityList;
+bonePointsRef      = applyRigidTransform(PsiCT.mesh.Points, T_CT_ref_candidate);
+YmatchPositionsRef = applyRigidTransform(YmatchPositionsCT, T_CT_ref_candidate);
+YmatchNormalsRef   = YmatchNormalsCT * R_CT_ref_candidate.';
+
+% 7B. Lift each measured 2-D normal through its own image pose =============
+%
+% A measured normal is stored as two components [n_x, n_y] in its local
+% ultrasound-image plane. To display that direction in 3-D ref coordinates:
+%
+%   1. Append a zero third component: [n_x, n_y, 0]. The zero states that
+%      the measured direction lies inside the local ultrasound image plane.
+%   2. Rotate the resulting 3-D direction using this image's R_image_ref.
+%
+% Every tracked image can have a different orientation. Therefore, using one
+% shared rotation for all measured normals would be incorrect. The loop fills
+% the rows of the combined measurement array image by image, matching the row
+% order established when the results were concatenated in Section 5.
 measurementNormals3DRef = zeros(numberOfMeasurements,3);
 firstRow = 1;
 for planeIndex = processedPlaneIndices
+    % Retrieve the local normals and the image-specific image -> ref pose.
     selectedPlane = data.imagePlanesRef(planeIndex);
-    imageX = resultsByImage(planeIndex).X;
-    rows = firstRow:firstRow+resultsByImage(planeIndex).numberOfMeasurements-1;
-    R_image_ref = selectedPlane.T_image_ref(1:3,1:3);
-    measurementNormals3DRef(rows,:) = ...
-        [imageX.normal2DImage,zeros(numel(rows),1)]*R_image_ref.';
-    resultsByImage(planeIndex).measurementNormals3DRef = measurementNormals3DRef(rows,:);
+    imageX        = resultsByImage(planeIndex).X;
+    R_image_ref   = selectedPlane.T_image_ref(1:3,1:3);
+
+    % Locate this image's rows in the combined X/Y arrays. The same row range
+    % applies to X.position3DRef, YmatchPositionsRef, and YmatchNormalsRef.
+    numberOfImageMeasurements = resultsByImage(planeIndex).numberOfMeasurements;
+    combinedRows = firstRow:(firstRow + numberOfImageMeasurements - 1);
+
+    % Embed the local 2-D normals in the image's 3-D coordinate system, then
+    % rotate them from image -> ref. Translation is intentionally excluded.
+    measurementNormals3DImage = [imageX.normal2DImage, zeros(numberOfImageMeasurements,1)];
+    measurementNormals3DRef(combinedRows,:) = measurementNormals3DImage * R_image_ref.';
+
+    % Keep convenient per-image ref-frame results for later inspection. This
+    % does not alter the matches; it only groups their display-ready values.
+    resultsByImage(planeIndex).measurementNormals3DRef = ...
+        measurementNormals3DRef(combinedRows,:);
     resultsByImage(planeIndex).YmatchesRef = struct( ...
-        'position3D',YmatchPositionsRef(rows,:),'normal3D',YmatchNormalsRef(rows,:), ...
-        'faceIndex',YmatchFaceIndices(rows));
-    firstRow = firstRow+numel(rows);
+        'position3D', YmatchPositionsRef(combinedRows,:), ...
+        'normal3D', YmatchNormalsRef(combinedRows,:), ...
+        'faceIndex', YmatchFaceIndices(combinedRows));
+
+    firstRow = firstRow + numberOfImageMeasurements;
 end
 
-% Use one common display length for every unit normal. Changing this scale
-% affects only the arrows, never the orientation term in the match cost.
+% 7C. Prepare display-only geometry for arrows and correspondence lines ====
+%
+% All normals are unit directions, so they would appear very short compared
+% with the overall image and bone dimensions. Use one common arrow length
+% based on the ultrasound-image extent. This scale affects only the plotted
+% arrows; it does not change the normals or the P-IMLOP orientation cost.
 imageExtentMm = max([[data.imagePlanesRef.W],[data.imagePlanesRef.H]]);
-normalDisplayScale = 0.04*imageExtentMm;
-% Prepare all correspondence segments as one polyline separated by NaNs.
-% One plot object is much lighter than creating hundreds of individual lines.
+normalDisplayScale = 0.04 * imageExtentMm;
+
+% Each correspondence should appear as an independent grey line from X_i to
+% Y_i. NaN rows separate consecutive segments inside one long polyline. This
+% produces the same visual result as hundreds of individual plot3 calls, but
+% uses only one graphics object and is much faster to draw and manipulate.
 correspondenceX = reshape([ ...
     X.position3DRef(:, 1), YmatchPositionsRef(:, 1), nan(numberOfMeasurements, 1)].', [], 1);
 correspondenceY = reshape([ ...
@@ -440,9 +648,12 @@ correspondenceY = reshape([ ...
 correspondenceZ = reshape([ ...
     X.position3DRef(:, 3), YmatchPositionsRef(:, 3), nan(numberOfMeasurements, 1)].', [], 1);
 
-% One overview contains the whole experiment. Image opacity is intentionally
-% low because several tracked planes overlap. Rotation lets the user inspect
-% their spatial arrangement and all red-to-blue correspondence pairs.
+% 7D. Create one interactive 3-D overview in ref ===========================
+%
+% A single axes is used so the complete spatial relationship can be judged:
+% where every ultrasound plane intersects the bone, where each measurement
+% lies, and which surface point it selected. Equal axis scaling prevents the
+% geometry from being visually stretched along one coordinate direction.
 demoFigure = figure( ...
     'Name','P-IMLOP all-image, many-point BATCHED PD-tree search demo', ...
     'Position',[80,80,1250,850]);
@@ -455,8 +666,11 @@ xlabel(setupAxes, 'X_{ref} (mm)');
 ylabel(setupAxes, 'Y_{ref} (mm)');
 zlabel(setupAxes, 'Z_{ref} (mm)');
 
-% Draw the complete pre-registered tibia lightly. Its transparency lets the
-% tracked image and selected correspondences remain visible through it.
+% 7E. Draw the anatomical context: bone mesh and ultrasound planes =========
+%
+% Draw the complete candidate tibia pose lightly in beige. Its transparency
+% provides anatomical context while allowing image planes and correspondence
+% markers on the far side of the surface to remain visible.
 boneHandle = patch(setupAxes, ...
     'Faces', boneFaces, ...
     'Vertices', bonePointsRef, ...
@@ -465,27 +679,43 @@ boneHandle = patch(setupAxes, ...
     'FaceAlpha', 0.24, ...
     'DisplayName', 'Pre-registered tibia mesh');
 
-% Draw ALL tracked images, including any skipped by correspondence search.
-% Give each surface its own tag. Only the first handle represents ultrasound
-% planes in the common legend, avoiding fifteen repeated legend entries.
+% Draw every tracked ultrasound image, including images skipped by the search
+% because they had no valid measurements. display_image3D applies each
+% T_image_ref internally, so the image pixels appear at their tracked pose in
+% ref. A low opacity is important because many planes overlap in this view.
+%
+% Each surface receives a unique tag for later programmatic identification.
+% Only the first handle is included in the common legend, which avoids one
+% repeated legend entry for every ultrasound image.
 imageHandles = gobjects(numberOfImages,1);
 for planeIndex = 1:numberOfImages
     selectedPlane = data.imagePlanesRef(planeIndex);
-    pixelSpacingXYMm = [selectedPlane.W/max(selectedPlane.nCols-1,1), ...
+
+    % Convert the physical image width and height into pixel spacing. The
+    % max(...,1) safeguard avoids division by zero for a one-pixel dimension.
+    pixelSpacingXYMm = [
+        selectedPlane.W/max(selectedPlane.nCols-1,1), ...
         selectedPlane.H/max(selectedPlane.nRows-1,1)];
+
     imageHandle = display_image3D(setupAxes, ...
         selectedPlane.image,selectedPlane.T_image_ref, ...
-        'SwapXY',true,'PixelSpacing',pixelSpacingXYMm, ...
-        'Tag',sprintf('demo_pdtree_image_plane_%d',planeIndex), ...
-        'Colormap','gray','FaceAlpha',imageFaceAlpha);
-    imageHandle.DisplayName = sprintf('Ultrasound image %d',planeIndex);
+        'SwapXY', true, ...
+        'PixelSpacing',pixelSpacingXYMm, ...
+        'Tag', sprintf('demo_pdtree_image_plane_%d',planeIndex), ...
+        'Colormap', 'gray', ...
+        'FaceAlpha', imageFaceAlpha);
+
+    imageHandle.DisplayName  = sprintf('Ultrasound image %d',planeIndex);
     imageHandles(planeIndex) = imageHandle;
 end
 imageHandles(1).DisplayName = sprintf('Ultrasound planes (%d)',numberOfImages);
 
-% Highlight every unique mesh face selected by at least one measurement.
-% Several neighboring X points may choose the same triangle, so plotting the
-% unique face list avoids drawing identical triangles repeatedly.
+% 7F. Highlight the model surface regions selected by the search ===========
+%
+% A model correspondence Y_i lies on one triangle of the CT mesh. Highlight
+% every selected triangle in cyan to show which surface regions contributed
+% matches. Neighboring measurements can select the same triangle, so the
+% unique face list prevents identical triangles from being drawn repeatedly.
 matchedFacesHandle = patch(setupAxes, ...
     'Faces', boneFaces(uniqueMatchedFaceIndices, :), ...
     'Vertices', bonePointsRef, ...
@@ -495,8 +725,12 @@ matchedFacesHandle = patch(setupAxes, ...
     'LineWidth', 0.8, ...
     'DisplayName', 'Selected model triangles');
 
-% Plot all measured points and their image-plane normals in red. These are
-% the combined retained X sets from every processed ultrasound image.
+% 7G. Draw the measurement side of every correspondence in red =============
+%
+% Red dots are the retained ultrasound measurements X_i. Red arrows show the
+% measured in-plane normals after Block 7B converted each one through its own
+% image -> ref rotation. Their common origins make it easy to associate each
+% direction with its measurement point.
 xPointHandle = scatter3(setupAxes, ...
     X.position3DRef(:, 1), X.position3DRef(:, 2), X.position3DRef(:, 3), ...
     22, [0.90, 0.05, 0.05], 'filled', ...
@@ -509,8 +743,11 @@ xNormalHandle = quiver3(setupAxes, ...
     0, 'Color', [0.90, 0.05, 0.05], 'LineWidth', 0.8, ...
     'MaxHeadSize', 0.35, 'DisplayName', 'Measured normals');
 
-% Plot every selected model point and face normal in blue. The i-th blue
-% point is the most-likely oriented correspondence Y_i of the i-th red point.
+% 7H. Draw the selected model side of every correspondence in blue =========
+%
+% Blue dots are the most-likely model points Y_i returned by the PD-tree
+% search. Blue arrows are their model surface normals. Row ordering is still
+% preserved: the i-th blue point and normal belong to the i-th red X_i.
 yPointHandle = scatter3(setupAxes, ...
     YmatchPositionsRef(:, 1), YmatchPositionsRef(:, 2), YmatchPositionsRef(:, 3), ...
     28, [0.05, 0.30, 0.95], 'filled', ...
@@ -523,14 +760,23 @@ yNormalHandle = quiver3(setupAxes, ...
     0, 'Color', [0.05, 0.30, 0.95], 'LineWidth', 0.8, ...
     'MaxHeadSize', 0.35, 'DisplayName', 'Selected model normals');
 
-% Join every paired X_i and Y_i with a thin grey segment. Together these
-% lines make the complete set of indexed correspondence pairs easy to recognize.
+% 7I. Connect each X_i to its corresponding Y_i ============================
+%
+% The thin grey segments make the one-to-one association explicit. Segment i
+% begins at red measurement X_i and ends at its blue model match Y_i. A long
+% or unexpected segment can therefore be inspected together with its source
+% image and normals instead of judging the two point clouds independently.
 correspondenceHandle = plot3(setupAxes, ...
     correspondenceX, correspondenceY, correspondenceZ, ...
     '-', 'Color', [0.25, 0.25, 0.25], 'LineWidth', 0.65, ...
     'DisplayName', 'X_i-to-Y_i correspondences');
 
-title(setupAxes, 'Complete tracked setup in ref', 'Interpreter', 'tex');
+% 7J. Finish the legend, result summary, and interactive view ==============
+%
+% The legend explains the visual encoding without repeating one entry per
+% image. The title summarizes how much data is displayed and the mean match
+% cost for this candidate pose. Enabling rotation lets the user inspect dense
+% or overlapping correspondences from different viewpoints.
 legend(setupAxes, [ ...
     boneHandle; imageHandles(1); matchedFacesHandle; ...
     xPointHandle; xNormalHandle; yPointHandle; yNormalHandle; ...
@@ -540,7 +786,6 @@ legend(setupAxes, [ ...
     'FontSize', 8, ...
     'Interpreter', 'tex');
 
-% The title reports retained points, so the effect of subsampling is visible.
 title(setupAxes,sprintf( ...
     'P-IMLOP: %d / %d images searched, %d measurements, mean E_{match} = %.3f', ...
     numberOfProcessedImages,numberOfImages,numberOfMeasurements,mean(EMatchValues)), ...
