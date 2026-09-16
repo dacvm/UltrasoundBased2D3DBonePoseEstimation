@@ -555,13 +555,14 @@ fprintf('  Total / amortized search time    : %.3f s / %.3f ms per point\n\n', t
 %   3. The mesh triangles containing at least one selected Y_i, in cyan.
 %   4. Retained ultrasound measurements X_i and their normals, in red.
 %   5. Most-likely model correspondences Y_i and their normals, in blue.
-%   6. A grey line joining each indexed pair X_i -> Y_i.
+%   6. Each model normal projected into its ultrasound plane, in green.
+%   7. A grey line joining each indexed pair X_i -> Y_i.
 %
 % For these elements to overlay correctly, every displayed 3-D position and
 % normal direction must first be expressed in ref. Measurement positions X_i
 % already live in ref. The CT mesh and selected Y_i must be moved from CT to
-% ref, while every measured 2-D normal must be lifted through the pose of the
-% particular ultrasound image from which it came.
+% ref, while every measured and projected 2-D normal must be lifted through
+% the pose of the particular ultrasound image from which it came.
 
 % 7A. Transform the CT-side geometry into the display frame ===============
 %
@@ -585,23 +586,27 @@ bonePointsRef      = applyRigidTransform(PsiCT.mesh.Points, T_CT_ref_candidate);
 YmatchPositionsRef = applyRigidTransform(YmatchPositionsCT, T_CT_ref_candidate);
 YmatchNormalsRef   = YmatchNormalsCT * R_CT_ref_candidate.';
 
-% 7B. Lift each measured 2-D normal through its own image pose =============
+% 7B. Lift measured and projected normals through each image pose ===========
 %
-% A measured normal is stored as two components [n_x, n_y] in its local
-% ultrasound-image plane. To display that direction in 3-D ref coordinates:
+% A measured normal and a projected model normal are each stored as two
+% components [n_x, n_y] in a local ultrasound-image plane. To display either
+% direction in 3-D ref coordinates:
 %
 %   1. Append a zero third component: [n_x, n_y, 0]. The zero states that
-%      the measured direction lies inside the local ultrasound image plane.
+%      the direction lies inside the local ultrasound image plane.
 %   2. Rotate the resulting 3-D direction using this image's R_image_ref.
 %
 % Every tracked image can have a different orientation. Therefore, using one
-% shared rotation for all measured normals would be incorrect. The loop fills
-% the rows of the combined measurement array image by image, matching the row
-% order established when the results were concatenated in Section 5.
+% shared rotation for all normals would be incorrect. The loop fills the rows
+% of the combined arrays image by image, matching the row order established
+% when the correspondence results were concatenated in Section 5.
 measurementNormals3DRef = zeros(numberOfMeasurements,3);
+projectedYNormals3DRef = zeros(numberOfMeasurements,3);
 firstRow = 1;
 for planeIndex = processedPlaneIndices
-    % Retrieve the local normals and the image-specific image -> ref pose.
+    % Retrieve both types of local 2-D normal and this image's image -> ref
+    % pose. The projected model normals are the exact normalized projections
+    % retained by the P-IMLOP match calculation for the selected Y_i.
     selectedPlane = data.imagePlanesRef(planeIndex);
     imageX        = resultsByImage(planeIndex).X;
     R_image_ref   = selectedPlane.T_image_ref(1:3,1:3);
@@ -615,11 +620,21 @@ for planeIndex = processedPlaneIndices
     % rotate them from image -> ref. Translation is intentionally excluded.
     measurementNormals3DImage = [imageX.normal2DImage, zeros(numberOfImageMeasurements,1)];
     measurementNormals3DRef(combinedRows,:) = measurementNormals3DImage * R_image_ref.';
+    
+    % Retrieve the projected image normal
+    imageMatchDetails        = resultsByImage(planeIndex).batchSearchDetails.matchDetails;
+    imageProjectedYNormals2D = imageMatchDetails.projectedYNormal2DImage;
+
+    % Apply the same image -> ref rotation to the projected model-normal
+    % directions. Their image-Z components are zero by construction, so the
+    % resulting green arrows remain inside this tracked ultrasound plane.
+    projectedYNormals3DImage = [imageProjectedYNormals2D, zeros(numberOfImageMeasurements,1)];
+    projectedYNormals3DRef(combinedRows,:) = projectedYNormals3DImage * R_image_ref.';
 
     % Keep convenient per-image ref-frame results for later inspection. This
     % does not alter the matches; it only groups their display-ready values.
-    resultsByImage(planeIndex).measurementNormals3DRef = ...
-        measurementNormals3DRef(combinedRows,:);
+    resultsByImage(planeIndex).measurementNormals3DRef = measurementNormals3DRef(combinedRows,:);
+    resultsByImage(planeIndex).projectedYNormals3DRef  = projectedYNormals3DRef(combinedRows,:);
     resultsByImage(planeIndex).YmatchesRef = struct( ...
         'position3D', YmatchPositionsRef(combinedRows,:), ...
         'normal3D', YmatchNormalsRef(combinedRows,:), ...
@@ -760,7 +775,27 @@ yNormalHandle = quiver3(setupAxes, ...
     0, 'Color', [0.05, 0.30, 0.95], 'LineWidth', 0.8, ...
     'MaxHeadSize', 0.35, 'DisplayName', 'Selected model normals');
 
-% 7I. Connect each X_i to its corresponding Y_i ============================
+% 7I. Draw each projected model-normal direction in green ==================
+%
+% The green arrow at X_i is the selected model normal after projection and
+% renormalization in X_i's own ultrasound image plane. Comparing the green
+% arrow with the red measured-normal arrow at the same origin reveals the
+% angular disagreement that contributes to E_match.
+%
+% A projection is undefined when a model normal has essentially no component
+% inside its image plane. Draw only rows marked as defined by the same match
+% calculation used during the PD-tree search.
+projectedYNormalHandle = quiver3(setupAxes, ...
+    X.position3DRef(projectionIsDefined, 1), ...
+    X.position3DRef(projectionIsDefined, 2), ...
+    X.position3DRef(projectionIsDefined, 3), ...
+    projectedYNormals3DRef(projectionIsDefined, 1) * normalDisplayScale, ...
+    projectedYNormals3DRef(projectionIsDefined, 2) * normalDisplayScale, ...
+    projectedYNormals3DRef(projectionIsDefined, 3) * normalDisplayScale, ...
+    0, 'Color', [0.05, 0.70, 0.20], 'LineWidth', 1.0, ...
+    'MaxHeadSize', 0.35, 'DisplayName', 'Projected model normals');
+
+% 7J. Connect each X_i to its corresponding Y_i ============================
 %
 % The thin grey segments make the one-to-one association explicit. Segment i
 % begins at red measurement X_i and ends at its blue model match Y_i. A long
@@ -771,7 +806,7 @@ correspondenceHandle = plot3(setupAxes, ...
     '-', 'Color', [0.25, 0.25, 0.25], 'LineWidth', 0.65, ...
     'DisplayName', 'X_i-to-Y_i correspondences');
 
-% 7J. Finish the legend, result summary, and interactive view ==============
+% 7K. Finish the legend, result summary, and interactive view ==============
 %
 % The legend explains the visual encoding without repeating one entry per
 % image. The title summarizes how much data is displayed and the mean match
@@ -780,7 +815,7 @@ correspondenceHandle = plot3(setupAxes, ...
 legend(setupAxes, [ ...
     boneHandle; imageHandles(1); matchedFacesHandle; ...
     xPointHandle; xNormalHandle; yPointHandle; yNormalHandle; ...
-    correspondenceHandle], ...
+    projectedYNormalHandle; correspondenceHandle], ...
     'Location', 'northwest', ...
     'NumColumns', 2, ...
     'FontSize', 8, ...
