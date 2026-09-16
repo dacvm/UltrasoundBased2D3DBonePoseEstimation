@@ -6,6 +6,7 @@
     "ultrasoundImageFileName": "validSnapshots_20260910_172849.mat"
   },
   "output": {
+    "saveResult": false,
     "boneSurface3DOutputPath": "../outputs"
   }
 }
