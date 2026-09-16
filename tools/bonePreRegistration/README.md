@@ -7,7 +7,7 @@ This MATLAB tool prepares a coarse pose for each knee bone before later bone-pos
 The workflow has two consecutive parts:
 
 1. `bonePreRegistration_anatomicalLandmark.m` measures three reproducible CT-mesh landmarks for each femur and tibia: medial, lateral, and shaft.
-2. `bonePreRegistration_3Dsurface.m` associates each regional ultrasound surface with its matching CT landmark and estimates a rigid CT-to-reference transformation for each bone.
+2. `bonePreRegistration_3Dsurface.m` associates each regional ultrasound surface with its matching CT landmark, estimates an initial CT-to-reference transformation, and refines that pose with ICP.
 
 Run Part 1 first. Part 2 requires the landmark MAT-file created by Part 1 and the 3D bone-surface MAT-file created by [`tools/boneSegmentationProcess`](../boneSegmentationProcess/README.md), Part 3.
 
@@ -197,9 +197,10 @@ Paths may be absolute or relative. Relative paths are resolved from the director
 3. **Group surface points by anatomy.** Surface groups are classified from names ending in `_medial`, `_lateral`, or `_shaft`; the legacy suffix `_mid` is treated as `shaft`. Groups are matched to bones by bone code, and all nonempty records in one region are combined.
 4. **Build regional correspondence candidates.** Every measured surface point in a region is paired with that region's single CT landmark. The repeated landmark and surface matrices therefore have matching rows. Sampled connection lines are displayed for inspection.
 5. **Prepare the comparison scene.** The script draws the ground-truth bone meshes and anatomical coordinate systems stored in `validBonePoses`, together with all measured surfaces.
-6. **Estimate one rigid transform per bone.** `estgeotform3d` robustly estimates the transform from measured surface points in `ref` to their paired CT landmarks using a maximum correspondence distance of 100 mm. The inverse matrix is stored as `T_CT_ref_est` and applied to the CT mesh.
-7. **Propagate and display the anatomical pose.** The estimated CT-to-reference transform moves `T_bone_CT` and the CT mesh into `ref`. Colored estimated meshes and dashed anatomical axes are overlaid on the gray ground-truth geometry.
-8. **Save the coarse registration.** The complete result array is written automatically, including explicit status records for bones that could not be registered.
+6. **Estimate an initial rigid transform per bone.** `estgeotform3d` robustly estimates the transform from measured surface points in `ref` to their paired CT landmarks using a maximum correspondence distance of 100 mm. Its inverse becomes `T_CT_ref_init` and places the CT mesh near the measured surface.
+7. **Refine the initialized pose with ICP.** The complete initialized mesh is the moving point cloud and the measured ultrasound surface is the fixed point cloud. Point-to-point `pcregistericp` uses the closest 10% of correspondences because ultrasound observes only part of the complete CT mesh. It estimates `T_delta_ref_icp`, which is applied after the initialization: `T_CT_ref_est = T_delta_ref_icp * T_CT_ref_init`.
+8. **Propagate and display the final anatomical pose.** The refined CT-to-reference transform moves `T_bone_CT` and the CT mesh into `ref`. Colored estimated meshes and dashed anatomical axes are overlaid on the gray ground-truth geometry. If ICP fails, the valid initialization is retained and the failure reason is recorded.
+9. **Save the coarse registration.** When `output.saveResults` is true, the complete result array is written with the initialization, ICP diagnostics, final pose, and explicit status records for bones that could not be initialized.
 
 Each bone needs at least three unique, non-collinear points in both correspondence sets. Because CT points are repeated regional landmarks, usable measurements must cover at least three non-collinear regional landmark locations. A bone that does not meet this requirement is skipped with a warning while other bones continue.
 
@@ -234,6 +235,12 @@ coarseRegistration(1..B)
 +-- name
 +-- bone
 +-- status
++-- T_CT_ref_init
++-- T_bone_ref_init
++-- boneMeshRef_init
++-- T_delta_ref_icp
++-- icpRMSE_mm
++-- icpStatus
 +-- T_CT_ref_est
 +-- T_bone_ref_est
 +-- boneMeshRef_est
@@ -249,17 +256,26 @@ coarseRegistrationMetadata
 +-- sourceBoneLandmarksFile
 +-- sourceBoneLandmarksVariables
 +-- configurationFile
++-- icpMetric
++-- icpInitialTransform
++-- icpInlierRatio
++-- icpUsesDownsampling
++-- matlabRelease
 ```
 
 | Field | Explanation |
 | --- | --- |
 | `name`, `bone` | Identify the bone and preserve the association with the CT, landmark, surface, and ground-truth records. |
 | `status` | `registered` means a rigid transform was estimated successfully. A value beginning with `skipped:` explains why the bone was retained without a transform, currently because it had fewer than three non-collinear correspondence points. |
-| `T_CT_ref_est` | Estimated 4-by-4 rigid transform from CT coordinates to the common reference frame. Apply it as `p_ref = T_CT_ref_est * p_CT` for homogeneous column-vector points. |
+| `T_CT_ref_init`, `T_bone_ref_init`, `boneMeshRef_init` | Initialization result produced from the anatomical-region correspondences before ICP refinement. |
+| `T_delta_ref_icp` | Incremental 4-by-4 ICP correction applied in `ref` after initialization. The final composition is `T_delta_ref_icp * T_CT_ref_init`. |
+| `icpRMSE_mm` | Final point-to-point RMSE reported by `pcregistericp`. It is `NaN` when ICP fails and the initialization is used instead. |
+| `icpStatus` | `completed` for a successful ICP call, or a fallback message containing the reason that ICP failed. |
+| `T_CT_ref_est` | Final 4-by-4 rigid transform from CT coordinates to the common reference frame after initialization and ICP. Apply it as `p_ref = T_CT_ref_est * p_CT` for homogeneous column-vector points. |
 | `T_bone_ref_est` | Estimated anatomical bone-frame pose in `ref`, calculated as `T_CT_ref_est * T_bone_CT`. |
 | `boneMeshRef_est` | `triangulation` made from the original CT connectivity and vertices transformed into `ref` by `T_CT_ref_est`. |
 
-Skipped entries keep `T_CT_ref_est`, `T_bone_ref_est`, and `boneMeshRef_est` empty. This allows downstream code to inspect `status` without losing the bone's identity.
+Skipped entries keep all initialization, ICP, and final result fields empty. This allows downstream code to inspect `status` without losing the bone's identity. If initialization succeeds but ICP fails, the final fields contain the initialization, `T_delta_ref_icp` is identity, and the overall status remains `registered` so the result can still initialize fine registration.
 
 The metadata fields identify every input used by the coarse-registration workflow:
 
@@ -275,6 +291,8 @@ The metadata fields identify every input used by the coarse-registration workflo
 | `sourceBoneLandmarksFile` | Full path of the bone-landmark MAT-file. |
 | `sourceBoneLandmarksVariables` | Loaded landmark variables: `landmarks` and `intersectionDiagnostics`. |
 | `configurationFile` | Full path of `bonePreRegistration_3Dsurface.json`. Its contents are not copied into the metadata. |
+| `icpMetric`, `icpInitialTransform`, `icpInlierRatio`, `icpUsesDownsampling` | Record that this workflow uses point-to-point ICP, an identity ICP starting transform, the closest 10% of correspondences, and the complete mesh vertex set. |
+| `matlabRelease` | MATLAB release used for the run, retained because unspecified `pcregistericp` defaults can vary between releases. |
 
 Load the result with:
 
