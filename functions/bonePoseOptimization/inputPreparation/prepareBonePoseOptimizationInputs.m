@@ -63,10 +63,21 @@ currentCoarseRegistration = coarseRegistration(coarseIndex);
 % validBonePoses.bonePoses is also an array with one record per bone:
 %   validBonePoses.bonePoses(1).bone = 'F';
 %   validBonePoses.bonePoses(2).bone = 'T';
-% Each record's data field contains its ground-truth transforms and mesh.
-% So we select the targetBone record and keep its data for later validation.
-groundTruthIndex          = findUniqueBoneIndex(validBonePoses.bonePoses, targetBone, 'ground-truth bone pose');
-currentGroundTruthPose    = validBonePoses.bonePoses(groundTruthIndex).data;
+% The current schema stores the CT mesh once beside data, while data contains
+% the selected ground-truth transform. Keeping these two levels separate avoids
+% duplicating the complete CT mesh for every pose in a kinematic recording.
+groundTruthIndex           = findUniqueBoneIndex(validBonePoses.bonePoses, targetBone, 'ground-truth bone pose');
+currentGroundTruthBonePose = validBonePoses.bonePoses(groundTruthIndex);
+currentGroundTruthPose     = currentGroundTruthBonePose.data;
+
+% One optimization run currently evaluates one fixed ground-truth bone pose.
+% Reject a per-data-row pose series explicitly instead of accidentally reading
+% comma-separated struct fields as though they represented one transform.
+if ~isstruct(currentGroundTruthPose) || ~isscalar(currentGroundTruthPose)
+    error('prepareBonePoseOptimizationInputs:UnsupportedGroundTruthPoseSeries', ...
+        ['The selected bone must contain exactly one ground-truth pose. ' ...
+         'perDataRow kinematic ground truth is not yet supported by this optimization workflow.']);
+end
 
 % A skipped coarse-registration record cannot provide an optimization start pose.
 if ~strcmpi(string(currentCoarseRegistration.status), "registered")
@@ -121,12 +132,34 @@ validateRigidTransform(T_CT_ref_initial, 'coarseRegistration.T_CT_ref_est');
 % Read and validate the ground-truth transforms saved by spatial processing.
 T_CT_ref_groundTruth = currentGroundTruthPose.T_CT_ref;
 T_bone_ref_groundTruth = currentGroundTruthPose.T_bone_ref;
-boneMeshRefGroundTruth = currentGroundTruthPose.mesh;
 validateRigidTransform(T_CT_ref_groundTruth, 'validBonePoses.bonePoses.data.T_CT_ref');
 validateRigidTransform(T_bone_ref_groundTruth, 'validBonePoses.bonePoses.data.T_bone_ref');
-if ~isa(boneMeshRefGroundTruth, 'triangulation')
-    error('prepareBonePoseOptimizationInputs:InvalidGroundTruthMesh', ...
-          'The ground-truth bone mesh must be a triangulation.');
+
+% The current spatial-processing schema stores one source mesh in CT rather
+% than repeating a transformed mesh inside every pose record. Rebuild the
+% reference-frame mesh with the pose that produced the saved intersections.
+if isfield(currentGroundTruthBonePose, 'meshCT')
+    boneMeshCTGroundTruth = currentGroundTruthBonePose.meshCT;
+    if ~isa(boneMeshCTGroundTruth, 'triangulation')
+        error('prepareBonePoseOptimizationInputs:InvalidGroundTruthMesh', ...
+            'validBonePoses.bonePoses.meshCT must be a triangulation.');
+    end
+    bonePointsRefGroundTruth = applyRigidTransform( ...
+        boneMeshCTGroundTruth.Points, T_CT_ref_groundTruth);
+    boneMeshRefGroundTruth = triangulation( ...
+        boneMeshCTGroundTruth.ConnectivityList, bonePointsRefGroundTruth);
+elseif isfield(currentGroundTruthPose, 'mesh')
+    % Older reviewed snapshot files stored the already transformed mesh here.
+    % Retain this fallback so existing optimization inputs remain usable.
+    boneMeshRefGroundTruth = currentGroundTruthPose.mesh;
+    if ~isa(boneMeshRefGroundTruth, 'triangulation')
+        error('prepareBonePoseOptimizationInputs:InvalidGroundTruthMesh', ...
+            'validBonePoses.bonePoses.data.mesh must be a triangulation.');
+    end
+else
+    error('prepareBonePoseOptimizationInputs:MissingGroundTruthMesh', ...
+        ['The ground-truth bone pose must contain meshCT at the bone level ' ...
+         'or the legacy data.mesh field.']);
 end
 
 % The saved anatomical frame must come from the same CT pose and CT bone model.

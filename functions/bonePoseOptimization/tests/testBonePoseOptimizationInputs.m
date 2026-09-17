@@ -293,8 +293,8 @@ end
 
 function testGroundTruthBonePoseIsPreparedForValidation(testCase)
 %TESTGROUNDTRUTHBONEPOSEISPREPAREDFORVALIDATION Check the selected saved pose.
-% testCase supplies the CT model and validation-only pose. This function has
-% no output.
+% testCase supplies the CT model, reviewed snapshot path, and validation-only
+% pose. This function has no output.
 
 % The validation pose must describe the same tibia selected for estimation.
 data = testCase.TestData.data;
@@ -307,6 +307,21 @@ verifySize(testCase, groundTruthBonePose.T_CT_ref, [4 4]);
 verifySize(testCase, groundTruthBonePose.T_bone_ref, [4 4]);
 verifyEqual(testCase, groundTruthBonePose.T_bone_ref, ...
     groundTruthBonePose.T_CT_ref * data.T_bone_CT, 'AbsTol', 1e-8);
+
+% The new reviewed-snapshot schema stores the source mesh in CT coordinates.
+% Confirm that preparation applied the saved ground-truth transform instead
+% of accidentally treating meshCT as though it were already in ref.
+snapshotOutput = load( ...
+    testCase.TestData.config.input.validSnapshotsMatFile, 'validBonePoses');
+savedBoneCodes = upper(string({snapshotOutput.validBonePoses.bonePoses.bone}));
+savedBoneIndex = find(savedBoneCodes == "T", 1);
+savedBonePose = snapshotOutput.validBonePoses.bonePoses(savedBoneIndex);
+expectedPointsRef = applyRigidTransform( ...
+    savedBonePose.meshCT.Points, savedBonePose.data.T_CT_ref);
+verifyEqual(testCase, groundTruthBonePose.boneMeshRef.ConnectivityList, ...
+    savedBonePose.meshCT.ConnectivityList);
+verifyEqual(testCase, groundTruthBonePose.boneMeshRef.Points, ...
+    expectedPointsRef, 'AbsTol', 1e-8);
 end
 
 
