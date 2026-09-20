@@ -10,7 +10,7 @@
     "F": "PRO",
     "T": "DIS"
   },
-  "bonePoseMode": "average",
+  "bonePoseMode": "first",
   "output": {
     "ultrasoundIntersectionOutputPath": "../outputs"
   }
