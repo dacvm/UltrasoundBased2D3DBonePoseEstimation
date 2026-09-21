@@ -41,6 +41,14 @@ dataFilePath = fullfile(projectRoot, 'tools', ...
     'validSnapshots_20260919_110840_meas04c.mat');
 loadedData = load(dataFilePath, 'validSnapshots', 'validBonePoses');
 
+% Load the extracted ultrasound bone surfaces separately. Each surface record
+% contains XYZ points that were already transformed into the ref frame by the
+% segmentation-recovery workflow.
+surfaceFilePath = fullfile(projectRoot, 'tools', ...
+    'boneSegmentationProcess', 'outputs', ...
+    'boneSurface_20260921_172157.mat');
+loadedSurfaceData = load(surfaceFilePath, 'surfaceResults');
+
 % This reviewed file contains one ultrasound sequence. Its bone code identifies
 % which mesh and pose sequence belongs with the ultrasound images. For this
 % recording the code is F, so the femur is selected instead of the tibia.
@@ -53,6 +61,16 @@ bonePoseIndex      = find(availableBoneCodes == boneCode, 1);
 bonePose           = loadedData.validBonePoses.bonePoses(bonePoseIndex);
 poseRecords        = bonePose.data;
 numberOfFrames     = numel(frameRecords);
+
+% Select the surface group describing the same acquisition location and bone as
+% the ultrasound group. This file contains femur_middle, but matching by stored
+% identity keeps the relationship visible instead of relying on array position.
+surfaceGroupNames = string({loadedSurfaceData.surfaceResults.name});
+surfaceGroupBones = string({loadedSurfaceData.surfaceResults.bone});
+surfaceGroupIndex = find( ...
+    surfaceGroupNames == string(snapshotGroup.name) & ...
+    surfaceGroupBones == boneCode, 1);
+surfaceRecords = loadedSurfaceData.surfaceResults(surfaceGroupIndex).data;
 
 %% PAIR EVERY ULTRASOUND FRAME WITH ITS BONE POSE
 
@@ -77,6 +95,21 @@ for frameIndex = 1:numberOfFrames
     end
 
     poseIndexByFrame(frameIndex) = matchingPoseIndex;
+end
+
+%% PAIR EVERY ULTRASOUND FRAME WITH ITS EXTRACTED SURFACE
+
+% Surface extraction preserves sourceIndex from the reviewed ultrasound file.
+% Match that stable identity once here so later code does not assume that two
+% independently saved arrays always have the same storage order.
+surfaceSourceIndices = [surfaceRecords.sourceIndex];
+surfaceIndexByFrame = zeros(1, numberOfFrames);
+
+for frameIndex = 1:numberOfFrames
+    frameSourceIndex = frameRecords(frameIndex).sourceIndex;
+    matchingSurfaceIndex = find( ...
+        surfaceSourceIndices == frameSourceIndex, 1);
+    surfaceIndexByFrame(frameIndex) = matchingSurfaceIndex;
 end
 
 %% SMOOTH THE IMAGE AND BONE POSE SEQUENCES
@@ -211,6 +244,57 @@ for displayedFrameIndex = 1:numberOfDisplayedFrames
     pairedDelaySeconds(displayedFrameIndex) = recordedTimes(imageFrameIndex) - recordedTimes(poseFrameIndex);
 end
 
+% Surface points were extracted from the ultrasound pixels, so they must follow
+% imageIndexByDisplayedFrame rather than poseIndexByDisplayedFrame. For example,
+% when an earlier pose is paired with a later recorded image, use the surface
+% extracted from that same later image.
+surfaceIndexByDisplayedFrame = ...
+    surfaceIndexByFrame(imageIndexByDisplayedFrame);
+
+%% RECONSTRUCT THE EXTRACTED SURFACE WITH THE SMOOTHED IMAGE POSES
+
+% surfaceCoordinatesXY is the measurement that belongs to the delayed image.
+% It has not yet been attached to a 3D tracking trajectory. Reconstruct it once
+% here so both visualizations use exactly the same local surface points.
+surfacePointsImageByDisplayedFrame = cell(1, numberOfDisplayedFrames);
+surfacePointsRefSmoothedByDisplayedFrame = ...
+    cell(1, numberOfDisplayedFrames);
+
+for displayedFrameIndex = 1:numberOfDisplayedFrames
+    poseFrameIndex = poseIndexByDisplayedFrame(displayedFrameIndex);
+    imageFrameIndex = imageIndexByDisplayedFrame(displayedFrameIndex);
+    surfaceIndex = surfaceIndexByDisplayedFrame(displayedFrameIndex);
+
+    imagePlane = frameRecords(imageFrameIndex).plane;
+    surfaceCoordinatesXY = ...
+        double(surfaceRecords(surfaceIndex).surfaceCoordinatesXY);
+
+    % surfaceCoordinatesXY stores one-based [column, row] positions. W and H
+    % measure the distance from the first to the last pixel centre, so dividing
+    % by count-1 gives the physical millimetres per pixel interval. Subtract one
+    % from the pixel coordinates to place the first pixel centre at [0, 0].
+    pixelSpacingX = imagePlane.W / (imagePlane.nCols - 1);
+    pixelSpacingY = imagePlane.H / (imagePlane.nRows - 1);
+    numberOfSurfacePoints = size(surfaceCoordinatesXY, 1);
+    surfacePointsImage = [ ...
+        (surfaceCoordinatesXY(:, 1) - 1) * pixelSpacingX, ...
+        (surfaceCoordinatesXY(:, 2) - 1) * pixelSpacingY, ...
+        zeros(numberOfSurfacePoints, 1)];
+
+    % Temporal compensation pairs the later image measurements with an earlier
+    % physical pose. Therefore, use the pose-side smoothed T_image_ref here—not
+    % the raw transform originally stored beside the later image record.
+    T_image_ref_smoothed = ...
+        imageTransformsRefSmoothed(:, :, poseFrameIndex);
+    surfacePointsRefSmoothed = applyRigidTransform( ...
+        surfacePointsImage, T_image_ref_smoothed);
+
+    surfacePointsImageByDisplayedFrame{displayedFrameIndex} = ...
+        surfacePointsImage;
+    surfacePointsRefSmoothedByDisplayedFrame{displayedFrameIndex} = ...
+        surfacePointsRefSmoothed;
+end
+
 %% CALCULATE FIXED LIMITS FOR THE COMPLETE ANIMATION
 
 % MATLAB normally changes the axes limits when plotted objects move. That would
@@ -253,7 +337,12 @@ for displayedFrameIndex = 1:numberOfDisplayedFrames
     % ultrasound rectangle in the same ref coordinate system as the bone mesh.
     imageCornersRef = applyRigidTransform(imageCorners, T_image_ref_smoothed);
 
-    currentPointsRef = [bonePointsRef; imageCornersRef];
+    % Use the extracted surface reconstructed with the same smoothed image pose
+    % that positions the displayed ultrasound plane in ref.
+    surfacePointsRef = ...
+        surfacePointsRefSmoothedByDisplayedFrame{displayedFrameIndex};
+
+    currentPointsRef = [bonePointsRef; imageCornersRef; surfacePointsRef];
     sceneMinimum     = min(sceneMinimum, min(currentPointsRef, [], 1));
     sceneMaximum     = max(sceneMaximum, max(currentPointsRef, [], 1));
 end
@@ -300,6 +389,18 @@ boneHandle = patch(sceneAxes, ...
     'FaceAlpha', 0.45, ...
     'DisplayName', 'Bone mesh');
 
+% Draw the first extracted surface as bright green points. These coordinates
+% were reconstructed with the same smoothed transform as the image plane.
+firstSurfacePointsRef = ...
+    surfacePointsRefSmoothedByDisplayedFrame{1};
+surfaceHandle = scatter3(sceneAxes, ...
+    firstSurfacePointsRef(:, 1), ...
+    firstSurfacePointsRef(:, 2), ...
+    firstSurfacePointsRef(:, 3), ...
+    12, [0.10, 0.95, 0.20], 'filled', ...
+    'MarkerEdgeColor', 'none', ...
+    'DisplayName', 'Extracted ultrasound surface');
+
 camlight(sceneAxes, 'headlight');
 lighting(sceneAxes, 'gouraud');
 colormap(sceneAxes, gray(256));
@@ -332,6 +433,14 @@ for displayedFrameIndex = 1:numberOfDisplayedFrames
     % transformed CT vertices need to be sent to the existing patch object.
     boneHandle.Vertices = applyRigidTransform( ...
         bonePose.meshCT.Points, T_CT_ref_smoothed);
+
+    % Use the delayed image's extracted surface after placing it with the same
+    % smoothed T_image_ref that positions the displayed ultrasound plane.
+    surfacePointsRef = ...
+        surfacePointsRefSmoothedByDisplayedFrame{displayedFrameIndex};
+    surfaceHandle.XData = surfacePointsRef(:, 1);
+    surfaceHandle.YData = surfacePointsRef(:, 2);
+    surfaceHandle.ZData = surfacePointsRef(:, 3);
 
     % Remove the previous textured plane and image coordinate axes before
     % drawing the new ultrasound pose. Recreating this small surface keeps the
@@ -444,6 +553,12 @@ for displayedFrameIndex = 1:numberOfDisplayedFrames
     % transform changes vertex coordinates but not the triangle connectivity.
     bonePointsImage = applyRigidTransform(bonePose.meshCT.Points, T_CT_imageByDisplayedFrame(:, :, displayedFrameIndex));
 
+    % The extracted surface was reconstructed directly from its stored 2D pixel
+    % coordinates, so it can be included beside the fixed image rectangle
+    % without passing through an unsmoothed ref-frame pose.
+    surfacePointsImage = ...
+        surfacePointsImageByDisplayedFrame{displayedFrameIndex};
+
     % The image plane is already in its own coordinate frame. Its top-left
     % corner is the origin, its width follows +X_image, and its height follows
     % +Y_image. No rigid transform is needed for these four corners.
@@ -455,7 +570,7 @@ for displayedFrameIndex = 1:numberOfDisplayedFrames
 
     % Let both the moving bone and fixed image rectangle contribute to the
     % limits, then update the accumulated minimum and maximum of each XYZ axis.
-    currentPointsImage = [bonePointsImage; imageCorners];
+    currentPointsImage = [bonePointsImage; imageCorners; surfacePointsImage];
     imageSceneMinimum = min(imageSceneMinimum, min(currentPointsImage, [], 1));
     imageSceneMaximum = max(imageSceneMaximum, max(currentPointsImage, [], 1));
 end
@@ -526,6 +641,18 @@ imageFrameBoneHandle = patch(imageAxes, ...
     'FaceAlpha', 0.45, ...
     'DisplayName', 'Bone mesh');
 
+% Draw the first extracted surface in local image coordinates. Because these
+% points and the ultrasound texture share the image frame, they lie on the fixed
+% image plane while the CT mesh moves relative to them.
+firstSurfacePointsImage = surfacePointsImageByDisplayedFrame{1};
+imageFrameSurfaceHandle = scatter3(imageAxes, ...
+    firstSurfacePointsImage(:, 1), ...
+    firstSurfacePointsImage(:, 2), ...
+    firstSurfacePointsImage(:, 3), ...
+    12, [0.10, 0.95, 0.20], 'filled', ...
+    'MarkerEdgeColor', 'none', ...
+    'DisplayName', 'Extracted ultrasound surface');
+
 % Lighting makes changes in surface orientation easier to see. The gray colormap
 % is used by the grayscale B-mode image texture drawn below.
 camlight(imageAxes, 'headlight');
@@ -566,6 +693,14 @@ for displayedFrameIndex = 1:numberOfDisplayedFrames
     imageFrameBoneHandle.Vertices = applyRigidTransform( ...
         bonePose.meshCT.Points, ...
         T_CT_imageByDisplayedFrame(:, :, displayedFrameIndex));
+
+    % Update the extracted points with the surface that belongs to the currently
+    % displayed delayed ultrasound image.
+    surfacePointsImage = ...
+        surfacePointsImageByDisplayedFrame{displayedFrameIndex};
+    imageFrameSurfaceHandle.XData = surfacePointsImage(:, 1);
+    imageFrameSurfaceHandle.YData = surfacePointsImage(:, 2);
+    imageFrameSurfaceHandle.ZData = surfacePointsImage(:, 3);
 
     % Recreate only the textured surface so the delay-compensated pixel content
     % advances over time. Every frame uses the same identity transform, keeping
