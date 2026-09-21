@@ -398,6 +398,13 @@ xlabel(dplotAxes, 'Timeframe');
 ylabel(dplotAxes, 'Estimated bone distance (mm)');
 title(dplotAxes, 'Bone distance from extracted ultrasound surface');
 xlim(dplotAxes, [timeframeValues(1), timeframeValues(end)]);
+
+% Keep the distance plot wider than it is tall. The axes still receives the
+% full width of the right layout tile, while MATLAB adds unused vertical space
+% above and below its plotting box. This prevents the plot from becoming almost
+% square when the figure window is maximized.
+pbaspect(dplotAxes, [2, 1, 1]);
+
 legend(dplotAxes, 'Location', 'best');
 
 %% DISPLAY BONE MOTION IN THE IMAGE FRAME
