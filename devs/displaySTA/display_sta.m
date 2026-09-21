@@ -7,6 +7,12 @@ clear; clc; close all;
 % the original acquisition timing.
 frameDelaySeconds = 0.05;
 
+% Use the same smoothing approach as smoothTransformations_demo.m. The window
+% controls how many neighbouring motion samples influence each result. A larger
+% value removes more jitter but can also soften fast, intentional movement.
+smoothingMethod = 'sgolay';
+smoothingWindow = 15;
+
 %% LOAD THE REVIEWED ULTRASOUND AND BONE DATA
 
 % Find the project root from this script instead of using a computer-specific
@@ -62,6 +68,39 @@ for frameIndex = 1:numberOfFrames
     poseIndexByFrame(frameIndex) = matchingPoseIndex;
 end
 
+%% SMOOTH THE IMAGE AND BONE POSE SEQUENCES
+
+% smoothTransformations expects a 4-by-4-by-N array. Build one transform stack
+% for the ultrasound image and another for the bone. They must be smoothed
+% separately because they come from different tracked rigid bodies:
+%
+%   - T_image_ref comes from the ultrasound sequence and maps image -> ref.
+%   - T_CT_ref comes from the rigid-body table and maps CT -> ref.
+%
+% Both transforms already have ref as their target frame. Smoothing them in
+% their current form therefore reduces visible pose jitter without changing the
+% transformation chains used later to place the image and mesh in the scene.
+imageTransformsRef = zeros(4, 4, numberOfFrames);
+boneTransformsRef = zeros(4, 4, numberOfFrames);
+
+for frameIndex = 1:numberOfFrames
+    currentPlane = frameRecords(frameIndex).plane;
+    currentPose = poseRecords(poseIndexByFrame(frameIndex));
+
+    imageTransformsRef(:, :, frameIndex) = currentPlane.T_image_ref;
+    boneTransformsRef(:, :, frameIndex) = currentPose.T_CT_ref;
+end
+
+imageTransformsRefSmoothed = smoothTransformations( ...
+    imageTransformsRef, ...
+    'method', smoothingMethod, ...
+    'window', smoothingWindow);
+
+boneTransformsRefSmoothed = smoothTransformations( ...
+    boneTransformsRef, ...
+    'method', smoothingMethod, ...
+    'window', smoothingWindow);
+
 %% CALCULATE FIXED LIMITS FOR THE COMPLETE ANIMATION
 
 % MATLAB normally changes the axes limits when plotted objects move. That would
@@ -72,7 +111,8 @@ sceneMaximum = [-Inf, -Inf, -Inf];
 
 for frameIndex = 1:numberOfFrames
     currentPlane = frameRecords(frameIndex).plane;
-    currentPose = poseRecords(poseIndexByFrame(frameIndex));
+    T_image_ref_smoothed = imageTransformsRefSmoothed(:, :, frameIndex);
+    T_CT_ref_smoothed = boneTransformsRefSmoothed(:, :, frameIndex);
 
     % Mesh vertices are stored in CT coordinates. T_CT_ref maps a CT point into
     % ref coordinates, following the project convention:
@@ -82,7 +122,7 @@ for frameIndex = 1:numberOfFrames
     % The anatomical T_bone_ref transform is not used here because the mesh
     % vertices do not live in the anatomical bone coordinate frame.
     bonePointsRef = applyRigidTransform( ...
-        bonePose.meshCT.Points, currentPose.T_CT_ref);
+        bonePose.meshCT.Points, T_CT_ref_smoothed);
 
     % These four points describe the ultrasound rectangle in its own image
     % frame. W and H are physical distances, so the corners use millimetres
@@ -97,7 +137,7 @@ for frameIndex = 1:numberOfFrames
     % chain prepared during spatial processing. Applying it places the physical
     % ultrasound rectangle in the same ref coordinate system as the bone mesh.
     imageCornersRef = applyRigidTransform( ...
-        imageCorners, currentPlane.T_image_ref);
+        imageCorners, T_image_ref_smoothed);
 
     currentPointsRef = [bonePointsRef; imageCornersRef];
     sceneMinimum = min(sceneMinimum, min(currentPointsRef, [], 1));
@@ -110,7 +150,7 @@ scenePadding = 0.05 * max(sceneMaximum - sceneMinimum);
 %% PREPARE THE 3D SCENE
 
 figureHandle = figure( ...
-    'Name', 'Sequential ultrasound and bone pose in ref', ...
+    'Name', 'Smoothed ultrasound and bone poses in ref', ...
     'Color', 'white');
 sceneAxes = axes(figureHandle);
 
@@ -134,9 +174,8 @@ zlim(sceneAxes, [sceneMinimum(3) - scenePadding, ...
 % Create the bone surface once. During playback only its Vertices property is
 % changed, because a rigid transform moves vertices without changing which
 % three vertices form each triangular face.
-firstPose = poseRecords(poseIndexByFrame(1));
 firstBonePointsRef = applyRigidTransform( ...
-    bonePose.meshCT.Points, firstPose.T_CT_ref);
+    bonePose.meshCT.Points, boneTransformsRefSmoothed(:, :, 1));
 
 boneHandle = patch(sceneAxes, ...
     'Faces', bonePose.meshCT.ConnectivityList, ...
@@ -161,12 +200,13 @@ for frameIndex = 1:numberOfFrames
     end
 
     currentPlane = frameRecords(frameIndex).plane;
-    currentPose = poseRecords(poseIndexByFrame(frameIndex));
+    T_image_ref_smoothed = imageTransformsRefSmoothed(:, :, frameIndex);
+    T_CT_ref_smoothed = boneTransformsRefSmoothed(:, :, frameIndex);
 
     % Update the bone pose in ref. The connectivity stays fixed, so only the
     % transformed CT vertices need to be sent to the existing patch object.
     boneHandle.Vertices = applyRigidTransform( ...
-        bonePose.meshCT.Points, currentPose.T_CT_ref);
+        bonePose.meshCT.Points, T_CT_ref_smoothed);
 
     % Remove the previous textured plane and image coordinate axes before
     % drawing the new ultrasound pose. Recreating this small surface keeps the
@@ -184,7 +224,7 @@ for frameIndex = 1:numberOfFrames
     pixelSpacingY = currentPlane.H / (currentPlane.nRows - 1);
 
     imageHandle = display_image3D( ...
-        sceneAxes, currentPlane.image, currentPlane.T_image_ref, ...
+        sceneAxes, currentPlane.image, T_image_ref_smoothed, ...
         'SwapXY', true, ...
         'PixelSpacing', [pixelSpacingX, pixelSpacingY], ...
         'Tag', 'plot_sta_ultrasound_image', ...
@@ -193,10 +233,10 @@ for frameIndex = 1:numberOfFrames
 
     % Show the image-frame X, Y, and Z directions. The red and green arrows lie
     % in the ultrasound plane; the blue arrow is its normal direction. Because
-    % these axes come directly from T_image_ref, their origin and orientation
-    % are expressed in ref coordinates.
-    imageOriginRef = currentPlane.T_image_ref(1:3, 4);
-    imageAxesRef = currentPlane.T_image_ref(1:3, 1:3);
+    % these axes come directly from the smoothed T_image_ref, their origin and
+    % orientation are expressed in ref coordinates.
+    imageOriginRef = T_image_ref_smoothed(1:3, 4);
+    imageAxesRef = T_image_ref_smoothed(1:3, 1:3);
     imageAxisScale = 0.20 * max(currentPlane.W, currentPlane.H);
     display_axis_v2( ...
         sceneAxes, imageOriginRef, imageAxesRef, imageAxisScale, 'Image', ...
