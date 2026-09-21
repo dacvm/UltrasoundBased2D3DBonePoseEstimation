@@ -208,8 +208,7 @@ for displayedFrameIndex = 1:numberOfDisplayedFrames
     % Record the delay that was actually achieved by the nearest image. It may
     % differ slightly from temporalDelaySeconds because the image sequence has
     % discrete timestamps. This value is shown in the figure title for review.
-    pairedDelaySeconds(displayedFrameIndex) = ...
-        recordedTimes(imageFrameIndex) - recordedTimes(poseFrameIndex);
+    pairedDelaySeconds(displayedFrameIndex) = recordedTimes(imageFrameIndex) - recordedTimes(poseFrameIndex);
 end
 
 %% CALCULATE FIXED LIMITS FOR THE COMPLETE ANIMATION
@@ -272,7 +271,6 @@ sceneAxes = axes(figureHandle);
 hold(sceneAxes, 'on');
 grid(sceneAxes, 'on');
 axis(sceneAxes, 'equal');
-axis(sceneAxes, 'vis3d');
 view(sceneAxes, 35, 30);
 
 xlabel(sceneAxes, 'X_{ref} (mm)');
@@ -310,263 +308,68 @@ imageHandle = gobjects(0);
 
 %% DISPLAY THE SEQUENCE FRAME BY FRAME
 
-% % Loop through every compensated pair to animate its poses and image pixels.
-% for displayedFrameIndex = 1:numberOfDisplayedFrames
-%     % Allow the animation to stop cleanly when the user closes its figure.
-%     if ~isvalid(figureHandle)
-%         break;
-%     end
-% 
-%     % Two indices are intentionally used here:
-%     %
-%     %   poseFrameIndex  selects the synchronized image-plane and bone poses.
-%     %   imageFrameIndex selects the later ultrasound pixels that correspond to
-%     %                   the earlier physical pose after delay compensation.
-%     poseFrameIndex = poseIndexByDisplayedFrame(displayedFrameIndex);
-%     imageFrameIndex = imageIndexByDisplayedFrame(displayedFrameIndex);
-% 
-%     posePlane = frameRecords(poseFrameIndex).plane;
-%     imagePlane = frameRecords(imageFrameIndex).plane;
-%     T_image_ref_smoothed = imageTransformsRefSmoothed(:, :, poseFrameIndex);
-%     T_CT_ref_smoothed = boneTransformsRefSmoothed(:, :, poseFrameIndex);
-% 
-%     % Update the bone pose in ref. The connectivity stays fixed, so only the
-%     % transformed CT vertices need to be sent to the existing patch object.
-%     boneHandle.Vertices = applyRigidTransform( ...
-%         bonePose.meshCT.Points, T_CT_ref_smoothed);
-% 
-%     % Remove the previous textured plane and image coordinate axes before
-%     % drawing the new ultrasound pose. Recreating this small surface keeps the
-%     % animation code easier to follow than manually updating all texture fields.
-%     if ~isempty(imageHandle) && isvalid(imageHandle)
-%         delete(imageHandle);
-%     end
-%     delete(findobj(sceneAxes, 'Tag', 'plot_sta_image_axes'));
-% 
-%     % The stored image matrix uses [column, row] order, so display_image3D swaps
-%     % its first two dimensions. W and H describe the physical plane extents;
-%     % dividing them by the number of pixel intervals recovers the calibration
-%     % spacing expected by the display helper.
-%     pixelSpacingX = imagePlane.W / (imagePlane.nCols - 1);
-%     pixelSpacingY = imagePlane.H / (imagePlane.nRows - 1);
-% 
-%     imageHandle = display_image3D( ...
-%         sceneAxes, imagePlane.image, T_image_ref_smoothed, ...
-%         'SwapXY', true, ...
-%         'PixelSpacing', [pixelSpacingX, pixelSpacingY], ...
-%         'Tag', 'plot_sta_ultrasound_image', ...
-%         'Colormap', 'gray', ...
-%         'FaceAlpha', 0.75);
-% 
-%     % Show the image-frame X, Y, and Z directions. The red and green arrows lie
-%     % in the ultrasound plane; the blue arrow is its normal direction. Because
-%     % these axes come directly from the smoothed T_image_ref, their origin and
-%     % orientation are expressed in ref coordinates.
-%     imageOriginRef = T_image_ref_smoothed(1:3, 4);
-%     imageAxesRef = T_image_ref_smoothed(1:3, 1:3);
-%     imageAxisScale = 0.20 * max(imagePlane.W, imagePlane.H);
-%     display_axis_v2( ...
-%         sceneAxes, imageOriginRef, imageAxesRef, imageAxisScale, 'Image', ...
-%         'Tag', 'plot_sta_image_axes', ...
-%         'Mode', 'thin');
-% 
-%     title(sceneAxes, { ...
-%         sprintf('%s | Bone %s', string(snapshotGroup.name), boneCode), ...
-%         sprintf('Frame %d of %d | Requested delay %.3f s', ...
-%             displayedFrameIndex, numberOfDisplayedFrames, ...
-%             temporalDelaySeconds), ...
-%         sprintf(['Pose row %d at %.3f s | Image row %d at %.3f s | ' ...
-%             'Paired delay %.3f s'], ...
-%             posePlane.rigidBodyRowIndex, recordedTimes(poseFrameIndex), ...
-%             imagePlane.rigidBodyRowIndex, recordedTimes(imageFrameIndex), ...
-%             pairedDelaySeconds(displayedFrameIndex))}, ...
-%         'Interpreter', 'none');
-% 
-%     drawnow;
-%     pause(frameDelaySeconds);
-% end
-
-%% PART 2: EXPRESS THE IMAGE PLANE AND BONE IN THE ULTRASOUND SENSOR FRAME
-
-% The tracked ultrasound sensor is the probe. The fCal configuration contains
-% the fixed transform T_image_probe, which places the image plane inside that
-% probe coordinate frame. Read the same calibration file used by the spatial-
-% processing workflow so this second view uses the established frame relation.
-configurationPath = fullfile(projectRoot, 'tools', ...
-    'ultrasoundSpatialProcessing', 'configs', ...
-    'ultrasoundBone_intersectionData_poseModesConfig.json');
-rawConfiguration = jsondecode(fileread(configurationPath));
-configurationDirectory = fileparts(configurationPath);
-fcalFilePath = fullfile(configurationDirectory, ...
-    rawConfiguration.input.fcalConfigFilePath, ...
-    rawConfiguration.input.fcalConfigFileName);
-
-calibrationTransforms = read_fcal_transforms(fcalFilePath);
-imageToProbeIndex = find(strcmp( ...
-    {calibrationTransforms.Name}, 'ImageToProbe'), 1);
-T_image_probe = calibrationTransforms(imageToProbeIndex).Matrix;
-
-% The 3-by-3 block read from fCal also contains pixel scaling. Image width and
-% height already carry that physical scale, so T_image_probe must contain only
-% a proper rotation and translation. This is the same separation performed when
-% the original T_image_ref records were prepared.
-R_image_probe_raw = T_image_probe(1:3, 1:3);
-[U_image_probe, ~, V_image_probe] = svd(R_image_probe_raw);
-R_image_probe = U_image_probe * V_image_probe';
-
-if det(R_image_probe) < 0
-    U_image_probe(:, 3) = -U_image_probe(:, 3);
-    R_image_probe = U_image_probe * V_image_probe';
-end
-
-T_image_probe(1:3, 1:3) = R_image_probe;
-
-% Calculate every bone pose relative to the moving probe before creating the
-% second figure. The transform chain for one time frame is:
-%
-%     T_image_ref = T_probe_ref * T_image_probe
-%
-% First recover the probe pose in ref:
-%
-%     T_probe_ref = T_image_ref / T_image_probe
-%
-% Mesh vertices begin in CT. T_CT_ref moves them into ref, then left division
-% by T_probe_ref moves them from ref into the current probe frame:
-%
-%     T_CT_probe = T_probe_ref \ T_CT_ref
-%
-% Consequently, applying T_CT_probe makes the probe stay still while the bone
-% shows the relative motion measured between the two tracked rigid bodies.
-T_CT_probeByDisplayedFrame = zeros(4, 4, numberOfDisplayedFrames);
-
+% Loop through every compensated pair to animate its poses and image pixels.
 for displayedFrameIndex = 1:numberOfDisplayedFrames
-    poseFrameIndex = poseIndexByDisplayedFrame(displayedFrameIndex);
-    T_image_ref_smoothed = imageTransformsRefSmoothed(:, :, poseFrameIndex);
-    T_CT_ref_smoothed = boneTransformsRefSmoothed(:, :, poseFrameIndex);
-
-    T_probe_ref_smoothed = T_image_ref_smoothed / T_image_probe;
-    T_CT_probeByDisplayedFrame(:, :, displayedFrameIndex) = ...
-        T_probe_ref_smoothed \ T_CT_ref_smoothed;
-end
-
-%% CALCULATE FIXED LIMITS IN THE ULTRASOUND SENSOR FRAME
-
-% Include every moving bone pose, the fixed image-plane rectangle, and the probe
-% origin. One shared extent prevents the camera from zooming during playback.
-sensorSceneMinimum = [Inf, Inf, Inf];
-sensorSceneMaximum = [-Inf, -Inf, -Inf];
-
-for displayedFrameIndex = 1:numberOfDisplayedFrames
-    imageFrameIndex = imageIndexByDisplayedFrame(displayedFrameIndex);
-    imagePlane      = frameRecords(imageFrameIndex).plane;
-
-    bonePointsProbe = applyRigidTransform( ...
-        bonePose.meshCT.Points, ...
-        T_CT_probeByDisplayedFrame(:, :, displayedFrameIndex));
-
-    imageCorners = [ ...
-        0,            0,            0; ...
-        imagePlane.W, 0,            0; ...
-        imagePlane.W, imagePlane.H, 0; ...
-        0,            imagePlane.H, 0];
-    imageCornersProbe = applyRigidTransform(imageCorners, T_image_probe);
-
-    currentPointsProbe = [bonePointsProbe; imageCornersProbe; 0, 0, 0];
-    sensorSceneMinimum = min(sensorSceneMinimum, min(currentPointsProbe, [], 1));
-    sensorSceneMaximum = max(sensorSceneMaximum, max(currentPointsProbe, [], 1));
-end
-
-sensorScenePadding = 0.05 * max(sensorSceneMaximum - sensorSceneMinimum);
-
-%% PREPARE THE ULTRASOUND SENSOR-FRAME SCENE
-
-sensorFigureHandle = figure( ...
-    'Name', 'Bone motion relative to the ultrasound sensor', ...
-    'Color', 'white');
-sensorAxes = axes(sensorFigureHandle);
-
-hold(sensorAxes, 'on');
-grid(sensorAxes, 'on');
-axis(sensorAxes, 'equal');
-axis(sensorAxes, 'vis3d');
-view(sensorAxes, 35, 30);
-
-xlabel(sensorAxes, 'X_{probe} (mm)');
-ylabel(sensorAxes, 'Y_{probe} (mm)');
-zlabel(sensorAxes, 'Z_{probe} (mm)');
-
-xlim(sensorAxes, [sensorSceneMinimum(1) - sensorScenePadding, ...
-                   sensorSceneMaximum(1) + sensorScenePadding]);
-ylim(sensorAxes, [sensorSceneMinimum(2) - sensorScenePadding, ...
-                   sensorSceneMaximum(2) + sensorScenePadding]);
-zlim(sensorAxes, [sensorSceneMinimum(3) - sensorScenePadding, ...
-                   sensorSceneMaximum(3) + sensorScenePadding]);
-
-% Draw the probe axes once at the origin. These axes never move because the
-% probe itself is the reference frame of this figure.
-firstImageFrameIndex = imageIndexByDisplayedFrame(1);
-firstImagePlane = frameRecords(firstImageFrameIndex).plane;
-probeAxisScale = 0.20 * max(firstImagePlane.W, firstImagePlane.H);
-display_axis_v2( ...
-    sensorAxes, zeros(3, 1), eye(3), probeAxisScale, 'Probe', ...
-    'Tag', 'plot_sta_probe_axes', ...
-    'Mode', 'thin');
-
-firstBonePointsProbe = applyRigidTransform( ...
-    bonePose.meshCT.Points, T_CT_probeByDisplayedFrame(:, :, 1));
-sensorBoneHandle = patch(sensorAxes, ...
-    'Faces', bonePose.meshCT.ConnectivityList, ...
-    'Vertices', firstBonePointsProbe, ...
-    'FaceColor', [0.92, 0.83, 0.74], ...
-    'EdgeColor', 'none', ...
-    'FaceAlpha', 0.45, ...
-    'DisplayName', 'Bone mesh');
-
-camlight(sensorAxes, 'headlight');
-lighting(sensorAxes, 'gouraud');
-colormap(sensorAxes, gray(256));
-
-sensorImageHandle = gobjects(0);
-
-%% DISPLAY THE SEQUENCE IN THE ULTRASOUND SENSOR FRAME
-
-for displayedFrameIndex = 1:numberOfDisplayedFrames
-    if ~isvalid(sensorFigureHandle)
+    % Allow the animation to stop cleanly when the user closes its figure.
+    if ~isvalid(figureHandle)
         break;
     end
 
+    % Two indices are intentionally used here:
+    %
+    %   poseFrameIndex  selects the synchronized image-plane and bone poses.
+    %   imageFrameIndex selects the later ultrasound pixels that correspond to
+    %                   the earlier physical pose after delay compensation.
     poseFrameIndex = poseIndexByDisplayedFrame(displayedFrameIndex);
     imageFrameIndex = imageIndexByDisplayedFrame(displayedFrameIndex);
+
     posePlane = frameRecords(poseFrameIndex).plane;
     imagePlane = frameRecords(imageFrameIndex).plane;
+    T_image_ref_smoothed = imageTransformsRefSmoothed(:, :, poseFrameIndex);
+    T_CT_ref_smoothed = boneTransformsRefSmoothed(:, :, poseFrameIndex);
 
-    % The bone vertices change because T_CT_probe changes over time. In contrast,
-    % T_image_probe is a fixed calibration, so the image plane stays at exactly
-    % the same position and orientation inside the probe coordinate frame.
-    sensorBoneHandle.Vertices = applyRigidTransform( ...
-        bonePose.meshCT.Points, ...
-        T_CT_probeByDisplayedFrame(:, :, displayedFrameIndex));
+    % Update the bone pose in ref. The connectivity stays fixed, so only the
+    % transformed CT vertices need to be sent to the existing patch object.
+    boneHandle.Vertices = applyRigidTransform( ...
+        bonePose.meshCT.Points, T_CT_ref_smoothed);
 
-    % Recreate only the textured surface so its pixel content advances through
-    % the delay-compensated sequence. Its geometry remains fixed because every
-    % frame uses the same T_image_probe transform.
-    if ~isempty(sensorImageHandle) && isvalid(sensorImageHandle)
-        delete(sensorImageHandle);
+    % Remove the previous textured plane and image coordinate axes before
+    % drawing the new ultrasound pose. Recreating this small surface keeps the
+    % animation code easier to follow than manually updating all texture fields.
+    if ~isempty(imageHandle) && isvalid(imageHandle)
+        delete(imageHandle);
     end
+    delete(findobj(sceneAxes, 'Tag', 'plot_sta_image_axes'));
 
+    % The stored image matrix uses [column, row] order, so display_image3D swaps
+    % its first two dimensions. W and H describe the physical plane extents;
+    % dividing them by the number of pixel intervals recovers the calibration
+    % spacing expected by the display helper.
     pixelSpacingX = imagePlane.W / (imagePlane.nCols - 1);
     pixelSpacingY = imagePlane.H / (imagePlane.nRows - 1);
-    sensorImageHandle = display_image3D( ...
-        sensorAxes, imagePlane.image, T_image_probe, ...
+
+    imageHandle = display_image3D( ...
+        sceneAxes, imagePlane.image, T_image_ref_smoothed, ...
         'SwapXY', true, ...
         'PixelSpacing', [pixelSpacingX, pixelSpacingY], ...
-        'Tag', 'plot_sta_sensor_ultrasound_image', ...
+        'Tag', 'plot_sta_ultrasound_image', ...
         'Colormap', 'gray', ...
         'FaceAlpha', 0.75);
 
-    title(sensorAxes, { ...
-        sprintf('%s | Bone %s | Ultrasound sensor frame', ...
-            string(snapshotGroup.name), boneCode), ...
+    % Show the image-frame X, Y, and Z directions. The red and green arrows lie
+    % in the ultrasound plane; the blue arrow is its normal direction. Because
+    % these axes come directly from the smoothed T_image_ref, their origin and
+    % orientation are expressed in ref coordinates.
+    imageOriginRef = T_image_ref_smoothed(1:3, 4);
+    imageAxesRef = T_image_ref_smoothed(1:3, 1:3);
+    imageAxisScale = 0.20 * max(imagePlane.W, imagePlane.H);
+    display_axis_v2( ...
+        sceneAxes, imageOriginRef, imageAxesRef, imageAxisScale, 'Image', ...
+        'Tag', 'plot_sta_image_axes', ...
+        'Mode', 'thin');
+
+    title(sceneAxes, { ...
+        sprintf('%s | Bone %s', string(snapshotGroup.name), boneCode), ...
         sprintf('Frame %d of %d | Requested delay %.3f s', ...
             displayedFrameIndex, numberOfDisplayedFrames, ...
             temporalDelaySeconds), ...
@@ -577,6 +380,238 @@ for displayedFrameIndex = 1:numberOfDisplayedFrames
             pairedDelaySeconds(displayedFrameIndex))}, ...
         'Interpreter', 'none');
 
+    drawnow;
+    pause(frameDelaySeconds);
+end
+
+%% PART 2: EXPRESS THE IMAGE PLANE AND BONE IN THE IMAGE FRAME
+
+% The image frame itself is the fixed reference frame for this visualization.
+% Both available time-varying transforms currently end in ref:
+%
+%     p_ref = T_image_ref * p_image
+%     p_ref = T_CT_ref    * p_CT
+%
+% We want one transform that maps a CT mesh point directly into image. Solving
+% the two equations for p_image gives:
+%
+%     p_image = T_image_ref \ T_CT_ref * p_CT
+%
+% Therefore:
+%
+%     T_CT_image = T_image_ref \ T_CT_ref
+%
+% Using this transform removes the shared motion of the ultrasound image frame
+% in ref. The image plane stays fixed at Z_image = 0, while the bone shows only
+% its changing position and orientation relative to that image plane.
+% Preallocate one 4-by-4 transform for every displayed frame. Keeping the
+% coordinate conversion outside the drawing loop makes the later animation
+% easier to read and avoids repeating the same calculation during rendering.
+T_CT_imageByDisplayedFrame = zeros(4, 4, numberOfDisplayedFrames);
+
+for displayedFrameIndex = 1:numberOfDisplayedFrames
+    % Temporal compensation can pair a pose with pixels from another row. Use
+    % the pose-side index here because both rigid-body transforms must describe
+    % the same physical time before their relative transform is calculated.
+    poseFrameIndex = poseIndexByDisplayedFrame(displayedFrameIndex);
+
+    % Retrieve the two smoothed transforms that currently end in ref.
+    T_image_ref_smoothed = imageTransformsRefSmoothed(:, :, poseFrameIndex);
+    T_CT_ref_smoothed = boneTransformsRefSmoothed(:, :, poseFrameIndex);
+
+    % Left division solves
+    % T_image_ref_smoothed * T_CT_image = T_CT_ref_smoothed without explicitly
+    % calculating an inverse. The result maps CT mesh vertices into image.
+    T_CT_imageByDisplayedFrame(:, :, displayedFrameIndex) = T_image_ref_smoothed \ T_CT_ref_smoothed;
+end
+
+%% CALCULATE FIXED LIMITS IN THE IMAGE FRAME
+
+% Include every moving bone pose and the fixed image rectangle. One shared
+% extent prevents the camera from zooming while the animation is playing.
+% Start with opposite infinities so the first set of points always replaces the
+% initial values, after which later frames can expand the accumulated bounds.
+imageSceneMinimum = [Inf, Inf, Inf];
+imageSceneMaximum = [-Inf, -Inf, -Inf];
+
+for displayedFrameIndex = 1:numberOfDisplayedFrames
+
+    % The temporally paired image record supplies the physical plane dimensions.
+    imageFrameIndex = imageIndexByDisplayedFrame(displayedFrameIndex);
+    imagePlane      = frameRecords(imageFrameIndex).plane;
+
+    % Move all CT vertices into the image frame for this displayed pose. A rigid
+    % transform changes vertex coordinates but not the triangle connectivity.
+    bonePointsImage = applyRigidTransform(bonePose.meshCT.Points, T_CT_imageByDisplayedFrame(:, :, displayedFrameIndex));
+
+    % The image plane is already in its own coordinate frame. Its top-left
+    % corner is the origin, its width follows +X_image, and its height follows
+    % +Y_image. No rigid transform is needed for these four corners.
+    imageCorners = [ ...
+        0,            0,            0; ...
+        imagePlane.W, 0,            0; ...
+        imagePlane.W, imagePlane.H, 0; ...
+        0,            imagePlane.H, 0];
+
+    % Let both the moving bone and fixed image rectangle contribute to the
+    % limits, then update the accumulated minimum and maximum of each XYZ axis.
+    currentPointsImage = [bonePointsImage; imageCorners];
+    imageSceneMinimum = min(imageSceneMinimum, min(currentPointsImage, [], 1));
+    imageSceneMaximum = max(imageSceneMaximum, max(currentPointsImage, [], 1));
+end
+
+% Add five percent of the largest scene dimension on every side. One padding
+% value gives a consistent visual margin along X, Y, and Z.
+imageScenePadding = 0.05 * max(imageSceneMaximum - imageSceneMinimum);
+
+%% PREPARE THE IMAGE-FRAME SCENE
+
+% Create a dedicated figure so this view remains independent from the optional
+% ref-frame visualization above it.
+imageFigureHandle = figure( ...
+    'Name', 'Bone motion relative to the ultrasound image', ...
+    'Color', 'white');
+
+% Explicitly attach all Part 2 graphics to these axes. This prevents MATLAB from
+% drawing into another figure that happens to be active.
+imageAxes = axes(imageFigureHandle);
+
+% Keep all objects visible together, show spatial reference lines, preserve the
+% same physical scale in every direction, and select an initial camera angle.
+hold(imageAxes, 'on');
+grid(imageAxes, 'on');
+axis(imageAxes, 'equal');
+view(imageAxes, -60, 40);
+
+% State both the coordinate frame and the physical unit on each axis.
+xlabel(imageAxes, 'X_{image} (mm)');
+ylabel(imageAxes, 'Y_{image} (mm)');
+zlabel(imageAxes, 'Z_{image} (mm)');
+
+% Apply the limits calculated from the complete sequence. These limits stay
+% fixed while the image texture and bone vertices change during playback.
+xlim(imageAxes, [imageSceneMinimum(1) - imageScenePadding, ...
+                  imageSceneMaximum(1) + imageScenePadding]);
+ylim(imageAxes, [imageSceneMinimum(2) - imageScenePadding, ...
+                  imageSceneMaximum(2) + imageScenePadding]);
+zlim(imageAxes, [imageSceneMinimum(3) - imageScenePadding, ...
+                  imageSceneMaximum(3) + imageScenePadding]);
+
+% Draw the image coordinate axes once at the origin. They remain fixed because
+% the image coordinate frame is the reference frame of this figure.
+% The first displayed image supplies a representative plane size used only to
+% choose readable arrow lengths; it does not affect a transformation.
+firstImageFrameIndex = imageIndexByDisplayedFrame(1);
+firstImagePlane      = frameRecords(firstImageFrameIndex).plane;
+imageAxisScale       = 0.20 * max(firstImagePlane.W, firstImagePlane.H);
+
+% An origin of zeros and basis eye(3) draw the image frame itself: red follows
+% +X_image, green follows +Y_image, and blue follows +Z_image.
+display_axis_v2( ...
+    imageAxes, zeros(3, 1), eye(3), imageAxisScale, 'Image', ...
+    'Tag', 'plot_sta_fixed_image_axes', ...
+    'Mode', 'thin');
+
+% Transform the CT vertices for the first displayed pose so the bone surface can
+% be created at its correct initial image-frame position.
+firstBonePointsImage = applyRigidTransform(bonePose.meshCT.Points, T_CT_imageByDisplayedFrame(:, :, 1));
+
+% Create the mesh once. Later frames replace only Vertices because rigid motion
+% does not change which three vertices form each triangular Face.
+imageFrameBoneHandle = patch(imageAxes, ...
+    'Faces', bonePose.meshCT.ConnectivityList, ...
+    'Vertices', firstBonePointsImage, ...
+    'FaceColor', [0.92, 0.83, 0.74], ...
+    'EdgeColor', 'none', ...
+    'FaceAlpha', 0.45, ...
+    'DisplayName', 'Bone mesh');
+
+% Lighting makes changes in surface orientation easier to see. The gray colormap
+% is used by the grayscale B-mode image texture drawn below.
+camlight(imageAxes, 'headlight');
+lighting(imageAxes, 'gouraud');
+colormap(imageAxes, gray(256));
+
+% No ultrasound surface exists before the first iteration. gobjects(0) provides
+% an empty graphics handle that can be checked safely before deletion.
+fixedImageHandle = gobjects(0);
+
+% A coordinate frame expressed in itself has identity rotation and zero
+% translation. Reusing this transform guarantees that the image plane stays
+% fixed while its pixel values change.
+T_image_image = eye(4);
+
+%% DISPLAY THE SEQUENCE IN THE IMAGE FRAME
+
+for displayedFrameIndex = 1:numberOfDisplayedFrames
+    % Stop playback naturally if the user closes this figure.
+    if ~isvalid(imageFigureHandle)
+        break;
+    end
+
+    % Read both sides of the temporal-delay pairing:
+    % - poseFrameIndex controls the relative bone transformation.
+    % - imageFrameIndex selects the later ultrasound pixel data.
+    poseFrameIndex  = poseIndexByDisplayedFrame(displayedFrameIndex);
+    imageFrameIndex = imageIndexByDisplayedFrame(displayedFrameIndex);
+
+    % Keep the full records for readable metadata access in the title.
+    % imagePlane also contains the pixel matrix and physical plane dimensions.
+    posePlane  = frameRecords(poseFrameIndex).plane;
+    imagePlane = frameRecords(imageFrameIndex).plane;
+
+    % The bone vertices change because T_CT_image changes over time. The image
+    % plane uses T_image_image = identity, so its position and orientation can
+    % never move away from the image-frame origin and XY plane.
+    imageFrameBoneHandle.Vertices = applyRigidTransform( ...
+        bonePose.meshCT.Points, ...
+        T_CT_imageByDisplayedFrame(:, :, displayedFrameIndex));
+
+    % Recreate only the textured surface so the delay-compensated pixel content
+    % advances over time. Every frame uses the same identity transform, keeping
+    % the ultrasound plane geometry fixed.
+    if ~isempty(fixedImageHandle) && isvalid(fixedImageHandle)
+        delete(fixedImageHandle);
+    end
+
+    % W and H measure the distance from the first to the last pixel centre.
+    % Dividing by count-1 recovers the physical spacing between neighbouring
+    % pixels along local X_image and Y_image.
+    pixelSpacingX = imagePlane.W / (imagePlane.nCols - 1);
+    pixelSpacingY = imagePlane.H / (imagePlane.nRows - 1);
+
+    % Draw the new pixel matrix on the fixed image-frame XY plane. SwapXY is
+    % required because acquisition packets store their matrix as [column, row].
+    fixedImageHandle = display_image3D( ...
+        imageAxes, imagePlane.image, T_image_image, ...
+        'SwapXY', true, ...
+        'PixelSpacing', [pixelSpacingX, pixelSpacingY], ...
+        'Tag', 'plot_sta_fixed_ultrasound_image', ...
+        'Colormap', 'gray', ...
+        'FaceAlpha', 0.75);
+
+    % Show both source rows so the user can inspect the temporal pairing. The
+    % actual paired delay may differ slightly from the request because the code
+    % chooses the closest available discrete ultrasound image.
+    title(imageAxes, { ...
+        sprintf('%s | Bone %s | Ultrasound image frame', ...
+            string(snapshotGroup.name), ...
+            boneCode), ...
+        sprintf('Frame %d of %d | Requested delay %.3f s', ...
+            displayedFrameIndex, ...
+            numberOfDisplayedFrames, ...
+            temporalDelaySeconds), ...
+        sprintf(['Pose row %d at %.3f s | Image row %d at %.3f s | ' ...
+            'Paired delay %.3f s'], ...
+            posePlane.rigidBodyRowIndex, ...
+            recordedTimes(poseFrameIndex), ...
+            imagePlane.rigidBodyRowIndex, ...
+            recordedTimes(imageFrameIndex), ...
+            pairedDelaySeconds(displayedFrameIndex))}, ...
+        'Interpreter', 'none');
+
+    % Send the new vertices, texture, and title to the figure, then wait for the
+    % configured playback interval before advancing to the next pair.
     drawnow;
     pause(frameDelaySeconds);
 end
