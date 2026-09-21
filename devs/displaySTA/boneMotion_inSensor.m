@@ -146,6 +146,13 @@ surfaceIndexByDisplayedFrame = ...
 % in this image-frame visualization without using an unsmoothed tracking pose.
 surfacePointsImageByDisplayedFrame = cell(1, numberOfDisplayedFrames);
 
+% Store one simple skin-to-bone distance estimate for every displayed
+% timeframe. Each estimate comes only from the extracted ultrasound surface:
+% the mean describes its average depth, while the standard deviation describes
+% how much the extracted surface depth varies across that image.
+d_bone_mean = zeros(1, numberOfDisplayedFrames);
+d_bone_std = zeros(1, numberOfDisplayedFrames);
+
 for displayedFrameIndex = 1:numberOfDisplayedFrames
     imageFrameIndex = imageIndexByDisplayedFrame(displayedFrameIndex);
     surfaceIndex = surfaceIndexByDisplayedFrame(displayedFrameIndex);
@@ -157,10 +164,20 @@ for displayedFrameIndex = 1:numberOfDisplayedFrames
     pixelSpacingY = imagePlane.H / (imagePlane.nRows - 1);
     numberOfSurfacePoints = size(surfaceCoordinatesXY, 1);
 
-    surfacePointsImageByDisplayedFrame{displayedFrameIndex} = [ ...
+    surfacePointsImage = [ ...
         (surfaceCoordinatesXY(:, 1) - 1) * pixelSpacingX, ...
         (surfaceCoordinatesXY(:, 2) - 1) * pixelSpacingY, ...
         zeros(numberOfSurfacePoints, 1)];
+
+    surfacePointsImageByDisplayedFrame{displayedFrameIndex} = ...
+        surfacePointsImage;
+
+    % The image origin represents the sensor-side edge of the image. Therefore,
+    % the physical Y_image coordinate is the requested depth from the sensor.
+    % This is the same conversion used to place the surface points on the image.
+    d_bone = surfacePointsImage(:, 2);
+    d_bone_mean(displayedFrameIndex) = mean(d_bone);
+    d_bone_std(displayedFrameIndex) = std(d_bone);
 end
 
 %% CALCULATE BONE MOTION RELATIVE TO THE IMAGE FRAME
@@ -222,7 +239,15 @@ scenePadding = 0.05 * max(sceneMaximum - sceneMinimum);
 figureHandle = figure( ...
     'Name', 'Bone motion relative to the ultrasound image', ...
     'Color', 'white');
-sceneAxes = axes(figureHandle);
+
+% Use a two-column layout so the 3D motion and its distance measurement remain
+% visible together. The left axes owns the original 3D scene. The right axes
+% owns the distance history and the marker synchronized with the animation.
+figureLayout = tiledlayout(figureHandle, 1, 2, ...
+    'TileSpacing', 'compact', ...
+    'Padding', 'compact');
+sceneAxes = nexttile(figureLayout, 1);
+dplotAxes = nexttile(figureLayout, 2);
 
 hold(sceneAxes, 'on');
 grid(sceneAxes, 'on');
@@ -273,6 +298,49 @@ colormap(sceneAxes, gray(256));
 imageHandle = gobjects(0);
 T_image_image = eye(4);
 
+% Plot the complete distance history before starting the animation. This keeps
+% the distance curve fixed while only the current-frame indicators move.
+timeframeValues = 1:numberOfDisplayedFrames;
+distanceLowerBound = d_bone_mean - d_bone_std;
+distanceUpperBound = d_bone_mean + d_bone_std;
+
+hold(dplotAxes, 'on');
+grid(dplotAxes, 'on');
+
+fill(dplotAxes, ...
+    [timeframeValues, fliplr(timeframeValues)], ...
+    [distanceLowerBound, fliplr(distanceUpperBound)], ...
+    [0.35, 0.65, 0.95], ...
+    'FaceAlpha', 0.25, ...
+    'EdgeColor', 'none', ...
+    'DisplayName', 'Mean \pm standard deviation');
+
+plot(dplotAxes, timeframeValues, d_bone_mean, ...
+    'Color', [0.05, 0.30, 0.75], ...
+    'LineWidth', 1.8, ...
+    'DisplayName', 'Mean bone distance');
+
+% These two handles are updated inside the animation loop. The line shows the
+% current timeframe, and the point shows its corresponding mean bone distance.
+currentTimeframeLine = xline(dplotAxes, timeframeValues(1), '--k', ...
+    'Current timeframe', ...
+    'LabelVerticalAlignment', 'bottom', ...
+    'HandleVisibility', 'off');
+currentDistancePoint = plot(dplotAxes, ...
+    timeframeValues(1), d_bone_mean(1), ...
+    'o', ...
+    'MarkerSize', 7, ...
+    'MarkerFaceColor', [0.90, 0.20, 0.15], ...
+    'MarkerEdgeColor', 'white', ...
+    'LineWidth', 1.0, ...
+    'HandleVisibility', 'off');
+
+xlabel(dplotAxes, 'Timeframe');
+ylabel(dplotAxes, 'Estimated bone distance (mm)');
+title(dplotAxes, 'Bone distance from extracted ultrasound surface');
+xlim(dplotAxes, [timeframeValues(1), timeframeValues(end)]);
+legend(dplotAxes, 'Location', 'best');
+
 %% DISPLAY BONE MOTION IN THE IMAGE FRAME
 
 for displayedFrameIndex = 1:numberOfDisplayedFrames
@@ -294,6 +362,12 @@ for displayedFrameIndex = 1:numberOfDisplayedFrames
     surfaceHandle.XData = surfacePointsImage(:, 1);
     surfaceHandle.YData = surfacePointsImage(:, 2);
     surfaceHandle.ZData = surfacePointsImage(:, 3);
+
+    % Keep the distance plot synchronized with the 3D scene. Both indicators use
+    % displayedFrameIndex, so they always refer to the image currently shown.
+    currentTimeframeLine.Value = displayedFrameIndex;
+    currentDistancePoint.XData = displayedFrameIndex;
+    currentDistancePoint.YData = d_bone_mean(displayedFrameIndex);
 
     % Only the image texture changes. Identity keeps its physical plane fixed in
     % the image coordinate frame for every animation step.
