@@ -6,6 +6,12 @@ clear; clc; close all;
 % it does not change the acquisition timestamps used for temporal alignment.
 frameDelaySeconds = 0.05;
 
+% Set this to true to record the complete figure as an MP4 video. Set it to
+% false when only an interactive visualization is needed. The Code Analyzer
+% suppression is needed because the disabled recording branches are expected
+% to be unreachable while this user setting is false.
+recordVisualization = true;
+
 % A positive value means that ultrasound pixels were recorded this many seconds
 % after the physical motion that produced them. The script therefore displays a
 % later recorded image together with the corresponding earlier rigid-body pose.
@@ -238,7 +244,8 @@ scenePadding = 0.05 * max(sceneMaximum - sceneMinimum);
 
 figureHandle = figure( ...
     'Name', 'Bone motion relative to the ultrasound image', ...
-    'Color', 'white');
+    'Color', 'white', ...
+    'WindowState', 'maximized');
 
 % Use a two-column layout so the 3D motion and its distance measurement remain
 % visible together. The left axes owns the original 3D scene. The right axes
@@ -408,6 +415,17 @@ pbaspect(dplotAxes, [2, 1, 1]);
 
 legend(dplotAxes, 'Location', 'best');
 
+% Prepare the video only when recording is enabled. The output path uses
+% scriptDirectory, so the MP4 is saved beside this script regardless of the
+% folder from which MATLAB was started. Its playback rate matches the intended
+% delay between displayed animation frames.
+if recordVisualization
+    videoFilePath = fullfile(scriptDirectory, 'boneMotion_inSensor_animation.mp4');
+    videoWriter = VideoWriter(videoFilePath, 'MPEG-4');
+    videoWriter.FrameRate = 1 / frameDelaySeconds;
+    open(videoWriter);
+end
+
 %% DISPLAY BONE MOTION IN THE IMAGE FRAME
 
 for displayedFrameIndex = 1:numberOfDisplayedFrames
@@ -486,5 +504,19 @@ for displayedFrameIndex = 1:numberOfDisplayedFrames
         'Interpreter', 'none');
 
     drawnow;
+
+    % Capture the complete maximized figure after both axes have been updated.
+    % When recording is disabled, MATLAB skips all video-related work.
+    if recordVisualization
+        videoFrame = getframe(figureHandle);
+        writeVideo(videoWriter, videoFrame);
+    end
+
     pause(frameDelaySeconds);
+end
+
+% Finalize the MP4 so it can be opened immediately after the script finishes.
+if recordVisualization
+    close(videoWriter);
+    fprintf('Animation saved to:\n%s\n', videoFilePath);
 end
