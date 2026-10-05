@@ -15,7 +15,7 @@ recordVisualization = true;
 % A positive value means that ultrasound pixels were recorded this many seconds
 % after the physical motion that produced them. The script therefore displays a
 % later recorded image together with the corresponding earlier rigid-body pose.
-temporalDelaySeconds = 0.14;
+temporalDelaySeconds = 0.12;
 
 % Smooth both tracked pose sequences before calculating relative bone motion.
 % These settings follow smoothTransformations_demo.m.

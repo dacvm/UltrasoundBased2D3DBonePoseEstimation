@@ -7,6 +7,12 @@ clear; clc; close all;
 % the original acquisition timing.
 frameDelaySeconds = 0.05;
 
+% Set this to true to record the complete figure as an MP4 video. Set it to
+% false when only an interactive visualization is needed. The Code Analyzer
+% suppression is needed because the disabled recording branches are expected
+% to be unreachable while this user setting is false.
+recordVisualization = true;
+
 % A positive value means that the ultrasound image content was recorded this
 % many seconds after the physical motion that produced it. We compensate for
 % that delay by showing a later recorded image with an earlier pose:
@@ -354,13 +360,14 @@ scenePadding = 0.05 * max(sceneMaximum - sceneMinimum);
 
 figureHandle = figure( ...
     'Name', 'Smoothed and time-aligned ultrasound and bone poses in ref', ...
-    'Color', 'white');
+    'Color', 'white', ...
+    'WindowState', 'maximized');
 sceneAxes = axes(figureHandle);
 
 hold(sceneAxes, 'on');
 grid(sceneAxes, 'on');
 axis(sceneAxes, 'equal');
-view(sceneAxes, 35, 30);
+view(sceneAxes, -60, 40);
 
 xlabel(sceneAxes, 'X_{ref} (mm)');
 ylabel(sceneAxes, 'Y_{ref} (mm)');
@@ -406,6 +413,17 @@ lighting(sceneAxes, 'gouraud');
 colormap(sceneAxes, gray(256));
 
 imageHandle = gobjects(0);
+
+% Prepare the video only when recording is enabled. The output path uses
+% scriptDirectory, so the MP4 is saved beside this script regardless of the
+% folder from which MATLAB was started. Its playback rate matches the intended
+% delay between displayed animation frames.
+if recordVisualization
+    videoFilePath = fullfile(scriptDirectory, 'display_sta_animation.mp4');
+    videoWriter = VideoWriter(videoFilePath, 'MPEG-4');
+    videoWriter.FrameRate = 1 / frameDelaySeconds;
+    open(videoWriter);
+end
 
 %% DISPLAY THE SEQUENCE FRAME BY FRAME
 
@@ -477,18 +495,41 @@ for displayedFrameIndex = 1:numberOfDisplayedFrames
         'Tag', 'plot_sta_image_axes', ...
         'Mode', 'thin');
 
+    % title(sceneAxes, { ...
+    %     sprintf('%s | Bone %s', string(snapshotGroup.name), boneCode), ...
+    %     sprintf('Frame %d of %d | Requested delay %.3f s', ...
+    %         displayedFrameIndex, numberOfDisplayedFrames, ...
+    %         temporalDelaySeconds), ...
+    %     sprintf(['Pose row %d at %.3f s | Image row %d at %.3f s | ' ...
+    %         'Paired delay %.3f s'], ...
+    %         posePlane.rigidBodyRowIndex, recordedTimes(poseFrameIndex), ...
+    %         imagePlane.rigidBodyRowIndex, recordedTimes(imageFrameIndex), ...
+    %         pairedDelaySeconds(displayedFrameIndex))}, ...
+    %     'Interpreter', 'none');
     title(sceneAxes, { ...
-        sprintf('%s | Bone %s', string(snapshotGroup.name), boneCode), ...
-        sprintf('Frame %d of %d | Requested delay %.3f s', ...
+        sprintf('Ultrasound image frame | Frame (%d / %d) | Delay %.3f s', ...
             displayedFrameIndex, numberOfDisplayedFrames, ...
             temporalDelaySeconds), ...
-        sprintf(['Pose row %d at %.3f s | Image row %d at %.3f s | ' ...
-            'Paired delay %.3f s'], ...
+        sprintf('Pose #%d at %.3f s | Image #%d at %.3f s | Paired delay %.3f s', ...
             posePlane.rigidBodyRowIndex, recordedTimes(poseFrameIndex), ...
             imagePlane.rigidBodyRowIndex, recordedTimes(imageFrameIndex), ...
             pairedDelaySeconds(displayedFrameIndex))}, ...
         'Interpreter', 'none');
 
     drawnow;
+
+    % Capture the complete figure after all graphics have been updated. When
+    % recording is disabled, MATLAB skips all video-related work.
+    if recordVisualization
+        videoFrame = getframe(figureHandle);
+        writeVideo(videoWriter, videoFrame);
+    end
+
     pause(frameDelaySeconds);
+end
+
+% Finalize the MP4 so it can be opened immediately after the script finishes.
+if recordVisualization
+    close(videoWriter);
+    fprintf('Animation saved to:\n%s\n', videoFilePath);
 end
