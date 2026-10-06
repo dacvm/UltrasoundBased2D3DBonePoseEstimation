@@ -18,7 +18,9 @@
     "model": "PIMLOP_v1",
     "fixedParameters": {
       "measurementSubsampleFraction": 0.5,
-      "positionStandardDeviationImage": [1.0, 1.0, 1.5]
+      "positionXStandardDeviationImage": 1.0,
+      "positionYStandardDeviationImage": 1.0,
+      "positionZStandardDeviationImage": 1.5
     },
     "hyperparameters": {
       "kappa": [50]

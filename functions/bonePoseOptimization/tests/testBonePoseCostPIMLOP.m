@@ -61,19 +61,26 @@ function testValidatorReturnsCanonicalSettings(testCase)
 %TESTVALIDATORRETURNSCANONICALSETTINGS Check one accepted configuration.
 % testCase provides MATLAB verification methods. This function has no output.
 
-% Use column vectors and single precision to show the validator normalizes them.
+% Use single precision, a column kappa list, and a shuffled field order to
+% show the validator normalizes them.
 fixedParameters = struct( ...
+    'positionZStandardDeviationImage', single(1.5), ...
     'measurementSubsampleFraction', single(0.5), ...
-    'positionStandardDeviationImage', [1; 1; 1.5]);
+    'positionXStandardDeviationImage', 1, ...
+    'positionYStandardDeviationImage', 1);
 hyperparameters = struct('kappa', single([10; 50; 200]));
 [fixedParameters, hyperparameters] = ...
     validate_cost_PIMLOP_v01(fixedParameters, hyperparameters);
 
 verifyEqual(testCase, fieldnames(fixedParameters).', ...
-    {'measurementSubsampleFraction', 'positionStandardDeviationImage'});
+    {'measurementSubsampleFraction', 'positionXStandardDeviationImage', ...
+    'positionYStandardDeviationImage', 'positionZStandardDeviationImage'});
 verifyEqual(testCase, fixedParameters.measurementSubsampleFraction, 0.5);
-verifyEqual(testCase, fixedParameters.positionStandardDeviationImage, [1 1 1.5]);
+verifyEqual(testCase, fixedParameters.positionXStandardDeviationImage, 1);
+verifyEqual(testCase, fixedParameters.positionYStandardDeviationImage, 1);
+verifyEqual(testCase, fixedParameters.positionZStandardDeviationImage, 1.5);
 verifyClass(testCase, fixedParameters.measurementSubsampleFraction, 'double');
+verifyClass(testCase, fixedParameters.positionZStandardDeviationImage, 'double');
 
 % Kappa is the only hyperparameter and comes back as a double row vector.
 verifyEqual(testCase, fieldnames(hyperparameters).', {'kappa'});
@@ -83,7 +90,9 @@ verifyClass(testCase, hyperparameters.kappa, 'double');
 % The edge values of the documented ranges must be accepted, including
 % kappa = 0 (orientation term off) and a single-value kappa list.
 edgeParameters = struct('measurementSubsampleFraction', 1, ...
-    'positionStandardDeviationImage', [0.1 0.1 0.1]);
+    'positionXStandardDeviationImage', 0.1, ...
+    'positionYStandardDeviationImage', 0.1, ...
+    'positionZStandardDeviationImage', 0.1);
 validate_cost_PIMLOP_v01(edgeParameters, struct('kappa', 0));
 end
 
@@ -93,12 +102,20 @@ function testValidatorRejectsInvalidSettings(testCase)
 % testCase provides MATLAB verification methods. This function has no output.
 
 validParameters = struct('measurementSubsampleFraction', 0.5, ...
-    'positionStandardDeviationImage', [1 1 1.5]);
+    'positionXStandardDeviationImage', 1, ...
+    'positionYStandardDeviationImage', 1, ...
+    'positionZStandardDeviationImage', 1.5);
 validHyperparameters = struct('kappa', [10 50]);
 
 % Field names must match exactly in both groups.
 verifyError(testCase, @() validate_cost_PIMLOP_v01( ...
-    rmfield(validParameters, 'positionStandardDeviationImage'), validHyperparameters), ...
+    rmfield(validParameters, 'positionZStandardDeviationImage'), validHyperparameters), ...
+    'validate_cost_PIMLOP_v01:MissingParameter');
+% The old three-value field was split per axis, so it is no longer accepted.
+oldVectorParameters = rmfield(validParameters, {'positionXStandardDeviationImage', ...
+    'positionYStandardDeviationImage', 'positionZStandardDeviationImage'});
+oldVectorParameters.positionStandardDeviationImage = [1 1 1.5];
+verifyError(testCase, @() validate_cost_PIMLOP_v01(oldVectorParameters, validHyperparameters), ...
     'validate_cost_PIMLOP_v01:MissingParameter');
 verifyError(testCase, @() validate_cost_PIMLOP_v01(validParameters, struct()), ...
     'validate_cost_PIMLOP_v01:MissingParameter');
@@ -123,10 +140,10 @@ invalidValues = { ...
     'measurementSubsampleFraction', 0; ...
     'measurementSubsampleFraction', 1.5; ...
     'measurementSubsampleFraction', [0.5 0.5]; ...
-    'positionStandardDeviationImage', [1 0 1.5]; ...
-    'positionStandardDeviationImage', [1 -1 1.5]; ...
-    'positionStandardDeviationImage', [1 Inf 1.5]; ...
-    'positionStandardDeviationImage', [1 1]};
+    'positionXStandardDeviationImage', 0; ...
+    'positionYStandardDeviationImage', -1; ...
+    'positionZStandardDeviationImage', Inf; ...
+    'positionZStandardDeviationImage', [1 1.5]};
 for valueIndex = 1:size(invalidValues, 1)
     invalidParameters = validParameters;
     invalidParameters.(invalidValues{valueIndex, 1}) = invalidValues{valueIndex, 2};
@@ -170,7 +187,9 @@ verifyEqual(testCase, plan.numberOfRuns, 1);
 % Every runtime value reaches config.cost.parameters, where the cost reads it.
 verifyEqual(testCase, config.cost.model, 'PIMLOP_v1');
 verifyEqual(testCase, config.cost.parameters.measurementSubsampleFraction, 0.5);
-verifyEqual(testCase, config.cost.parameters.positionStandardDeviationImage, [1 1 1.5]);
+verifyEqual(testCase, config.cost.parameters.positionXStandardDeviationImage, 1);
+verifyEqual(testCase, config.cost.parameters.positionYStandardDeviationImage, 1);
+verifyEqual(testCase, config.cost.parameters.positionZStandardDeviationImage, 1.5);
 verifyEqual(testCase, config.cost.parameters.kappa, 50);
 verifyEqual(testCase, config.optimizer.seed, 1001);
 end
@@ -205,7 +224,9 @@ for combinationIndex = 1:plan.numberOfCombinations
         spec, combinationRow, spec.experiment.seeds(1));
     verifyEqual(testCase, runConfig.cost.parameters.kappa, kappaCandidates(combinationIndex));
     verifyEqual(testCase, runConfig.cost.parameters.measurementSubsampleFraction, 0.5);
-    verifyEqual(testCase, runConfig.cost.parameters.positionStandardDeviationImage, [1 1 1.5]);
+    verifyEqual(testCase, runConfig.cost.parameters.positionXStandardDeviationImage, 1);
+    verifyEqual(testCase, runConfig.cost.parameters.positionYStandardDeviationImage, 1);
+    verifyEqual(testCase, runConfig.cost.parameters.positionZStandardDeviationImage, 1.5);
 end
 end
 

@@ -228,7 +228,9 @@ cost = sum over all retained measurements of min_y E_match(x, y)
 | Parameter | Type | Meaning |
 | --- | --- | --- |
 | `measurementSubsampleFraction` | Fixed | Fraction in `(0, 1]` of the valid surface points kept from every image, spread evenly along each surface curve. Smaller values make every evaluation faster. |
-| `positionStandardDeviationImage` | Fixed | Three positive position standard deviations `[sx, sy, sz]` in millimetres along the image x, y, and out-of-plane axes. |
+| `positionXStandardDeviationImage` | Fixed | Positive position standard deviation in millimetres along the image x axis. |
+| `positionYStandardDeviationImage` | Fixed | Positive position standard deviation in millimetres along the image y axis. |
+| `positionZStandardDeviationImage` | Fixed | Positive position standard deviation in millimetres along the out-of-plane (image z) axis. |
 | `kappa` | Hyperparameter | Nonnegative orientation concentration. `0` switches the orientation term off; `50` corresponds to roughly 8 degrees of angular spread. Bigger values give a narrower spread (roughly `1/sqrt(kappa)` radians). |
 
 This model requires aligned 3D bone-surface measurements with 2D normals (`surfaceNormalXY` and `surfaceNormalMask`) from `boneSurfaceMatFile`. One evaluation takes several seconds, so keep `populationSize` and `maxFunctionEvaluations` small for first runs. The reference demos and regression tests in `devs/pimlopDevelopment/` still run independently.

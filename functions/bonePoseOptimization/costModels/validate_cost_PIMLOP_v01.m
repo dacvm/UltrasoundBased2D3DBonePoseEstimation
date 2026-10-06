@@ -8,17 +8,18 @@ function [fixedParameters, hyperparameters] = validate_cost_PIMLOP_v01(fixedPara
 %   fixedParameters - Struct containing:
 %                     measurementSubsampleFraction, the fraction (0, 1] of
 %                     valid surface points kept from every image; and
-%                     positionStandardDeviationImage, the three position
-%                     standard deviations [sx sy sz] in mm along the image
-%                     axes.
+%                     positionXStandardDeviationImage,
+%                     positionYStandardDeviationImage,
+%                     positionZStandardDeviationImage, the position
+%                     standard deviations in mm along the image x, y and
+%                     out-of-plane z axes (one positive scalar each).
 %   hyperparameters - Struct containing:
 %                     kappa, a list of candidate orientation concentrations
 %                     (nonnegative, no duplicates). A single run uses a
 %                     one-value list, for example [50].
 %
 % Outputs:
-%   fixedParameters - Validated fixed settings stored as doubles, with
-%                     positionStandardDeviationImage as a 1x3 row vector.
+%   fixedParameters - Validated fixed settings stored as double scalars.
 %   hyperparameters - Validated candidate lists stored as double row
 %                     vectors; the experiment plan sweeps every value.
 %
@@ -28,10 +29,18 @@ function [fixedParameters, hyperparameters] = validate_cost_PIMLOP_v01(fixedPara
 % normals. The cost function does not care about the split: the run
 % configuration places fixed values and the chosen kappa together under
 % config.cost.parameters.
+%
+% The three position standard deviations are separate scalar fields, not
+% one [sx sy sz] list, so a reader of the JSON does not mistake them for
+% candidate values that the experiment would sweep.
 
 % Require exactly the documented fields so missing or misspelled settings fail early.
+positionStandardDeviationNames = { ...
+    'positionXStandardDeviationImage', ...
+    'positionYStandardDeviationImage', ...
+    'positionZStandardDeviationImage'};
 validateFieldNames(fixedParameters, ...
-    {'measurementSubsampleFraction', 'positionStandardDeviationImage'}, ...
+    [{'measurementSubsampleFraction'}, positionStandardDeviationNames], ...
     'cost.fixedParameters');
 validateFieldNames(hyperparameters, {'kappa'}, 'cost.hyperparameters');
 
@@ -41,11 +50,14 @@ validateattributes(measurementSubsampleFraction, {'numeric'}, ...
     {'scalar', 'real', 'finite', '>', 0, '<=', 1}, ...
     mfilename, 'cost.fixedParameters.measurementSubsampleFraction');
 
-% One standard deviation per image axis builds the diagonal position covariance.
-positionStandardDeviationImage = fixedParameters.positionStandardDeviationImage;
-validateattributes(positionStandardDeviationImage, {'numeric'}, ...
-    {'vector', 'numel', 3, 'real', 'finite', 'positive'}, ...
-    mfilename, 'cost.fixedParameters.positionStandardDeviationImage');
+% One standard deviation per image axis builds the diagonal position
+% covariance, so each one must be a single positive number.
+for nameIndex = 1:numel(positionStandardDeviationNames)
+    parameterName = positionStandardDeviationNames{nameIndex};
+    validateattributes(fixedParameters.(parameterName), {'numeric'}, ...
+        {'scalar', 'real', 'finite', 'positive'}, ...
+        mfilename, ['cost.fixedParameters.' parameterName]);
+end
 
 % Kappa weights the orientation term; zero switches it off, so every
 % candidate must be nonnegative. A repeated value would only repeat the
@@ -61,9 +73,12 @@ end
 
 % Rebuild both groups in one documented order. The generic planner uses
 % this field order for stable table columns and combination numbers.
-fixedParameters = struct();
-fixedParameters.measurementSubsampleFraction   = double(measurementSubsampleFraction);
-fixedParameters.positionStandardDeviationImage = double(positionStandardDeviationImage(:).');
+validatedFixedParameters = struct();
+validatedFixedParameters.measurementSubsampleFraction    = double(measurementSubsampleFraction);
+validatedFixedParameters.positionXStandardDeviationImage = double(fixedParameters.positionXStandardDeviationImage);
+validatedFixedParameters.positionYStandardDeviationImage = double(fixedParameters.positionYStandardDeviationImage);
+validatedFixedParameters.positionZStandardDeviationImage = double(fixedParameters.positionZStandardDeviationImage);
+fixedParameters = validatedFixedParameters;
 
 % The planner expects every candidate list as a row vector.
 hyperparameters = struct();
