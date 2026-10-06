@@ -51,18 +51,14 @@ kappa = 50;
 
 % cost_PIMLOP_v01 already uses the standard optimizer interface, so place the
 % settings under config.cost.parameters just as a future JSON run config will.
-config = struct();
-config.cost = struct();
-config.cost.model = 'PIMLOP_v1';
+config                 = struct();
+config.cost            = struct();
+config.cost.model      = 'PIMLOP_v1';
 config.cost.parameters = struct();
-config.cost.parameters.measurementSubsampleFraction = ...
-    measurementSubsampleFraction;
-config.cost.parameters.positionStandardDeviationImageXmm = ...
-    positionStandardDeviationImageMm(1);
-config.cost.parameters.positionStandardDeviationImageYmm = ...
-    positionStandardDeviationImageMm(2);
-config.cost.parameters.positionStandardDeviationImageZmm = ...
-    positionStandardDeviationImageMm(3);
+config.cost.parameters.measurementSubsampleFraction      = measurementSubsampleFraction;
+config.cost.parameters.positionStandardDeviationImageXmm = positionStandardDeviationImageMm(1);
+config.cost.parameters.positionStandardDeviationImageYmm = positionStandardDeviationImageMm(2);
+config.cost.parameters.positionStandardDeviationImageZmm = positionStandardDeviationImageMm(3);
 config.cost.parameters.kappa = kappa;
 
 % This value changes only the appearance of the ultrasound planes. It never
@@ -78,8 +74,7 @@ PsiCT = preparePIMLOPModel_batchedProcess(data.boneMeshCT);
 % Build the spatial hierarchy before calling the cost function. This is the
 % important architectural point of the demonstration: the tree belongs to
 % prepared data, not to one candidate-pose evaluation.
-PsiCT.pdTree = buildPIMLOPPDTree_batchedProcess( ...
-    PsiCT.mesh, PsiCT.validFaceMask);
+PsiCT.pdTree = buildPIMLOPPDTree_batchedProcess(PsiCT.mesh, PsiCT.validFaceMask);
 
 % Store the model in the same nested location planned for the production
 % optimization input. The extra layer leaves room for future cost-specific
@@ -87,7 +82,7 @@ PsiCT.pdTree = buildPIMLOPPDTree_batchedProcess( ...
 if ~isfield(data, 'extra')
     data.extra = struct();
 end
-data.extra.pimlop = struct();
+data.extra.pimlop       = struct();
 data.extra.pimlop.PsiCT = PsiCT;
 
 %% 4. EVALUATE ONE CANDIDATE POSE THROUGH THE COST FUNCTION
@@ -99,9 +94,8 @@ poseVector = zeros(6,1);
 % Request DETAILS because this is an explanatory demonstration. An optimizer
 % normally requests only the first output and therefore avoids the optional
 % diagnostic arrays used by the report and figure below.
-evaluationTimer = tic;
-[pimlopCost, costDetails] = cost_PIMLOP_v01( ...
-    poseVector, data, config);
+evaluationTimer   = tic;
+[pimlopCost, costDetails] = cost_PIMLOP_v01(poseVector, data, config);
 evaluationSeconds = toc(evaluationTimer);
 
 %% 5. READ THE FUNCTION OUTPUTS USING FRAME-EXPLICIT NAMES
@@ -109,23 +103,23 @@ evaluationSeconds = toc(evaluationTimer);
 % The function returns all model-side correspondences in CT, because that is
 % the coordinate frame of the fixed PD-tree. Measurement positions remain in
 % ref, and their image-local 2-D normals keep an image index beside them.
-resultsByImage        = costDetails.resultsByImage;
-processedImageMask    = costDetails.processedImageMask;
-processedPlaneIndices = costDetails.processedPlaneIndices;
-X                     = costDetails.X;
-YmatchesCT            = costDetails.YmatchesCT;
-EMatchValues          = costDetails.EMatchValues;
-T_CT_ref_candidate    = costDetails.T_CT_ref_candidate;
-R_CT_ref_candidate    = T_CT_ref_candidate(1:3,1:3);
+resultsByImage           = costDetails.resultsByImage;
+processedImageMask       = costDetails.processedImageMask;
+processedPlaneIndices    = costDetails.processedPlaneIndices;
+X                        = costDetails.X;
+YmatchesCT               = costDetails.YmatchesCT;
+EMatchValues             = costDetails.EMatchValues;
+T_CT_ref_candidate       = costDetails.T_CT_ref_candidate;
+R_CT_ref_candidate       = T_CT_ref_candidate(1:3,1:3);
 
-numberOfImages          = costDetails.numberOfImages;
-numberOfProcessedImages = costDetails.numberOfProcessedImages;
-numberOfSkippedImages   = costDetails.numberOfSkippedImages;
-numberOfMeasurements    = costDetails.numberOfMeasurements;
+numberOfImages           = costDetails.numberOfImages;
+numberOfProcessedImages  = costDetails.numberOfProcessedImages;
+numberOfSkippedImages    = costDetails.numberOfSkippedImages;
+numberOfMeasurements     = costDetails.numberOfMeasurements;
 
-YmatchPositionsCT = YmatchesCT.position3D;
-YmatchNormalsCT   = YmatchesCT.normal3D;
-YmatchFaceIndices = YmatchesCT.faceIndex;
+YmatchPositionsCT        = YmatchesCT.position3D;
+YmatchNormalsCT          = YmatchesCT.normal3D;
+YmatchFaceIndices        = YmatchesCT.faceIndex;
 uniqueMatchedFaceIndices = unique(YmatchFaceIndices, 'stable');
 
 % Join the per-image diagnostics in the same order used by the combined X,
@@ -145,8 +139,7 @@ fprintf(' Image   Valid   Used   Mean distance(mm)   Mean angle(deg)   Mean E_ma
 for planeIndex = 1:numberOfImages
     result = resultsByImage(planeIndex);
     if result.status == "skipped"
-        fprintf(' %5d       0      0   SKIPPED: %s\n', ...
-            planeIndex, result.skipReason);
+        fprintf(' %5d       0      0   SKIPPED: %s\n', planeIndex, result.skipReason);
         continue;
     end
 
@@ -160,31 +153,36 @@ for planeIndex = 1:numberOfImages
         mean(result.EMatchValues));
 end
 
-numberOfValidMeasurementsBeforeSubsampling = sum( ...
-    [resultsByImage.numberOfValidMeasurementsBeforeSubsampling]);
-averageFacesEvaluated = mean(facesEvaluatedPerMeasurement);
-averageFacesEvaluatedPercent = ...
-    100 * averageFacesEvaluated / PsiCT.pdTree.numberOfDatums;
+numberOfValidMeasurementsBeforeSubsampling = sum([resultsByImage.numberOfValidMeasurementsBeforeSubsampling]);
+averageFacesEvaluated                      = mean(facesEvaluatedPerMeasurement);
+averageFacesEvaluatedPercent               = 100 * averageFacesEvaluated / PsiCT.pdTree.numberOfDatums;
 
 fprintf('\n  Images processed / skipped       : %d / %d\n', ...
-    numberOfProcessedImages, numberOfSkippedImages);
+    numberOfProcessedImages, ...
+    numberOfSkippedImages);
 fprintf('  Valid / retained measurements    : %d / %d (fraction %.3f)\n', ...
     numberOfValidMeasurementsBeforeSubsampling, ...
-    numberOfMeasurements, measurementSubsampleFraction);
+    numberOfMeasurements, ...
+    measurementSubsampleFraction);
 fprintf('  Valid model triangles            : %d\n', ...
     PsiCT.pdTree.numberOfDatums);
 fprintf('  PD-tree nodes / leaves           : %d / %d\n', ...
-    PsiCT.pdTree.numberOfNodes, PsiCT.pdTree.numberOfLeaves);
+    PsiCT.pdTree.numberOfNodes, ...
+    PsiCT.pdTree.numberOfLeaves);
 fprintf('  Unique selected model faces      : %d\n', ...
     numel(uniqueMatchedFaceIndices));
 fprintf('  X-to-Y distance, mean / max      : %.3f / %.3f mm\n', ...
-    mean(euclideanDistancesMm), max(euclideanDistancesMm));
+    mean(euclideanDistancesMm), ...
+    max(euclideanDistancesMm));
 fprintf('  Normal angle, mean / max         : %.2f / %.2f deg\n', ...
-    mean(orientationAnglesDeg), max(orientationAnglesDeg));
+    mean(orientationAnglesDeg), ...
+    max(orientationAnglesDeg));
 fprintf('  E_match, total / mean / max      : %.3f / %.3f / %.3f\n', ...
-    pimlopCost, mean(EMatchValues), max(EMatchValues));
+    pimlopCost, mean(EMatchValues), ...
+    max(EMatchValues));
 fprintf('  Average faces tested per point   : %.1f (%.2f%% of model)\n', ...
-    averageFacesEvaluated, averageFacesEvaluatedPercent);
+    averageFacesEvaluated, ...
+    averageFacesEvaluatedPercent);
 fprintf('  Average nodes pruned per point   : %.1f\n', ...
     mean(nodesPrunedPerMeasurement));
 fprintf('  Candidate evaluation time        : %.3f s\n\n', ...
@@ -196,18 +194,16 @@ fprintf('  Candidate evaluation time        : %.3f s\n\n', ...
 % displayed in ref. Transform model positions with the full rigid transform
 % and model normals with rotation only.
 boneFaces          = PsiCT.mesh.ConnectivityList;
-bonePointsRef      = applyRigidTransform( ...
-    PsiCT.mesh.Points, T_CT_ref_candidate);
-YmatchPositionsRef = applyRigidTransform( ...
-    YmatchPositionsCT, T_CT_ref_candidate);
+bonePointsRef      = applyRigidTransform(PsiCT.mesh.Points, T_CT_ref_candidate);
+YmatchPositionsRef = applyRigidTransform(YmatchPositionsCT, T_CT_ref_candidate);
 YmatchNormalsRef   = YmatchNormalsCT * R_CT_ref_candidate.';
 
 % Each 2-D measured normal and projected model normal belongs to one image.
 % Embed it as [nx,ny,0] in that image and rotate it into ref using the pose of
 % that particular ultrasound image.
 measurementNormals3DRef = zeros(numberOfMeasurements,3);
-projectedYNormals3DRef   = zeros(numberOfMeasurements,3);
-firstCombinedRow = 1;
+projectedYNormals3DRef  = zeros(numberOfMeasurements,3);
+firstCombinedRow        = 1;
 
 for planeIndex = processedPlaneIndices
     selectedPlane = data.imagePlanesRef(planeIndex);
@@ -215,22 +211,14 @@ for planeIndex = processedPlaneIndices
     R_image_ref   = selectedPlane.T_image_ref(1:3,1:3);
 
     numberOfImageMeasurements = imageResult.numberOfMeasurements;
-    combinedRows = firstCombinedRow:( ...
-        firstCombinedRow + numberOfImageMeasurements - 1);
+    combinedRows = firstCombinedRow:(firstCombinedRow + numberOfImageMeasurements - 1);
 
-    measurementNormals3DImage = [ ...
-        imageResult.X.normal2DImage, ...
-        zeros(numberOfImageMeasurements,1)];
-    measurementNormals3DRef(combinedRows,:) = ...
-        measurementNormals3DImage * R_image_ref.';
+    measurementNormals3DImage               = [imageResult.X.normal2DImage, zeros(numberOfImageMeasurements,1)];
+    measurementNormals3DRef(combinedRows,:) = measurementNormals3DImage * R_image_ref.';
 
-    imageProjectedYNormals2D = ...
-        imageResult.batchSearchDetails.matchDetails.projectedYNormal2DImage;
-    projectedYNormals3DImage = [ ...
-        imageProjectedYNormals2D, ...
-        zeros(numberOfImageMeasurements,1)];
-    projectedYNormals3DRef(combinedRows,:) = ...
-        projectedYNormals3DImage * R_image_ref.';
+    imageProjectedYNormals2D = imageResult.batchSearchDetails.matchDetails.projectedYNormal2DImage;
+    projectedYNormals3DImage = [imageProjectedYNormals2D, zeros(numberOfImageMeasurements,1)];
+    projectedYNormals3DRef(combinedRows,:) = projectedYNormals3DImage * R_image_ref.';
 
     firstCombinedRow = firstCombinedRow + numberOfImageMeasurements;
 end
@@ -284,6 +272,7 @@ boneHandle = patch(setupAxes, ...
 imageHandles = gobjects(numberOfImages,1);
 for planeIndex = 1:numberOfImages
     selectedPlane = data.imagePlanesRef(planeIndex);
+
     pixelSpacingXYMm = [ ...
         selectedPlane.W / max(selectedPlane.nCols-1,1), ...
         selectedPlane.H / max(selectedPlane.nRows-1,1)];
@@ -295,11 +284,11 @@ for planeIndex = 1:numberOfImages
         'Tag', sprintf('demo_pimlop_cost_image_%d',planeIndex), ...
         'Colormap', 'gray', ...
         'FaceAlpha', imageFaceAlpha);
+    
     imageHandle.DisplayName = sprintf('Ultrasound image %d',planeIndex);
     imageHandles(planeIndex) = imageHandle;
 end
-imageHandles(1).DisplayName = sprintf( ...
-    'Ultrasound planes (%d)', numberOfImages);
+imageHandles(1).DisplayName = sprintf('Ultrasound planes (%d)', numberOfImages);
 
 % Cyan triangles show the mesh regions selected by at least one retained
 % ultrasound measurement.

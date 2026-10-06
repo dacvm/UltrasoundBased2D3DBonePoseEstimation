@@ -26,6 +26,8 @@ MATLAB project: estimate 3D bone pose by registering CT bone meshes to tracked 2
 - New functions MUST have a help block right below `function`: what it does, why it is needed, and every input and output. Copy the style of `functions/geometry/applyRigidTransform.m`.
 - Comments are for a junior reader: comment each logical block with its intent (the *why*) in simple words. Comment a single line only when its purpose is not obvious.
 - Tests are function-based (`functiontests(localfunctions)`); follow `functions/bonePoseOptimization/tests/testBonePoseCostDispatcher.m`.
+- Default to the straightforward implementation that works. Avoid defensive code (extra safe try/catch, validation, edge-case guards) unless there's a concrete, current need for it.
+- For full implementation instructions, use the `/implement-simple` command.
 
 ## Geometry conventions
 - Rigid transforms are numeric 4x4 matrices with column vectors: `p_target = T_source_target * p_source`.
