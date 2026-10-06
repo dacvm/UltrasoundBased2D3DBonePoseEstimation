@@ -61,26 +61,30 @@ function testValidatorReturnsCanonicalSettings(testCase)
 %TESTVALIDATORRETURNSCANONICALSETTINGS Check one accepted configuration.
 % testCase provides MATLAB verification methods. This function has no output.
 
-% Use a column vector and single precision to show the validator normalizes them.
+% Use column vectors and single precision to show the validator normalizes them.
 fixedParameters = struct( ...
     'measurementSubsampleFraction', single(0.5), ...
-    'positionStandardDeviationImage', [1; 1; 1.5], ...
-    'kappa', 50);
+    'positionStandardDeviationImage', [1; 1; 1.5]);
+hyperparameters = struct('kappa', single([10; 50; 200]));
 [fixedParameters, hyperparameters] = ...
-    validate_cost_PIMLOP_v01(fixedParameters, struct());
+    validate_cost_PIMLOP_v01(fixedParameters, hyperparameters);
 
 verifyEqual(testCase, fieldnames(fixedParameters).', ...
-    {'measurementSubsampleFraction', 'positionStandardDeviationImage', 'kappa'});
+    {'measurementSubsampleFraction', 'positionStandardDeviationImage'});
 verifyEqual(testCase, fixedParameters.measurementSubsampleFraction, 0.5);
 verifyEqual(testCase, fixedParameters.positionStandardDeviationImage, [1 1 1.5]);
-verifyEqual(testCase, fixedParameters.kappa, 50);
 verifyClass(testCase, fixedParameters.measurementSubsampleFraction, 'double');
-verifyEmpty(testCase, fieldnames(hyperparameters));
 
-% The edge values of the documented ranges must be accepted.
+% Kappa is the only hyperparameter and comes back as a double row vector.
+verifyEqual(testCase, fieldnames(hyperparameters).', {'kappa'});
+verifyEqual(testCase, hyperparameters.kappa, [10 50 200]);
+verifyClass(testCase, hyperparameters.kappa, 'double');
+
+% The edge values of the documented ranges must be accepted, including
+% kappa = 0 (orientation term off) and a single-value kappa list.
 edgeParameters = struct('measurementSubsampleFraction', 1, ...
-    'positionStandardDeviationImage', [0.1 0.1 0.1], 'kappa', 0);
-validate_cost_PIMLOP_v01(edgeParameters, struct());
+    'positionStandardDeviationImage', [0.1 0.1 0.1]);
+validate_cost_PIMLOP_v01(edgeParameters, struct('kappa', 0));
 end
 
 
@@ -89,23 +93,32 @@ function testValidatorRejectsInvalidSettings(testCase)
 % testCase provides MATLAB verification methods. This function has no output.
 
 validParameters = struct('measurementSubsampleFraction', 0.5, ...
-    'positionStandardDeviationImage', [1 1 1.5], 'kappa', 50);
+    'positionStandardDeviationImage', [1 1 1.5]);
+validHyperparameters = struct('kappa', [10 50]);
 
-% Field names must match exactly, and no setting may be swept yet.
+% Field names must match exactly in both groups.
 verifyError(testCase, @() validate_cost_PIMLOP_v01( ...
-    rmfield(validParameters, 'kappa'), struct()), ...
+    rmfield(validParameters, 'positionStandardDeviationImage'), validHyperparameters), ...
+    'validate_cost_PIMLOP_v01:MissingParameter');
+verifyError(testCase, @() validate_cost_PIMLOP_v01(validParameters, struct()), ...
     'validate_cost_PIMLOP_v01:MissingParameter');
 extraParameters = validParameters;
-extraParameters.misspelledKappa = 1;
-verifyError(testCase, @() validate_cost_PIMLOP_v01(extraParameters, struct()), ...
+extraParameters.misspelledFraction = 1;
+verifyError(testCase, @() validate_cost_PIMLOP_v01(extraParameters, validHyperparameters), ...
     'validate_cost_PIMLOP_v01:UnexpectedParameter');
-verifyError(testCase, @() validate_cost_PIMLOP_v01( ...
-    validParameters, struct('kappa', [10 50])), ...
+extraHyperparameters = validHyperparameters;
+extraHyperparameters.misspelledKappa = 1;
+verifyError(testCase, @() validate_cost_PIMLOP_v01(validParameters, extraHyperparameters), ...
+    'validate_cost_PIMLOP_v01:UnexpectedParameter');
+% Kappa now belongs to the hyperparameters, so it is refused as a fixed setting.
+fixedWithKappa = validParameters;
+fixedWithKappa.kappa = 50;
+verifyError(testCase, @() validate_cost_PIMLOP_v01(fixedWithKappa, validHyperparameters), ...
     'validate_cost_PIMLOP_v01:UnexpectedParameter');
 verifyError(testCase, @() validate_cost_PIMLOP_v01(validParameters, []), ...
     'validate_cost_PIMLOP_v01:InvalidParameterGroup');
 
-% Each value outside its documented range must be rejected.
+% Each fixed value outside its documented range must be rejected.
 invalidValues = { ...
     'measurementSubsampleFraction', 0; ...
     'measurementSubsampleFraction', 1.5; ...
@@ -113,18 +126,28 @@ invalidValues = { ...
     'positionStandardDeviationImage', [1 0 1.5]; ...
     'positionStandardDeviationImage', [1 -1 1.5]; ...
     'positionStandardDeviationImage', [1 Inf 1.5]; ...
-    'positionStandardDeviationImage', [1 1]; ...
-    'kappa', -1; ...
-    'kappa', NaN; ...
-    'kappa', [10 50]};
+    'positionStandardDeviationImage', [1 1]};
 for valueIndex = 1:size(invalidValues, 1)
     invalidParameters = validParameters;
     invalidParameters.(invalidValues{valueIndex, 1}) = invalidValues{valueIndex, 2};
     verifyError(testCase, ...
-        @() validate_cost_PIMLOP_v01(invalidParameters, struct()), ...
+        @() validate_cost_PIMLOP_v01(invalidParameters, validHyperparameters), ...
         ?MException, sprintf('%s = %s should be rejected.', ...
         invalidValues{valueIndex, 1}, mat2str(invalidValues{valueIndex, 2})));
 end
+
+% Each invalid kappa candidate list must be rejected. Duplicates are
+% checked separately below because they have their own error identifier.
+invalidKappaLists = {-1, [10 -1], NaN, [10 Inf], []};
+for listIndex = 1:numel(invalidKappaLists)
+    invalidKappa = invalidKappaLists{listIndex};
+    verifyError(testCase, ...
+        @() validate_cost_PIMLOP_v01(validParameters, struct('kappa', invalidKappa)), ...
+        ?MException, sprintf('kappa = %s should be rejected.', mat2str(invalidKappa)));
+end
+verifyError(testCase, ...
+    @() validate_cost_PIMLOP_v01(validParameters, struct('kappa', [10 10])), ...
+    'validate_cost_PIMLOP_v01:DuplicateCandidate');
 end
 
 
@@ -140,8 +163,8 @@ config = testCase.TestData.config;
 verifyEqual(testCase, spec.cost.model, 'PIMLOP_v1');
 verifyTrue(testCase, isfile(spec.input.boneSurfaceMatFile));
 verifyEqual(testCase, spec.experiment.name, 'oneSweep_PIMLOP_v01');
-verifyEmpty(testCase, fieldnames(spec.cost.hyperparameters));
-verifyEqual(testCase, plan.parameterNames, {'normalFacingToleranceDeg'});
+verifyEqual(testCase, spec.cost.hyperparameters.kappa, 50);
+verifyEqual(testCase, plan.parameterNames, {'normalFacingToleranceDeg', 'kappa'});
 verifyEqual(testCase, plan.numberOfRuns, 1);
 
 % Every runtime value reaches config.cost.parameters, where the cost reads it.
@@ -150,6 +173,40 @@ verifyEqual(testCase, config.cost.parameters.measurementSubsampleFraction, 0.5);
 verifyEqual(testCase, config.cost.parameters.positionStandardDeviationImage, [1 1 1.5]);
 verifyEqual(testCase, config.cost.parameters.kappa, 50);
 verifyEqual(testCase, config.optimizer.seed, 1001);
+end
+
+
+function testKappaSweepConfigurationPlansOneCombinationPerKappa(testCase)
+%TESTKAPPASWEEPCONFIGURATIONPLANSONECOMBINATIONPERKAPPA Check the sweep JSON.
+% testCase supplies the project root. This function has no output.
+
+% Only the configuration and planning steps are run here; they are fast,
+% while preparing inputs and running CMA-ES for every kappa would take long.
+configPath = fullfile(testCase.TestData.projectRoot, 'config', ...
+    'optconfig_hyperparamSweep_PIMLOP.json');
+spec = createBonePoseOptimizationExperimentConfig(configPath);
+plan = createBonePoseOptimizationExperimentPlan(spec);
+
+% With one tolerance value, each kappa candidate becomes one combination,
+% and every combination is repeated once per seed.
+kappaCandidates = spec.cost.hyperparameters.kappa;
+verifyEqual(testCase, kappaCandidates, [10 50 200]);
+verifyEqual(testCase, plan.parameterNames, {'normalFacingToleranceDeg', 'kappa'});
+verifyEqual(testCase, plan.numberOfCombinations, numel(kappaCandidates));
+verifyEqual(testCase, plan.combinations.kappa.', kappaCandidates);
+verifyEqual(testCase, plan.numberOfRuns, ...
+    numel(kappaCandidates) * numel(spec.experiment.seeds));
+
+% Each run config must carry its own scalar kappa next to the fixed
+% settings, because that is where cost_PIMLOP_v01 reads it.
+for combinationIndex = 1:plan.numberOfCombinations
+    combinationRow = plan.combinations(combinationIndex, :);
+    runConfig = createBonePoseOptimizationRunConfig( ...
+        spec, combinationRow, spec.experiment.seeds(1));
+    verifyEqual(testCase, runConfig.cost.parameters.kappa, kappaCandidates(combinationIndex));
+    verifyEqual(testCase, runConfig.cost.parameters.measurementSubsampleFraction, 0.5);
+    verifyEqual(testCase, runConfig.cost.parameters.positionStandardDeviationImage, [1 1 1.5]);
+end
 end
 
 
