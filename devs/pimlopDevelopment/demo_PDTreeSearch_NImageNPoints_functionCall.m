@@ -101,6 +101,17 @@ evaluationSeconds = toc(evaluationTimer);
 % The function returns all model-side correspondences in CT, because that is
 % the coordinate frame of the fixed PD-tree. Measurement positions remain in
 % ref, and their image-local 2-D normals keep an image index beside them.
+%
+% Copy the fields we need out of the DETAILS structure into short local
+% variables, so the code below is easier to read:
+%   - resultsByImage: one entry per ultrasound image with its own results.
+%   - processedImageMask / processedPlaneIndices: which images were used
+%     (true/index) and which were skipped (for example, no measurements).
+%   - X: the measured bone-surface points from all used images, stacked.
+%   - YmatchesCT: for every measured point, the closest matching point on
+%     the CT bone model (in CT coordinates).
+%   - EMatchValues: the match error of every point; their sum is the cost.
+%   - T_CT_ref_candidate: the tested bone pose (moves CT points into ref).
 resultsByImage           = costDetails.resultsByImage;
 processedImageMask       = costDetails.processedImageMask;
 processedPlaneIndices    = costDetails.processedPlaneIndices;
@@ -108,13 +119,20 @@ X                        = costDetails.X;
 YmatchesCT               = costDetails.YmatchesCT;
 EMatchValues             = costDetails.EMatchValues;
 T_CT_ref_candidate       = costDetails.T_CT_ref_candidate;
+
+% Keep only the rotation part of the pose. Normals are directions, not
+% positions, so they must be rotated but never shifted.
 R_CT_ref_candidate       = T_CT_ref_candidate(1:3,1:3);
 
+% Simple counts used later in the printed report.
 numberOfImages           = costDetails.numberOfImages;
 numberOfProcessedImages  = costDetails.numberOfProcessedImages;
 numberOfSkippedImages    = costDetails.numberOfSkippedImages;
 numberOfMeasurements     = costDetails.numberOfMeasurements;
 
+% Split the matched model points into separate arrays: their positions,
+% their surface normals, and the index of the mesh triangle they lie on.
+% The list of unique triangles shows how much of the bone was actually used.
 YmatchPositionsCT        = YmatchesCT.position3D;
 YmatchNormalsCT          = YmatchesCT.normal3D;
 YmatchFaceIndices        = YmatchesCT.faceIndex;
@@ -122,7 +140,13 @@ uniqueMatchedFaceIndices = unique(YmatchFaceIndices, 'stable');
 
 % Join the per-image diagnostics in the same order used by the combined X,
 % Y, and E_match arrays. These values explain the cost but do not recompute it.
-searchDetailsByImage         = [resultsByImage(processedImageMask).batchSearchDetails];
+%   - euclideanDistancesMm: straight-line distance between each measured
+%     point and its matched model point.
+%   - orientationAnglesDeg: angle between the measured normal and the
+%     matched model normal (small angle = surfaces face the same way).
+%   - facesEvaluatedPerMeasurement / nodesPrunedPerMeasurement: how much work
+%     the PD-tree search did; fewer faces tested means a faster search.
+searchDetailsByImage        = [resultsByImage(processedImageMask).batchSearchDetails];
 matchDetailsByImage          = [searchDetailsByImage.matchDetails];
 euclideanDistancesMm         = vertcat(matchDetailsByImage.euclideanDistanceMm);
 orientationAnglesDeg         = vertcat(matchDetailsByImage.orientationAngleDeg);
@@ -132,15 +156,22 @@ nodesPrunedPerMeasurement    = vertcat(searchDetailsByImage.numberOfNodesPruned)
 
 %% 6. PRINT A SHORT RESULT REPORT
 
+% First print one table row per ultrasound image. This shows whether some
+% images fit the bone model much worse than others, which a single total
+% cost would hide.
 fprintf('\nP-IMLOP cost-function demonstration\n');
 fprintf(' Image   Valid   Used   Mean distance(mm)   Mean angle(deg)   Mean E_match\n');
 for planeIndex = 1:numberOfImages
     result = resultsByImage(planeIndex);
+
+    % A skipped image has no matches, so print the reason instead of numbers.
     if result.status == "skipped"
         fprintf(' %5d       0      0   SKIPPED: %s\n', planeIndex, result.skipReason);
         continue;
     end
 
+    % For a used image, print how many measurements it had, how many were
+    % kept after subsampling, and the average match quality of those points.
     imageMatchDetails = result.batchSearchDetails.matchDetails;
     fprintf(' %5d   %5d  %5d       %8.3f          %8.2f         %8.3f\n', ...
         planeIndex, ...
@@ -151,10 +182,15 @@ for planeIndex = 1:numberOfImages
         mean(result.EMatchValues));
 end
 
+% Compute the summary numbers for all images together. The percentage of
+% faces tested tells how well the PD-tree avoids checking every triangle:
+% 100% would mean no speed-up compared with a brute-force search.
 numberOfValidMeasurementsBeforeSubsampling = sum([resultsByImage.numberOfValidMeasurementsBeforeSubsampling]);
 averageFacesEvaluated                      = mean(facesEvaluatedPerMeasurement);
 averageFacesEvaluatedPercent               = 100 * averageFacesEvaluated / PsiCT.pdTree.numberOfDatums;
 
+% Print the overall summary: data used, model and tree size, match quality,
+% the final cost, and how long one cost evaluation took.
 fprintf('\n  Images processed / skipped       : %d / %d\n', ...
     numberOfProcessedImages, ...
     numberOfSkippedImages);
@@ -191,7 +227,12 @@ fprintf('  Candidate evaluation time        : %.3f s\n\n', ...
 % The search remains in CT, but the ultrasound images and measurements are
 % displayed in ref. Transform model positions with the full rigid transform
 % and model normals with rotation only.
-boneFaces          = PsiCT.mesh.ConnectivityList;
+%   - boneFaces: the triangle list does not change when the mesh moves, so
+%     it is reused as-is.
+%   - bonePointsRef: the whole bone mesh placed at the tested pose.
+%   - YmatchPositionsRef / YmatchNormalsRef: the matched model points and
+%     their normals, now in the same frame as the ultrasound images.
+boneFaces         = PsiCT.mesh.ConnectivityList;
 bonePointsRef      = applyRigidTransform(PsiCT.mesh.Points, T_CT_ref_candidate);
 YmatchPositionsRef = applyRigidTransform(YmatchPositionsCT, T_CT_ref_candidate);
 YmatchNormalsRef   = YmatchNormalsCT * R_CT_ref_candidate.';
@@ -199,25 +240,37 @@ YmatchNormalsRef   = YmatchNormalsCT * R_CT_ref_candidate.';
 % Each 2-D measured normal and projected model normal belongs to one image.
 % Embed it as [nx,ny,0] in that image and rotate it into ref using the pose of
 % that particular ultrasound image.
+%
+% Create empty output arrays for all measurements at once. The loop below
+% fills them image by image, in the same stacked order as X.
 measurementNormals3DRef = zeros(numberOfMeasurements,3);
 projectedYNormals3DRef  = zeros(numberOfMeasurements,3);
 firstCombinedRow        = 1;
 
 for planeIndex = processedPlaneIndices
+    % Get this image's results and its rotation into ref. Only the rotation
+    % is needed because we are turning directions, not moving points.
     selectedPlane = data.imagePlanesRef(planeIndex);
     imageResult   = resultsByImage(planeIndex);
     R_image_ref   = selectedPlane.T_image_ref(1:3,1:3);
 
+    % Work out which rows of the combined arrays belong to this image.
     numberOfImageMeasurements = imageResult.numberOfMeasurements;
     combinedRows = firstCombinedRow:(firstCombinedRow + numberOfImageMeasurements - 1);
 
-    measurementNormals3DImage               = [imageResult.X.normal2DImage, zeros(numberOfImageMeasurements,1)];
+    % Measured normals: add a zero third component (the normal lies in the
+    % image plane), then rotate from the image frame into ref.
+    measurementNormals3DImage              = [imageResult.X.normal2DImage, zeros(numberOfImageMeasurements,1)];
     measurementNormals3DRef(combinedRows,:) = measurementNormals3DImage * R_image_ref.';
 
-    imageProjectedYNormals2D = imageResult.batchSearchDetails.matchDetails.projectedYNormal2DImage;
+    % Projected model normals: the matched model normal flattened onto the
+    % image plane. Convert it to 3-D and into ref in the same way, so it can
+    % be drawn next to the measured normal for a visual comparison.
+    imageProjectedYNormals2D =imageResult.batchSearchDetails.matchDetails.projectedYNormal2DImage;
     projectedYNormals3DImage = [imageProjectedYNormals2D, zeros(numberOfImageMeasurements,1)];
     projectedYNormals3DRef(combinedRows,:) = projectedYNormals3DImage * R_image_ref.';
 
+    % Move the start row forward so the next image fills the next rows.
     firstCombinedRow = firstCombinedRow + numberOfImageMeasurements;
 end
 
