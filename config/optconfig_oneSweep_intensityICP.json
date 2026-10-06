@@ -12,7 +12,7 @@
     "coarseRegistrationMatFile": "tools/bonePreRegistration/outputs/coarseRegistration_20260916_154020.mat"
   },
   "intersection": {
-    "normalFacingToleranceDeg": [30]
+    "normalFacingToleranceDeg": 30
   },
   "cost": {
     "model": "intensityICP_v1",
