@@ -235,10 +235,104 @@ verifyEqual(testCase, detailsWithoutSurface.activePlaneMask, ...
 end
 
 
+function testOptionalSurfaceNormalsAreValidatedWhenPresent(testCase)
+%TESTOPTIONALSURFACENORMALSAREVALIDATEDWHENPRESENT Check the optional schema.
+% The real historical artifact already proves missing fields remain accepted.
+% This test adds valid normals to a temporary copy, then confirms a non-unit
+% vector is rejected at the generic preparation boundary.
+
+config = testCase.TestData.config;
+surfaceOutput = load(config.input.boneSurfaceMatFile, ...
+    'surfaceResults', 'extractionMetadata');
+surfaceResults = surfaceOutput.surfaceResults;
+targetBone = string(config.input.bone);
+firstNonemptyIdentity = zeros(0, 2);
+
+for groupIndex = 1:numel(surfaceResults)
+    if ~strcmpi(string(surfaceResults(groupIndex).bone), targetBone)
+        continue;
+    end
+    for recordIndex = 1:numel(surfaceResults(groupIndex).data)
+        numberOfPoints = size( ...
+            surfaceResults(groupIndex).data(recordIndex).surfaceCoordinatesXY, 1);
+        surfaceResults(groupIndex).data(recordIndex).surfaceNormalXY = ...
+            repmat([0, -1], numberOfPoints, 1);
+        surfaceResults(groupIndex).data(recordIndex).surfaceNormalMask = ...
+            true(numberOfPoints, 1);
+        if isempty(firstNonemptyIdentity) && numberOfPoints > 0
+            firstNonemptyIdentity = [groupIndex, recordIndex];
+        end
+    end
+end
+verifyNotEmpty(testCase, firstNonemptyIdentity);
+
+temporarySurfacePath = [tempname, '.mat'];
+cleanupTemporarySurface = onCleanup( ...
+    @() deleteFileIfPresent(temporarySurfacePath));
+extractionMetadata = surfaceOutput.extractionMetadata;
+save(temporarySurfacePath, ...
+    'surfaceResults', 'extractionMetadata', '-v7.3');
+
+configWithNormals = config;
+configWithNormals.input.boneSurfaceMatFile = temporarySurfacePath;
+dataWithNormals = prepareBonePoseOptimizationInputs(configWithNormals);
+verifyTrue(testCase, all(isfield( ...
+    dataWithNormals.boneSurfaceMeasurements, ...
+    {'surfaceNormalXY', 'surfaceNormalMask'})));
+
+groupIndex = firstNonemptyIdentity(1);
+recordIndex = firstNonemptyIdentity(2);
+surfaceResults(groupIndex).data(recordIndex).surfaceNormalXY(1, :) = [2, 0];
+save(temporarySurfacePath, ...
+    'surfaceResults', 'extractionMetadata', '-v7.3');
+verifyError(testCase, ...
+    @() prepareBonePoseOptimizationInputs(configWithNormals), ...
+    'prepareBonePoseOptimizationInputs:InvalidSurfaceNormalValues');
+end
+
+
+function testPIMLOPModelIsPreparedInCT(testCase)
+%TESTPIMLOPMODELISPREPAREDINCT Check the PD-tree built during preparation.
+% testCase supplies the prepared estimation data. This function has no output.
+
+data = testCase.TestData.data;
+verifyTrue(testCase, isfield(data, 'extra') && ...
+    isfield(data.extra, 'pimlop') && isfield(data.extra.pimlop, 'PsiCT'));
+PsiCT = data.extra.pimlop.PsiCT;
+
+% The model must describe the same CT mesh that the other cost models use.
+verifyEqual(testCase, PsiCT.mesh.Points, data.boneMeshCT.Points);
+verifyEqual(testCase, PsiCT.mesh.ConnectivityList, ...
+    data.boneMeshCT.ConnectivityList);
+verifyEqual(testCase, PsiCT.normalConvention.frame, 'CT');
+
+% Every valid triangle must enter the tree exactly once as one datum.
+verifyNotEmpty(testCase, PsiCT.pdTree);
+verifyGreaterThan(testCase, PsiCT.pdTree.numberOfNodes, 0);
+verifyGreaterThan(testCase, PsiCT.pdTree.numberOfLeaves, 0);
+verifyEqual(testCase, PsiCT.pdTree.numberOfDatums, nnz(PsiCT.validFaceMask));
+end
+
+
+function testExistingCostIgnoresPIMLOPModel(testCase)
+%TESTEXISTINGCOSTIGNORESPIMLOPMODEL Check that adding the PD-tree is harmless.
+% testCase supplies the prepared data and its initial cost. This function has
+% no output.
+
+% Removing the P-IMLOP field must not change the configured cost at all,
+% which shows that the existing cost models do not read it.
+dataWithoutPIMLOP = rmfield(testCase.TestData.data, 'extra');
+[costWithoutPIMLOP, detailsWithoutPIMLOP] = bonePoseCostFunction( ...
+    zeros(6, 1), dataWithoutPIMLOP, testCase.TestData.config);
+verifyEqual(testCase, costWithoutPIMLOP, testCase.TestData.initialCost);
+verifyEqual(testCase, detailsWithoutPIMLOP, testCase.TestData.initialDetails);
+end
+
+
 function testGroundTruthBonePoseIsPreparedForValidation(testCase)
 %TESTGROUNDTRUTHBONEPOSEISPREPAREDFORVALIDATION Check the selected saved pose.
-% testCase supplies the CT model and validation-only pose. This function has
-% no output.
+% testCase supplies the CT model, reviewed snapshot path, and validation-only
+% pose. This function has no output.
 
 % The validation pose must describe the same tibia selected for estimation.
 data = testCase.TestData.data;
@@ -251,6 +345,21 @@ verifySize(testCase, groundTruthBonePose.T_CT_ref, [4 4]);
 verifySize(testCase, groundTruthBonePose.T_bone_ref, [4 4]);
 verifyEqual(testCase, groundTruthBonePose.T_bone_ref, ...
     groundTruthBonePose.T_CT_ref * data.T_bone_CT, 'AbsTol', 1e-8);
+
+% The new reviewed-snapshot schema stores the source mesh in CT coordinates.
+% Confirm that preparation applied the saved ground-truth transform instead
+% of accidentally treating meshCT as though it were already in ref.
+snapshotOutput = load( ...
+    testCase.TestData.config.input.validSnapshotsMatFile, 'validBonePoses');
+savedBoneCodes = upper(string({snapshotOutput.validBonePoses.bonePoses.bone}));
+savedBoneIndex = find(savedBoneCodes == "T", 1);
+savedBonePose = snapshotOutput.validBonePoses.bonePoses(savedBoneIndex);
+expectedPointsRef = applyRigidTransform( ...
+    savedBonePose.meshCT.Points, savedBonePose.data.T_CT_ref);
+verifyEqual(testCase, groundTruthBonePose.boneMeshRef.ConnectivityList, ...
+    savedBonePose.meshCT.ConnectivityList);
+verifyEqual(testCase, groundTruthBonePose.boneMeshRef.Points, ...
+    expectedPointsRef, 'AbsTol', 1e-8);
 end
 
 
@@ -392,4 +501,21 @@ config = testCase.TestData.config;
 config.input.bone = 'F';
 verifyError(testCase, @() prepareBonePoseOptimizationInputs(config), ...
     'prepareBonePoseOptimizationInputs:BoneNotRegistered');
+end
+
+
+function deleteFileIfPresent(filePath)
+%DELETEFILEIFPRESENT Remove a test-owned temporary MAT-file during cleanup.
+% Failed assertions can trigger cleanup after the file has already gone, so
+% existence is checked before deletion.
+%
+% Input:
+%   filePath : Absolute path to the temporary file owned by the current test.
+%
+% Outputs:
+%   None.
+
+if isfile(filePath)
+    delete(filePath);
+end
 end

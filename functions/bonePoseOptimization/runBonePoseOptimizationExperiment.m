@@ -5,6 +5,39 @@ function experimentResult = runBonePoseOptimizationExperiment(experimentSpec)
 % and saves each result immediately. It intentionally does not resume old
 % experiments or cache prepared inputs across different combinations.
 %
+% Where it fits in the framework:
+%   A hyperparameter sweep asks "which cost settings let the optimizer find
+%   the bone pose best, and how reliably?". To answer it we must run the
+%   whole bone-pose optimization many times: once for every combination of
+%   settings, and several times per combination with different random seeds.
+%
+%   main_bonePoseOptimization_hyperparamSweep.m reads the JSON with
+%   createBonePoseOptimizationExperimentConfig and then hands the checked
+%   experimentSpec to this function, which does everything else. It is the
+%   conductor that strings together the pieces built elsewhere:
+%     1. createBonePoseOptimizationExperimentPlan turns the spec into a
+%        to-do list of combinations and runs;
+%     2. for each combination, createBonePoseOptimizationRunConfig makes a
+%        one-run config and prepareBonePoseOptimizationInputs builds the
+%        fixed data (mesh, image planes, PD-tree, ...);
+%     3. for each seed of that combination, runBonePoseOptimization runs
+%        CMA-ES on that prepared data;
+%     4. every result is saved and added to one summary table.
+%
+% Why it is built this way:
+%   A sweep can run unattended for hours. Three ideas shape the code:
+%     - Prepare once per combination. Input preparation is slow and the
+%       same for every seed, so it is done once and reused by all seeds.
+%     - Never lose finished work. Each run is saved the moment it ends, and
+%       the summary table on disk is updated after every run, so a crash or
+%       a manual stop late in the sweep still leaves all earlier results.
+%     - One failure must not stop the sweep. A failing combination or seed
+%       is recorded as "failed" (with its error message) and the loop moves
+%       on, so one bad setting does not waste the rest of the night.
+%   Every call starts a NEW experiment folder; there is no resume, which
+%   keeps the code simple and guarantees one folder = one complete,
+%   self-consistent experiment.
+%
 % Input:
 %   experimentSpec - Validated configuration returned by
 %                    createBonePoseOptimizationExperimentConfig.
@@ -15,12 +48,21 @@ function experimentResult = runBonePoseOptimizationExperiment(experimentSpec)
 
 %% CREATE AND SAVE THE EXPERIMENT PLAN
 
-% Expand all candidate values before running so the total workload is visible.
+% Before running anything, turn the candidate lists into the concrete list
+% of combinations and runs. Knowing the full workload up front lets us tell
+% the user how big the sweep is, and gives every run a fixed ID that the
+% folders, the summary table, and the progress messages all share.
 experimentPlan   = createBonePoseOptimizationExperimentPlan(experimentSpec);
-% Create a fresh folder on every invocation.
+% Every sweep gets its own new, timestamped folder. Results of different
+% sweeps (or of a rerun of the same JSON) can then never overwrite or mix
+% with each other.
 experimentFolder = createExperimentFolder(experimentSpec.experiment.outputFolder, experimentSpec.experiment.name);
 
-% Record the original JSON beside the resolved MATLAB structures.
+% The JSON file on disk may be edited later for the next sweep. A copy of
+% it inside the experiment folder records exactly which settings produced
+% these results, so the experiment can be understood or repeated months
+% from now. If the copy fails we stop, because results without their
+% settings would be hard to interpret.
 configSnapshotPath          = fullfile(experimentFolder, 'experiment_config_snapshot.json');
 [configCopied, copyMessage] = copyfile(experimentSpec.source.configFilePath, configSnapshotPath);
 if ~configCopied
@@ -28,22 +70,33 @@ if ~configCopied
           'Could not copy the experiment configuration: %s', copyMessage);
 end
 
-% Record the software context that may affect stochastic parallel execution.
+% Results can depend on more than the JSON: the MATLAB version and whether
+% CMA-ES evaluates candidates in parallel. With parfor, the order in which
+% workers finish can vary, so the same seed may not give bit-identical
+% results. We note this context so a later reader knows how far results
+% are expected to be reproducible.
 environment.matlabVersion       = version;
 environment.parallelToolbox     = ver('parallel');
 environment.useParfor           = experimentSpec.optimizer.useParfor;
 environment.parforWorkers       = experimentSpec.optimizer.parforWorkers;
 environment.seedReproducibility = 'best_effort_when_internal_parfor_is_enabled';
 
-% Save the authoritative plan before the first optimization begins.
+% Save the spec, the plan and the environment before the first run starts.
+% This file is the reference description of the experiment: analysis code
+% reads it to know what was planned, even if the sweep is stopped halfway.
 planFilePath = fullfile(experimentFolder, 'experiment_plan.mat');
 save(planFilePath, 'experimentSpec', 'experimentPlan', 'environment');
 
-% Build an analysis-friendly table and save its initial pending state.
+% Create the summary table: one row per planned run, all marked "pending".
+% It is saved now and then rewritten after every run, so at any moment the
+% file on disk shows which runs are done, which failed, and which are still
+% waiting. It is the first thing to open when looking at the results.
 summaryTable = createSummaryTable(experimentPlan.runs);
 saveExperimentSummary(experimentFolder, summaryTable);
 
-% Explain the complete workload before starting the unattended loop.
+% Tell the user where the results will go and how much work is ahead
+% (number of runs and the maximum number of cost evaluations), so they can
+% judge the run time and stop early if the sweep is larger than intended.
 maximumEvaluations = experimentPlan.numberOfRuns * experimentSpec.optimizer.maxFunctionEvaluations;
 fprintf('Created experiment: %s\n', experimentFolder);
 fprintf('%d combinations x %d seeds = %d optimization runs.\n', ...
@@ -52,78 +105,129 @@ fprintf('Maximum planned function evaluations: %d\n', maximumEvaluations);
 
 %% RUN EACH COMBINATION
 
-% A zero state keeps the coarse CT-to-reference pose unchanged.
+% The optimizer does not search for the pose directly; it searches for a
+% small 6D correction [vx vy vz wx wy wz] on top of the coarse start pose.
+% A zero vector means "no correction yet", i.e. exactly the coarse pose.
+% Every run starts from here, so only the settings and the seed differ.
 initialPoseVector      = zeros(6, 1);
-% Save shared validation data after the first successful preparation only.
+% The ground truth is the same for every combination (same data, same
+% bone), so it only needs to be saved once. This flag remembers whether
+% that already happened.
 validationContextSaved = false;
 
-% Loop for every hyperparameter combination
+% The outer loop walks through the combinations one by one. For each, we
+% first prepare the inputs and then (in the inner loop below) run all its
+% seeds on those inputs.
 for combinationIndex = 1:experimentPlan.numberOfCombinations
 
-    % Read one scalar combination and find its consecutive seed rows.
+    % Take this combination's row from the plan and find its runs (one per
+    % seed). The plan stores all seeds of a combination next to each other,
+    % so these are the runs the inner loop will execute.
     combinationRow        = experimentPlan.combinations(combinationIndex, :);
     combinationRunIndexes = find(experimentPlan.runs.combinationNumber == combinationRow.combinationNumber);
 
-    % Copy the candidate values into the scalar configuration used by existing functions.
+    % Turn the plan row into a plain one-run config (one value per setting,
+    % no seed yet). Preparation and the cost function only understand this
+    % plain shape, not the candidate lists of the experiment spec.
     combinationConfig     = createBonePoseOptimizationRunConfig(experimentSpec, combinationRow);
 
     fprintf('\nPreparing %s (%d of %d).\n', ...
             char(combinationRow.combinationId), combinationIndex, experimentPlan.numberOfCombinations);
 
+    % Preparation is wrapped in try/catch: some settings (for example an
+    % extreme intersection tolerance) can make preparation fail. Such a
+    % failure should be recorded and skipped, not end the whole sweep.
     try
 
-        % Prepare once for this combination, then reuse the data for all of its seeds.
+        % Load and check all inputs and build the slow structures (PD-tree,
+        % start-pose intersections) once. Every seed below reuses this data,
+        % which is the main reason the loop is organised per combination.
         [combinationData, validationData] = prepareBonePoseOptimizationInputs(combinationConfig);
         combinationData.config            = combinationConfig;
 
-        % The initial cost depends on the scalar cost settings but not on the random seed.
+        % Evaluate the cost at the start pose. This is the "before" value we
+        % compare each run's final cost to, showing how much the optimizer
+        % improved. It depends on the cost settings but not on the seed, so
+        % computing it once per combination is enough.
         initialCost = bonePoseCostFunction(initialPoseVector, combinationData, combinationConfig);
 
-        % Ground truth is shared by the experiment, so one saved copy is sufficient.
+        % Save the full ground truth and start transforms once, in a shared
+        % file. Run files then only need a small reference to it, which
+        % keeps them small and avoids storing the same data many times.
         if ~validationContextSaved
             saveValidationContext(experimentFolder, validationData, combinationData, experimentSpec);
             validationContextSaved = true;
         end
 
     catch preparationError
-        
-        % Record every affected seed as failed because no optimizer can use this combination.
+
+        % Without prepared inputs no seed of this combination can run. We
+        % still write a "failed" result file and summary row for each of its
+        % seeds, so the summary shows exactly what happened (and why) for
+        % every planned run, instead of rows that stay "pending" forever.
         for runIndex = combinationRunIndexes(:).'
-            
+
+            % Build the same seed config and output folder a normal run
+            % would get. The failed result then sits in the exact place
+            % where analysis code expects this run's file, and it records
+            % the settings that were being tried when preparation broke.
             runRow      = experimentPlan.runs(runIndex, :);
             seedConfig  = createBonePoseOptimizationRunConfig(experimentSpec, combinationRow, runRow.seed);
             seedConfig  = addRunOutputFolder(seedConfig, runRow, experimentFolder);
-            
+
+            % Package the error as a run result with the same fields as a
+            % successful one (stage "preparation", NaN costs, no ground
+            % truth), so later analysis can load every run the same way and
+            % simply filter on its status. Save it right away, like any run.
             [runResult, summaryRecord] = createFailedRunResult(runRow, seedConfig, preparationError, 'preparation', NaN, struct());
             saveRunResult(runResult);
-            
+
+            % Mark this run as "failed" in the summary, with the error
+            % message, and rewrite the summary file, so the on-disk table
+            % is up to date even if the sweep stops before the next run.
             summaryTable = updateSummaryRow(summaryTable, runIndex, summaryRecord);
             saveExperimentSummary(experimentFolder, summaryTable);
-        
+
         end
+        % Move on to the next combination; the remaining sweep is unaffected.
         continue;
     end
 
     %% RUN EVERY SEED FOR THIS COMBINATION
 
-    % Use the same ordered seed list for this and every other combination.
+    % The inputs are ready, so now CMA-ES is run once per seed. Different
+    % seeds give different random search paths; comparing their results
+    % shows whether this combination finds the pose reliably or only by luck.
+
+    % Each run result keeps a small copy of the true pose. That way a single
+    % run file is enough to compute its pose error later, without also
+    % loading the shared validation file.
     validationReference = createValidationReference(validationData);
 
-    % Loop and run the optimization for every predefined seeds
     for runIndex = combinationRunIndexes(:).'
 
+        % Build the config for this exact run: the combination's settings
+        % plus this seed, and its own output folder so CMA-ES logs and the
+        % result file of different runs never overwrite each other.
         runRow          = experimentPlan.runs(runIndex, :);
         seedConfig      = createBonePoseOptimizationRunConfig(experimentSpec, combinationRow, runRow.seed);
         seedConfig      = addRunOutputFolder(seedConfig, runRow, experimentFolder);
-        
-        % Keep the prepared struct consistent with the exact seed-specific runtime config.
+
+        % Reuse the prepared data, but swap in the seed-specific config. The
+        % cost function reads settings from data.config, so this keeps the
+        % data and the config used by the optimizer exactly in agreement.
         seedData        = combinationData;
         seedData.config = seedConfig;
 
+        % Run CMA-ES. runOneSeed catches its own errors and returns a
+        % "failed" result instead, so one crashing seed does not stop the
+        % others.
         fprintf('Running %s with seed %d.\n', char(runRow.runId), runRow.seed);
         [runResult, summaryRecord] = runOneSeed(runRow, seedConfig, seedData, validationReference, initialPoseVector, initialCost);
 
-        % Save immediately so completed work survives even though this runner has no resume feature.
+        % Save the result and the updated summary right away. Since there
+        % is no resume feature, this is what protects finished runs if the
+        % sweep is interrupted later.
         saveRunResult(runResult);
         summaryTable = updateSummaryRow(summaryTable, runIndex, summaryRecord);
         saveExperimentSummary(experimentFolder, summaryTable);
@@ -132,12 +236,17 @@ end
 
 %% RETURN A COMPACT EXPERIMENT RESULT
 
-% Report both outcomes so unattended runs end with one clear status line.
+% All planned runs have now been attempted. Print one closing line with how
+% many succeeded and failed, so after an unattended sweep the user sees at
+% a glance whether it is worth opening the summary for failures.
 numberCompleted = sum(summaryTable.status == "completed");
 numberFailed    = sum(summaryTable.status == "failed");
 fprintf('\nExperiment finished: %d completed, %d failed.\n', numberCompleted, numberFailed);
 
-% Keep the most useful experiment-level values available to the calling script.
+% Everything is already saved on disk. The returned struct is only a
+% convenience for the calling script: where the results are, what was
+% planned, and the final summary, ready for a quick look or a next
+% analysis step without reloading files.
 experimentResult.experimentFolder = experimentFolder;
 experimentResult.experimentPlan   = experimentPlan;
 experimentResult.summaryTable     = summaryTable;

@@ -34,6 +34,7 @@ filename_bonesurface         = configuration.input.boneSurfaceFileName;
 filepath_bonelandmarks       = configuration.input.boneLandmarksFilePath;
 filename_bonelandmarks       = configuration.input.boneLandmarksFileName;
 coarseRegistrationOutputPath = configuration.output.coarseRegistrationOutputPath;
+saveResults                  = configuration.output.saveResults;
 
 %% REQUIRED PATH
 
@@ -276,6 +277,10 @@ processingMode = lower(string(validBonePoses.processingMode));
 switch processingMode
     case "snapshot"
         % Continue with the existing Snapshot surface grouping below.
+    case "static"
+        % Continue with the existing Snapshot surface grouping below. This
+        % is the new standard naming. The "snapshot" case will be
+        % deprecated in the future
     case "kinematic"
         % TODO: Select synchronized surface data for Kinematic pre-registration.
         error('bonePreRegistration_onlyImage:KinematicNotImplemented', ...
@@ -318,7 +323,7 @@ for groupIndex = 1:numel(surfaceResults)
     % femur_mid refers to the femur shaft, so both names use the shaft field.
     nameParts = split(groupName, "_");
     regionName = nameParts(end);
-    if regionName == "mid"
+    if regionName == "mid" || regionName == "middle"
         regionName = "shaft";
     end
 
@@ -368,9 +373,17 @@ boneCorrespondences = repmat(struct( ...
     'regionLabels', strings(0, 1)), size(landmarks));
 
 % Use one color per bone for its CT mesh and landmarks. Correspondence lines
-% use region colors so medial, lateral, and shaft candidates can be separated.
-boneDisplayColors  = lines(max(numel(landmarks), 1));
-regionLineColors   = lines(numel(regionNames));
+% use three shades from the bone's color family: light for medial, medium for
+% lateral, and dark for shaft, following the order in regionNames above.
+boneDisplayColors = lines(max(numel(landmarks), 1));
+femurCorrespondenceColors = [ ...
+    0.38, 0.68, 0.90; ...  % Light blue: medial landmark.
+    0.00, 0.45, 0.74; ...  % Medium blue: lateral landmark.
+    0.00, 0.20, 0.45];     % Dark blue: shaft landmark.
+tibiaCorrespondenceColors = [ ...
+    1.00, 0.68, 0.30; ...  % Light orange: medial landmark.
+    0.90, 0.40, 0.05; ...  % Medium orange: lateral landmark.
+    0.55, 0.18, 0.01];     % Dark orange: shaft landmark.
 availableBoneCodes = upper(string({bones.bone}));
 
 % Loop for all landmarks
@@ -389,6 +402,20 @@ for boneIndex = 1:numel(landmarks)
               'Expected one CT mesh for bone code "%s", but found %d.', ...
               currentBoneCode, numel(meshBoneIndex));
     end
+
+    % Select the complete shade family by bone code instead of bone array
+    % order, so femur lines stay blue and tibia lines stay orange.
+    normalizedBoneCode = upper(string(currentBoneCode));
+    if normalizedBoneCode == "F"
+        boneCorrespondenceColors = femurCorrespondenceColors;
+    elseif normalizedBoneCode == "T"
+        boneCorrespondenceColors = tibiaCorrespondenceColors;
+    else
+        error('bonePreRegistration_onlyImage:UnsupportedCorrespondenceBone', ...
+              'No correspondence-line color family is defined for bone code "%s".', ...
+              currentBoneCode);
+    end
+
     currentBoneMesh = bones(meshBoneIndex).mesh;
     if ~isa(currentBoneMesh, 'triangulation')
         error('bonePreRegistration_onlyImage:InvalidBoneMesh', ...
@@ -466,7 +493,7 @@ for boneIndex = 1:numel(landmarks)
                 [landmarkPoint(2), surfacePoints(pointIndex, 2)], ...
                 [landmarkPoint(3), surfacePoints(pointIndex, 3)], ...
                 '-', ...
-                'Color', regionLineColors(regionIndex, :), ...
+                'Color', boneCorrespondenceColors(regionIndex, :), ...
                 'LineWidth', 0.25, ...
                 'HandleVisibility', 'off', ...
                 'Tag', 'regional_correspondence_candidate');
@@ -488,12 +515,21 @@ drawnow;
 %% 3) COARSE REGISTRATION
 %% 3.0) PREPARE FOR COARSE REGISTRATION
 
-% Keep both transformation directions as raw 4x4 matrices so their source
-% and target frames remain explicit throughout later processing.
+% Keep the initialization, ICP correction, and final transformation as raw
+% 4x4 matrices. This makes the two coarse-registration steps explicit while
+% preserving the final fields expected by the fine-registration workflow.
 coarseRegistration = repmat(struct( ...
     'name', "", ...
     'bone', '', ...
     'status', "not processed", ...
+    'T_CT_ref_init', [], ...
+    'T_bone_ref_init', [], ...
+    'boneMeshRef_init', [], ...
+    'T_delta_ref_icp', [], ...
+    'T_bone_ref_icp', [], ...
+    'boneMeshRef_icp', [], ...
+    'icpRMSE_mm', NaN, ...
+    'icpStatus', "not processed", ...
     'T_CT_ref_est', [], ...
     'T_bone_ref_est', [], ...
     'boneMeshRef_est', []), size(boneCorrespondences));
@@ -521,6 +557,18 @@ groundTruthRegistrations = repmat(struct( ...
     'T_CT_ref_gt', [], ...
     'T_bone_ref_gt', [], ...
     'boneMeshRef_gt', []), size(boneCorrespondences));
+
+% The current spatial-processing schema stores one CT-frame mesh beside the
+% pose data instead of repeating a transformed mesh inside every pose record.
+% Check the shared fields here so a mismatched MAT file fails with a clear
+% message before individual bones are displayed.
+requiredBonePoseFields = {'bone', 'meshCT', 'data'};
+if ~isstruct(validBonePoses.bonePoses) || ...
+        ~all(isfield(validBonePoses.bonePoses, requiredBonePoseFields))
+    error('bonePreRegistration:InvalidGroundTruthBonePoseSchema', ...
+          ['Each validBonePoses.bonePoses entry must contain bone, meshCT, ' ...
+           'and data. Rerun build_ultrasoundBone_intersectionData_poseModes.m.']);
+end
 validBoneCodes = upper(string({validBonePoses.bonePoses.bone}));
 
 % Use one fixed length in millimetres so every ground-truth bone ACS is
@@ -531,17 +579,79 @@ for boneIndex = 1:numel(boneCorrespondences)
     currentBoneCode = upper(string(boneCorrespondences(boneIndex).bone));
 
     % Match the saved ground truth to the coarse-registration bone by code.
-    validBoneIndex           = find(validBoneCodes == currentBoneCode, 1);
-    currentValidBonePoseData = validBonePoses.bonePoses(validBoneIndex).data;
-    if ~isfield(currentValidBonePoseData, 'T_bone_ref')
-        error('bonePreRegistration:MissingGroundTruthBoneAcsPose', ...
-            ['The saved pose for bone "%s" does not contain T_bone_ref. ' ...
-             'Rerun build_ultrasoundBone_intersectionData.m with the updated output schema.'], ...
-            currentBoneCode);
+    matchingValidBoneIndices = find(validBoneCodes == currentBoneCode);
+    if numel(matchingValidBoneIndices) ~= 1
+        error('bonePreRegistration:UnmatchedGroundTruthBonePose', ...
+              'Expected one saved ground-truth pose for bone "%s", but found %d.', ...
+              currentBoneCode, numel(matchingValidBoneIndices));
     end
-    T_CT_ref_gt     = currentValidBonePoseData.T_CT_ref;
-    T_bone_ref_gt   = currentValidBonePoseData.T_bone_ref;
-    boneMeshRef_gt  = currentValidBonePoseData.mesh;
+    currentValidBonePose     = validBonePoses.bonePoses(matchingValidBoneIndices);
+    currentValidBonePoseData = currentValidBonePose.data;
+
+    % Static pre-registration requires exactly one reduced pose per bone. A
+    % pose series belongs to the kinematic workflow, which is rejected above.
+    if ~isscalar(currentValidBonePoseData)
+        error('bonePreRegistration:NonScalarGroundTruthBonePose', ...
+              'The static ground-truth data for bone "%s" must contain exactly one pose.', ...
+              currentBoneCode);
+    end
+
+    % Both transforms are required by the comparison plot. isValid is part of
+    % the new schema and prevents unavailable poses containing NaNs from being
+    % treated as real ground truth.
+    requiredPoseDataFields = {'isValid', 'status', 'T_CT_ref', 'T_bone_ref'};
+    if ~all(isfield(currentValidBonePoseData, requiredPoseDataFields))
+        error('bonePreRegistration:MissingGroundTruthPoseData', ...
+              ['The saved pose for bone "%s" must contain isValid, status, ' ...
+               'T_CT_ref, and T_bone_ref. Rerun ' ...
+               'build_ultrasoundBone_intersectionData_poseModes.m.'], ...
+              currentBoneCode);
+    end
+    if ~currentValidBonePoseData.isValid
+        error('bonePreRegistration:InvalidGroundTruthBonePose', ...
+              'The saved ground-truth pose for bone "%s" is marked invalid: %s', ...
+              currentBoneCode, string(currentValidBonePoseData.status));
+    end
+
+    % The producer now stores the heavy triangulation once in CT coordinates.
+    % Move its vertices into ref with T_CT_ref and keep its face connectivity.
+    boneMeshCT = currentValidBonePose.meshCT;
+    if ~isa(boneMeshCT, 'triangulation')
+        error('bonePreRegistration:InvalidGroundTruthBoneMesh', ...
+              'The saved meshCT for bone "%s" must be a triangulation.', ...
+              currentBoneCode);
+    end
+    T_CT_ref_gt   = currentValidBonePoseData.T_CT_ref;
+    T_bone_ref_gt = currentValidBonePoseData.T_bone_ref;
+
+    % Reject malformed transforms before they are applied to thousands of
+    % vertices or used as coordinate axes in the result figure.
+    groundTruthTransforms = {T_CT_ref_gt, T_bone_ref_gt};
+    groundTruthTransformNames = {'T_CT_ref', 'T_bone_ref'};
+    for transformIndex = 1:numel(groundTruthTransforms)
+        currentTransform = groundTruthTransforms{transformIndex};
+        isFiniteMatrix = isnumeric(currentTransform) && isreal(currentTransform) && ...
+                         isequal(size(currentTransform), [4, 4]) && ...
+                         all(isfinite(currentTransform), 'all');
+        if ~isFiniteMatrix
+            error('bonePreRegistration:InvalidGroundTruthTransform', ...
+                  '%s for bone "%s" must be a finite real 4-by-4 matrix.', ...
+                  groundTruthTransformNames{transformIndex}, currentBoneCode);
+        end
+
+        rotationMatrix = currentTransform(1:3, 1:3);
+        isProperRigid = norm(currentTransform(4, :) - [0, 0, 0, 1], inf) <= 1e-9 && ...
+                        norm(rotationMatrix.' * rotationMatrix - eye(3), 'fro') <= 1e-6 && ...
+                        abs(det(rotationMatrix) - 1) <= 1e-6;
+        if ~isProperRigid
+            error('bonePreRegistration:InvalidGroundTruthTransform', ...
+                  '%s for bone "%s" must be a proper rigid transform.', ...
+                  groundTruthTransformNames{transformIndex}, currentBoneCode);
+        end
+    end
+
+    bonePointsRef_gt = applyRigidTransform(boneMeshCT.Points, T_CT_ref_gt);
+    boneMeshRef_gt   = triangulation(boneMeshCT.ConnectivityList, bonePointsRef_gt);
 
     groundTruthRegistrations(boneIndex).name           = boneCorrespondences(boneIndex).name;
     groundTruthRegistrations(boneIndex).bone           = currentBoneCode;
@@ -604,9 +714,13 @@ for boneIndex = 1:numel(regionalSurfacePoints)
         'Tag', 'coarse_registration_surface');
 end
 
-%% 3.3) PERFORM THE COARSE REGISTRATION
+%% 3.3) PERFORM THE INITIALIZATION
 
-% Estimate and apply one independent rigid transformation for each bone.
+% The first coarse-registration step uses the three anatomical regions to
+% place each CT bone near its measured ultrasound surface. The variables in
+% this section use the suffix "init" because ICP will refine this pose in the
+% next section. The suffix "est" remains reserved for the final result after
+% both coarse-registration steps are complete.
 for boneIndex = 1:numel(boneCorrespondences)
     coarseRegistration(boneIndex).name = boneCorrespondences(boneIndex).name;
     coarseRegistration(boneIndex).bone = boneCorrespondences(boneIndex).bone;
@@ -634,12 +748,12 @@ for boneIndex = 1:numel(boneCorrespondences)
 
     % Let MATLAB estimate the ref-to-CT transform, then immediately extract
     % its premultiply matrix so the rest of the workflow uses raw 4x4 transforms.
-    tform_ref_CT_est = estgeotform3d(matchedPoints1, matchedPoints2, 'rigid', 'MaxDistance', 100);
-    T_ref_CT_est     = tform_ref_CT_est.A;
+    tform_ref_CT_init = estgeotform3d(matchedPoints1, matchedPoints2, 'rigid', 'MaxDistance', 100);
+    T_ref_CT_init     = tform_ref_CT_init.A;
 
     % The CT mesh must be moved into ref, so derive the opposite direction.
     % Solving against identity avoids forming the inverse with inv explicitly.
-    T_CT_ref_est = T_ref_CT_est \ eye(4);
+    T_CT_ref_init = T_ref_CT_init \ eye(4);
 
     % Find this bone's CT triangulation by its code, then transform every
     % vertex while keeping the triangle connectivity unchanged.
@@ -656,15 +770,112 @@ for boneIndex = 1:numel(boneCorrespondences)
     % Propagate this bone's CT-defined anatomical frame through the estimated
     % CT-to-ref registration so it can be compared directly with the saved
     % ground-truth anatomical frame in the same ref coordinate system.
-    T_bone_ref_est = T_CT_ref_est * currentBone.T_bone_CT;
+    T_bone_ref_init = T_CT_ref_init * currentBone.T_bone_CT;
 
     % Transform only the CT-frame vertices and reuse the original triangle
     % connectivity to build a mesh whose points are expressed in ref.
-    bonePointsRef_est = applyRigidTransform(currentBoneMesh.Points, T_CT_ref_est);
-    boneMeshRef_est   = triangulation(currentBoneMesh.ConnectivityList, bonePointsRef_est);
+    bonePointsRef_init = applyRigidTransform(currentBoneMesh.Points, T_CT_ref_init);
+    boneMeshRef_init   = triangulation(currentBoneMesh.ConnectivityList, bonePointsRef_init);
 
-    % Store frame-named matrices and the ref-frame mesh for later use.
+    % Keep the complete initialization result. Besides making the two coarse
+    % steps easy to inspect, these fields provide a usable fallback if ICP
+    % cannot improve this bone.
+    coarseRegistration(boneIndex).status             = "initialized";
+    coarseRegistration(boneIndex).T_CT_ref_init      = T_CT_ref_init;
+    coarseRegistration(boneIndex).T_bone_ref_init    = T_bone_ref_init;
+    coarseRegistration(boneIndex).boneMeshRef_init   = boneMeshRef_init;
+end
+
+%% 3.4) PERFORM ICP
+
+% Refine every initialized bone independently. The moving point cloud is the
+% complete CT mesh after initialization, while the fixed point cloud contains
+% the measured ultrasound surface in ref. Because the moving cloud already
+% starts at the initialized pose, ICP must start from an identity transform;
+% otherwise MATLAB may apply an additional centroid-based initialization.
+for boneIndex = 1:numel(coarseRegistration)
+    if coarseRegistration(boneIndex).status ~= "initialized"
+        continue;
+    end
+
+    % Convert the initialized triangulation and measured surface to the input
+    % type required by pcregistericp. Every mesh vertex is retained and stays
+    % in its original order, so movingReg can later reuse the CT connectivity.
+    boneMeshRef_init       = coarseRegistration(boneIndex).boneMeshRef_init;
+    bonePointCloudRef_init = pointCloud(boneMeshRef_init.Points);
+    surfacePointCloudRef   = pointCloud(boneCorrespondences(boneIndex).surfacePointsRef);
+
+    try
+        % Ultrasound measures only a small part of the bone, whereas the CT
+        % cloud contains the complete bone surface. Restricting ICP to the
+        % closest 10 percent of correspondences prevents the unmeasured mesh
+        % regions from pulling the whole bone toward the partial measurement.
+        identityTform = rigidtform3d();
+        [tform_delta_ref_icp, bonePointCloudRef_icp, icpRMSE_mm] = ...
+            pcregistericp( ...
+                bonePointCloudRef_init, ...
+                surfacePointCloudRef, ...
+                'Metric', 'pointToPoint', ...
+                'InlierRatio', 0.05, ...
+                'InitialTransform', identityTform);
+
+        % ICP returns the motion from the already initialized mesh to the
+        % refined mesh, both expressed in ref. Convert the MATLAB transform
+        % object immediately so all stored transforms remain numeric 4x4
+        % matrices and follow the project convention.
+        T_delta_ref_icp = tform_delta_ref_icp.A;
+
+        % Transform propagation must be read from right to left:
+        %   1. T_CT_ref_init moves CT points to their initialized ref pose.
+        %   2. T_delta_ref_icp applies the ICP correction in ref.
+        % Their product is therefore the complete CT-to-ref coarse pose.
+        T_CT_ref_est   = T_delta_ref_icp * coarseRegistration(boneIndex).T_CT_ref_init;
+
+        % The anatomical bone frame is attached to the CT model. Applying the
+        % final CT pose to T_bone_CT keeps the anatomical axes synchronized
+        % with the ICP-refined mesh.
+        currentBoneCode = coarseRegistration(boneIndex).bone;
+        meshBoneIndex   = find(availableBoneCodes == currentBoneCode);
+        currentBone     = bones(meshBoneIndex);
+        T_bone_ref_est  = T_CT_ref_est * currentBone.T_bone_CT;
+
+        % movingReg contains the refined locations in the same order as the
+        % moving input. Reusing the original faces converts it back to the
+        % triangulation format used by the rest of this project.
+        bonePointsRef_est = bonePointCloudRef_icp.Location;
+        boneMeshRef_est   = triangulation(currentBone.mesh.ConnectivityList, bonePointsRef_est);
+
+        coarseRegistration(boneIndex).icpStatus = "completed";
+
+    catch icpError
+        % ICP is a refinement, so a failure should not discard a valid
+        % initialization. Identity represents the effective correction that
+        % was applied, and NaN makes clear that no ICP RMSE is available.
+        warning('bonePreRegistration:ICPRefinementFailed', ...
+                'ICP refinement failed for bone "%s". Using the initialization instead. Reason: %s', ...
+                coarseRegistration(boneIndex).bone, icpError.message);
+
+        T_delta_ref_icp = eye(4);
+        icpRMSE_mm      = NaN;
+        T_CT_ref_est    = coarseRegistration(boneIndex).T_CT_ref_init;
+        T_bone_ref_est  = coarseRegistration(boneIndex).T_bone_ref_init;
+        boneMeshRef_est = coarseRegistration(boneIndex).boneMeshRef_init;
+        coarseRegistration(boneIndex).icpStatus = "fallback to initialization: " + string(icpError.message);
+    end
+
+    % Store the bone pose and mesh produced by the ICP step explicitly. These
+    % fields mirror T_bone_ref_init and boneMeshRef_init, which makes it easy
+    % to compare the geometry before and after ICP without having to infer
+    % which final-result fields belong to the refinement step.
+    coarseRegistration(boneIndex).T_bone_ref_icp    = T_bone_ref_est;
+    coarseRegistration(boneIndex).boneMeshRef_icp   = boneMeshRef_est;
+
+    % Preserve the established final field names as aliases of the ICP result
+    % so the later fine-registration workflow continues to receive the complete
+    % two-step coarse-registration result without any interface changes.
     coarseRegistration(boneIndex).status            = "registered";
+    coarseRegistration(boneIndex).T_delta_ref_icp   = T_delta_ref_icp;
+    coarseRegistration(boneIndex).icpRMSE_mm        = icpRMSE_mm;
     coarseRegistration(boneIndex).T_CT_ref_est      = T_CT_ref_est;
     coarseRegistration(boneIndex).T_bone_ref_est    = T_bone_ref_est;
     coarseRegistration(boneIndex).boneMeshRef_est   = boneMeshRef_est;
@@ -700,20 +911,9 @@ drawnow;
 
 %% SAVE THE COARSE REGISTRATION
 
-% Give each run a timestamped MAT filename so results from different input
-% configurations remain separate inside the configured output directory.
-outputTimestamp = char(datetime('now', 'Format', 'yyyyMMdd_HHmmss'));
-coarseRegistrationOutputFilePath = fullfile( coarseRegistrationOutputPath, ['coarseRegistration_', outputTimestamp, '.mat']);
-
-% Avoid silently replacing a result if the workflow is run twice within the
-% same second and therefore produces the same timestamped filename.
-if isfile(coarseRegistrationOutputFilePath)
-    error('bonePreRegistration:OutputFileAlreadyExists', ...
-          'Coarse-registration output already exists: %s', coarseRegistrationOutputFilePath);
-end
-
-% Record each input file and the variables loaded from it. Keeping these
-% fields flat makes the saved provenance easy to inspect and extend.
+% Record each input file and the variables loaded from it. Build this
+% structure for every run so it remains available in the workspace even when
+% saving is disabled.
 coarseRegistrationMetadata = struct();
 coarseRegistrationMetadata.createdAt                    = char(datetime('now'));
 coarseRegistrationMetadata.sourceUltrasoundFile         = ultrasoundFilePath;
@@ -725,11 +925,33 @@ coarseRegistrationMetadata.sourceCtVariable             = "bones";
 coarseRegistrationMetadata.sourceBoneLandmarksFile      = bonelandmarksFullPath;
 coarseRegistrationMetadata.sourceBoneLandmarksVariables = ["landmarks", "intersectionDiagnostics"];
 coarseRegistrationMetadata.configurationFile            = configurationFilePath;
+coarseRegistrationMetadata.icpMetric                    = "pointToPoint";
+coarseRegistrationMetadata.icpInitialTransform          = "identity";
+coarseRegistrationMetadata.icpInlierRatio               = 0.05;
+coarseRegistrationMetadata.icpUsesDownsampling          = false;
+coarseRegistrationMetadata.matlabRelease                = string(version('-release'));
 
-% Save the result and its provenance together. Version 7.3 supports the
-% registered meshes stored inside coarseRegistration.
-save(coarseRegistrationOutputFilePath, 'coarseRegistration', 'coarseRegistrationMetadata', '-v7.3');
+% Only create a result file when the configuration explicitly enables it.
+% This lets users inspect the figures and workspace without producing a new
+% timestamped MAT file.
+if saveResults
+    % Give each saved run a timestamped MAT filename so results from different
+    % input configurations remain separate inside the configured output directory.
+    outputTimestamp = char(datetime('now', 'Format', 'yyyyMMdd_HHmmss'));
+    coarseRegistrationOutputFilePath = fullfile( coarseRegistrationOutputPath, ['coarseRegistration_', outputTimestamp, '.mat']);
 
-% Print the resolved path so the generated artifact is easy to locate after
-% the figures and processing steps have completed.
-fprintf('Saved coarse-registration output to:\n%s\n', coarseRegistrationOutputFilePath);
+    % Avoid silently replacing a result if the workflow is run twice within the
+    % same second and therefore produces the same timestamped filename.
+    if isfile(coarseRegistrationOutputFilePath)
+        error('bonePreRegistration:OutputFileAlreadyExists', ...
+              'Coarse-registration output already exists: %s', coarseRegistrationOutputFilePath);
+    end
+
+    % Save the result and its provenance together. Version 7.3 supports the
+    % registered meshes stored inside coarseRegistration.
+    save(coarseRegistrationOutputFilePath, 'coarseRegistration', 'coarseRegistrationMetadata', '-v7.3');
+
+    % Print the resolved path so the generated artifact is easy to locate after
+    % the figures and processing steps have completed.
+    fprintf('Saved coarse-registration output to:\n%s\n', coarseRegistrationOutputFilePath);
+end

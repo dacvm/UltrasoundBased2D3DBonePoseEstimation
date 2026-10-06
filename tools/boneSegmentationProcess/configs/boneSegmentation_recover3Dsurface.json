@@ -1,11 +1,12 @@
 {
   "input": {
     "boneSurfaceFilePath": "../outputs",
-    "boneSurfaceFileName": "boneSurface_20260819_205302.mat",
+    "boneSurfaceFileName": "boneSurface_20260919_122427.mat",
     "ultrasoundImageFilePath": "../../ultrasoundSpatialProcessing/outputs",
-    "ultrasoundImageFileName": "validSnapshots_20260812_160247.mat"
+    "ultrasoundImageFileName": "validSnapshots_20260919_110840_meas04c.mat"
   },
   "output": {
+    "saveResult": true,
     "boneSurface3DOutputPath": "../outputs"
   }
 }

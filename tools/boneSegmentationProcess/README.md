@@ -321,6 +321,7 @@ Edit `tools/boneSegmentationProcess/configs/boneSegmentation_recover3Dsurface.js
 | `input.ultrasoundImageFilePath` | Directory containing the matching selected ultrasound snapshot MAT-file. |
 | `input.ultrasoundImageFileName` | Ultrasound snapshot MAT-file name only, including the `.mat` extension. |
 | `output.boneSurface3DOutputPath` | Directory in which the recovered 3D surface MAT-file is saved. |
+| `output.saveResult` | Boolean that controls whether the recovered 3D surface MAT-file is saved. |
 
 Paths may be absolute or relative. Relative paths are resolved from the directory containing `boneSegmentation_recover3Dsurface.json`. The output directory is created automatically when it does not exist.
 
@@ -332,7 +333,7 @@ Paths may be absolute or relative. Relative paths are resolved from the director
 4. **Convert pixels to physical image coordinates.** Each one-based `[column, row]` point in `surfaceCoordinatesXY` is converted to `[x_mm, y_mm, 0]` on its ultrasound image plane. Pixel spacing is calculated from the plane width, height, rows, and columns.
 5. **Transform the surface into the reference frame.** The matching `T_image_ref` rotation and translation map every image-plane point to `[X_ref, Y_ref, Z_ref]`. The result is assigned to `surfaceCoordinatesXYZRef` in the corresponding `surfaceResults` record.
 6. **Display the recovered surfaces.** A 3D figure shows the tracked ultrasound image planes and recovered surface points together. Surface groups use different colors, while the image planes remain translucent for spatial context.
-7. **Save the result.** The updated `surfaceResults` and the unchanged `extractionMetadata` are written to a new MATLAB v7.3 MAT-file.
+7. **Optionally save the result.** When `output.saveResult` is `true`, the updated `surfaceResults` and unchanged `extractionMetadata` are written to a new MATLAB v7.3 MAT-file. When it is `false`, both structures remain available in the MATLAB workspace without creating a file.
 
 Records without an extracted 2D surface remain valid. Their `surfaceCoordinatesXYZRef` field is assigned an empty 0-by-3 array because there are no points to transform.
 

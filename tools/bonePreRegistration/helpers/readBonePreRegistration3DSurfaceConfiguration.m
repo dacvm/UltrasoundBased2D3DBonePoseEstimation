@@ -9,7 +9,8 @@ function configuration = readBonePreRegistration3DSurfaceConfiguration( ...
 %
 % Output:
 %   configuration - Scalar structure containing validated absolute input and
-%                   output directories plus the three input MAT filenames.
+%                   output directories, the three input MAT filenames, and
+%                   the Boolean result-saving choice.
 
 % Report a missing file separately because it requires a different fix than
 % malformed JSON or an incorrect field inside an existing configuration.
@@ -64,6 +65,8 @@ boneLandmarksFileName = requireConfigurationText( ...
 coarseRegistrationOutputPathSetting = requireConfigurationText( ...
     outputConfiguration, 'coarseRegistrationOutputPath', ...
     'output.coarseRegistrationOutputPath');
+saveResults = requireConfigurationBoolean( ...
+    outputConfiguration, 'saveResults', 'output.saveResults');
 
 % A configured filename must remain separate from its directory and must
 % identify a MAT file because each input is loaded with MATLAB's LOAD.
@@ -108,7 +111,8 @@ configuration.input = struct( ...
     'boneLandmarksFilePath', boneLandmarksFilePath, ...
     'boneLandmarksFileName', boneLandmarksFileName);
 configuration.output = struct( ...
-    'coarseRegistrationOutputPath', coarseRegistrationOutputPath);
+    'coarseRegistrationOutputPath', coarseRegistrationOutputPath, ...
+    'saveResults', saveResults);
 end
 
 function value = requireConfigurationObject(parent, fieldName, fieldPath)
@@ -164,6 +168,31 @@ value = strtrim(char(rawValue));
 if isempty(value)
     error('bonePreRegistration:EmptyConfigurationText', ...
           'Configuration field "%s" must not be empty.', fieldPath);
+end
+end
+
+function value = requireConfigurationBoolean(parent, fieldName, fieldPath)
+%REQUIRECONFIGURATIONBOOLEAN Read one required JSON Boolean value.
+% This helper rejects numeric and text substitutes so the saving choice is
+% always written as a literal true or false value in the JSON file.
+%
+% Inputs:
+%   parent    - Scalar structure expected to contain the requested Boolean.
+%   fieldName - MATLAB field name of the requested Boolean.
+%   fieldPath - Full JSON path to display in an error message.
+%
+% Output:
+%   value - Logical scalar read from the JSON field.
+
+if ~isfield(parent, fieldName)
+    error('bonePreRegistration:MissingConfigurationField', ...
+          'Required configuration field "%s" is missing.', fieldPath);
+end
+value = parent.(fieldName);
+if ~islogical(value) || ~isscalar(value)
+    error('bonePreRegistration:InvalidConfigurationBoolean', ...
+          'Configuration field "%s" must contain one Boolean value.', ...
+          fieldPath);
 end
 end
 
