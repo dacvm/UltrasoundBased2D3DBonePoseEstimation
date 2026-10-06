@@ -6,7 +6,9 @@ addpath(genpath('functions'));
 %% CREATE CONFIGURATION
 
 % Use the same active configuration schema as the unattended experiment workflow.
-configFilePath = fullfile(pwd, 'config', 'optconfig_oneSweep_intensityCov.json');
+% Select another cost model by choosing its file, e.g. optconfig_oneSweep_ICPLike.json,
+% optconfig_oneSweep_intensityICP.json, or optconfig_oneSweep_PIMLOP.json.
+configFilePath = fullfile(pwd, 'config', 'optconfig_oneSweep_PIMLOP.json');
 % Read the single parameter combination and repeat seed from the one-sweep file.
 experimentSpec = createBonePoseOptimizationExperimentConfig(configFilePath);
 % Expand the specification through the same plan builder used by the experiment.

@@ -49,7 +49,7 @@ E_match = ½ (y_3dp − x_3dp)ᵀ Σ⁻¹ (y_3dp − x_3dp)  −  κ · ( P(R_p�
 - Speed of sound and segmentation uncertainty are not modelled.
 
 ## Where it lives in this repo
-The reusable functions are in `functions/PIMLOP/` (each with a scalar reference version and a `*_batchedProcess.m` version where listed). The cost model and its config validator are in `functions/bonePoseOptimization/costModels/`. Demos, development scripts, regression tests (`test_PIMLOP_batchedProcess.m`, `test_PIMLOPCostFunction.m`) and the `optimization_setup.mat` fixture stay in `devs/pimlopDevelopment/`.
+Framework-level tests are in `functions/bonePoseOptimization/tests/testBonePoseCostPIMLOP.m`. The reusable functions are in `functions/PIMLOP/` (each with a scalar reference version and a `*_batchedProcess.m` version where listed). The cost model and its config validator are in `functions/bonePoseOptimization/costModels/`. Demos, development scripts, regression tests (`test_PIMLOP_batchedProcess.m`, `test_PIMLOPCostFunction.m`) and the `optimization_setup.mat` fixture stay in `devs/pimlopDevelopment/`.
 
 | Paper step | File |
 |---|---|
@@ -60,7 +60,7 @@ The reusable functions are in `functions/PIMLOP/` (each with a scalar reference 
 | Ellipsoid–OBB pruning test, Eq. 8 | `ellipsoidIntersectsOBB.m` |
 | PD-tree search, Algorithm 2 | `searchPDTree.m` (and `*_batchedProcess.m` versions) |
 | Exhaustive reference used to check the tree search | `searchPIMLOPBruteForce.m` |
-| Cost for the bone-pose optimizer | `cost_PIMLOP_v01.m`, `validate_cost_PIMLOP_v01.m` (costModels) |
+| Cost for the bone-pose optimizer | `cost_PIMLOP_v01.m`, `validate_cost_PIMLOP_v01.m` (costModels), registered as `PIMLOP_v1`; select it with `config/optconfig_oneSweep_PIMLOP.json` |
 
 ## How this repo differs from the paper
 - **Registration phase:** not reimplemented. `cost_PIMLOP_v01.m` exposes the summed match error as a cost over the project's 6D pose vector. The pose optimizer does the registration step, and correspondences are searched again for every candidate pose.

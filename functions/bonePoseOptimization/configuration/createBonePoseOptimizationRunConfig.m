@@ -38,16 +38,18 @@ runConfig.intersection.normalFacingToleranceDeg = combinationRow.normalFacingTol
 fixedParameterNames = fieldnames(experimentSpec.cost.fixedParameters).';
 hyperparameterNames = fieldnames(experimentSpec.cost.hyperparameters).';
 
-% Keep every cost value used during evaluation together as finite scalar settings.
+% Keep every cost value used during evaluation together as finite settings.
 runConfig.cost = struct();
 runConfig.cost.model = experimentSpec.cost.model;
 runConfig.cost.parameters = struct();
 
 % Copy settings that stay fixed for every combination in this experiment.
+% A fixed setting may be a short vector (for example the three P-IMLOP image
+% standard deviations), because it never becomes a plan-table column.
 for parameterIndex = 1:numel(fixedParameterNames)
     parameterName  = fixedParameterNames{parameterIndex};
     parameterValue = experimentSpec.cost.fixedParameters.(parameterName);
-    validateattributes(parameterValue, {'numeric'}, {'scalar', 'real', 'finite'}, mfilename, parameterName);
+    validateattributes(parameterValue, {'numeric'}, {'vector', 'real', 'finite'}, mfilename, parameterName);
     runConfig.cost.parameters.(parameterName) = parameterValue;
 end
 

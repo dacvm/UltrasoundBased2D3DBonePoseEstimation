@@ -57,6 +57,12 @@ switch modelName
         definition.validateExperimentConfigFcn  = @validate_cost_intensityICP_v01;
         definition.requiresBoneSurface          = true;
 
+    case 'PIMLOP_v1'
+        definition.modelName                    = 'PIMLOP_v1';
+        definition.evaluateFcn                  = @cost_PIMLOP_v01;
+        definition.validateExperimentConfigFcn  = @validate_cost_PIMLOP_v01;
+        definition.requiresBoneSurface          = true;
+
     otherwise
         error('getBonePoseCostDefinition:UnsupportedModel', 'Unsupported cost model: %s', modelName);
 end

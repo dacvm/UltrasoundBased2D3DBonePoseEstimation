@@ -19,6 +19,7 @@
   - [5.1. `intensityCov_v1`: intensity and coverage](#51-intensitycov_v1-intensity-and-coverage)
   - [5.2. `ICPLike_v1`: one-way 3D point-to-mesh distance](#52-icplike_v1-one-way-3d-point-to-mesh-distance)
   - [5.3. `intensityICP_v1`: combined intensity and 3D distance](#53-intensityicp_v1-combined-intensity-and-3d-distance)
+  - [5.4. `PIMLOP_v1`: most-likely oriented point match](#54-pimlop_v1-most-likely-oriented-point-match)
 - [6. Running the project](#6-running-the-project)
   - [6.1. Requirements](#61-requirements)
   - [6.2. Configure the input paths and settings](#62-configure-the-input-paths-and-settings)
@@ -157,7 +158,7 @@ The `experiment.seeds` array controls repeated stochastic runs. A one-sweep conf
 
 ## 5. Supported cost functions
 
-This is an ongoing list. The current framework registers the following three versioned cost models; more models can be added through the extension process described in [Processing workflow](#8-processing-workflow). Every model returns one scalar objective to CMA-ES, and a lower value is always better.
+This is an ongoing list. The current framework registers the following four versioned cost models; more models can be added through the extension process described in [Processing workflow](#8-processing-workflow). Every model returns one scalar objective to CMA-ES, and a lower value is always better.
 
 In the tables below, a **fixed parameter** has one value for the complete experiment. A **hyperparameter** is an array of candidate values; the experiment planner includes it in the Cartesian product used to create parameter combinations.
 
@@ -209,6 +210,29 @@ A `weight` of `1` selects only the intensity-and-coverage term, while `0` select
 
 This model requires aligned 3D bone-surface measurements from `boneSurfaceMatFile`.
 
+### 5.4. `PIMLOP_v1`: most-likely oriented point match
+
+This model implements the match error of P-IMLOP (Billings et al. 2015; see [`literatures/P-IMLOP/notes.md`](literatures/P-IMLOP/notes.md)). Every ultrasound bone-surface measurement `x` has a 3D position and a 2D in-plane normal. For each measurement, the model finds the most likely point `y` on any CT mesh triangle and sums the resulting match errors:
+
+```text
+E_match(x, y) = 1/2 * (y_3dp - x_3dp)' * inv(Sigma) * (y_3dp - x_3dp)
+              + kappa * (1 - cos(angle between the projected model normal and x_2dn))
+
+cost = sum over all retained measurements of min_y E_match(x, y)
+```
+
+`Sigma` is a diagonal position covariance built from three standard deviations along the image axes. The model normal is rotated into the image and projected onto the image plane before it is compared with the measured 2D normal. A perfect match scores `0`.
+
+**CT-frame PD-tree strategy.** Searching every triangle for every measurement would be far too slow. `prepareBonePoseOptimizationInputs` therefore builds a principal-direction tree (PD-tree) of oriented bounding boxes once, in the CT frame, and stores it in `data.extra.pimlop.PsiCT`. For each candidate pose, the cost moves the measurements from ref into CT instead of moving the mesh, so the same tree is reused by every CMA-ES candidate. The tree search skips any box that cannot contain a better match than the best one found so far.
+
+| Parameter | Type | Meaning |
+| --- | --- | --- |
+| `measurementSubsampleFraction` | Fixed | Fraction in `(0, 1]` of the valid surface points kept from every image, spread evenly along each surface curve. Smaller values make every evaluation faster. |
+| `positionStandardDeviationImage` | Fixed | Three positive position standard deviations `[sx, sy, sz]` in millimetres along the image x, y, and out-of-plane axes. |
+| `kappa` | Fixed | Nonnegative orientation concentration. `0` switches the orientation term off; `50` corresponds to roughly 8 degrees of angular spread. |
+
+This model requires aligned 3D bone-surface measurements with 2D normals (`surfaceNormalXY` and `surfaceNormalMask`) from `boneSurfaceMatFile`. One evaluation takes several seconds, so keep `populationSize` and `maxFunctionEvaluations` small for first runs. The reference demos and regression tests in `devs/pimlopDevelopment/` still run independently.
+
 ## 6. Running the project
 
 ### 6.1. Requirements
@@ -226,6 +250,7 @@ Edit one of the following files:
 - `config/optconfig_oneSweep_intensityCov.json` for an intensity-only interactive run.
 - `config/optconfig_oneSweep_ICPLike.json` for an ICP-like point-cloud interactive run.
 - `config/optconfig_oneSweep_intensityICP.json` for a combined interactive run after selecting it in the one-sweep script.
+- `config/optconfig_oneSweep_PIMLOP.json` for a P-IMLOP interactive run after selecting it in the one-sweep script.
 - `config/optconfig_hyperparamSweep_intensityCov.json` for the current unattended multi-parameter, multi-seed experiment.
 
 The file under `config/legacy/` records the former schemaVersion02 layout for historical
@@ -464,7 +489,7 @@ At optimization time, CMA-ES changes only the six-value local pose perturbation.
    end
    ```
 
-2. **Create its matching validator beside the evaluator.** Use the interface `[fixedParameters, hyperparameters] = validate_cost_<name>_vNN(fixedParameters, hyperparameters)`. Require the exact supported field names, validate every value, convert fixed values to scalar doubles, and normalize each hyperparameter candidate list to a row vector. Rebuild the output structs in the order in which their fields should appear in experiment tables. An empty struct is valid when the model has no fixed parameters or no hyperparameters.
+2. **Create its matching validator beside the evaluator.** Use the interface `[fixedParameters, hyperparameters] = validate_cost_<name>_vNN(fixedParameters, hyperparameters)`. Require the exact supported field names, validate every value, convert fixed values to scalar doubles (a fixed value may also be a short numeric vector, such as the three P-IMLOP standard deviations), and normalize each hyperparameter candidate list to a row vector. Rebuild the output structs in the order in which their fields should appear in experiment tables. An empty struct is valid when the model has no fixed parameters or no hyperparameters.
 
 3. **Register the model in `getBonePoseCostDefinition.m`.** Add one `switch` case that assigns the public model name, evaluator, validator, and input requirement:
 

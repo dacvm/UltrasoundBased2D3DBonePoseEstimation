@@ -7,21 +7,28 @@ function [fixedParameters, hyperparameters] = validate_cost_PIMLOP_v01(fixedPara
 % Inputs:
 %   fixedParameters - Struct containing:
 %                     measurementSubsampleFraction, the fraction (0, 1] of
-%                     valid surface points kept from every image, and
+%                     valid surface points kept from every image;
 %                     positionStandardDeviationImage, the three position
 %                     standard deviations [sx sy sz] in mm along the image
-%                     axes.
-%   hyperparameters - Struct containing kappa, the candidate orientation
-%                     concentration values to sweep.
+%                     axes; and
+%                     kappa, the nonnegative orientation concentration.
+%   hyperparameters - Empty struct because this model has no sweepable
+%                     hyperparameters yet.
 %
 % Outputs:
 %   fixedParameters - Validated fixed settings stored as doubles, with
 %                     positionStandardDeviationImage as a 1x3 row vector.
-%   hyperparameters - Validated kappa candidates stored as a row vector.
+%   hyperparameters - Empty struct representing no model hyperparameters.
+%
+% Note: kappa can later move into hyperparameters to sweep it. The cost
+% function does not change, because the run configuration places fixed and
+% swept values together under config.cost.parameters.
 
 % Require exactly the documented fields so missing or misspelled settings fail early.
-validateFieldNames(fixedParameters, {'measurementSubsampleFraction', 'positionStandardDeviationImage'}, 'cost.fixedParameters');
-validateFieldNames(hyperparameters, {'kappa'}, 'cost.hyperparameters');
+validateFieldNames(fixedParameters, ...
+    {'measurementSubsampleFraction', 'positionStandardDeviationImage', 'kappa'}, ...
+    'cost.fixedParameters');
+validateFieldNames(hyperparameters, {}, 'cost.hyperparameters');
 
 % The subsample fraction keeps part of each surface curve, so it must lie in (0, 1].
 measurementSubsampleFraction = fixedParameters.measurementSubsampleFraction;
@@ -36,23 +43,19 @@ validateattributes(positionStandardDeviationImage, {'numeric'}, ...
     mfilename, 'cost.fixedParameters.positionStandardDeviationImage');
 
 % Kappa weights the orientation term; zero switches it off, so it must be nonnegative.
-kappa = hyperparameters.kappa;
+kappa = fixedParameters.kappa;
 validateattributes(kappa, {'numeric'}, ...
-    {'vector', 'nonempty', 'real', 'finite', 'nonnegative'}, ...
-    mfilename, 'cost.hyperparameters.kappa');
-if numel(unique(kappa)) ~= numel(kappa)
-    error('validate_cost_PIMLOP_v01:DuplicateKappa', ...
-        'cost.hyperparameters.kappa must not contain duplicate values.');
-end
+    {'scalar', 'real', 'finite', 'nonnegative'}, ...
+    mfilename, 'cost.fixedParameters.kappa');
 
 % Rebuild both groups in one documented order. The generic planner uses
 % this field order for stable table columns and combination numbers.
 fixedParameters = struct();
 fixedParameters.measurementSubsampleFraction   = double(measurementSubsampleFraction);
 fixedParameters.positionStandardDeviationImage = double(positionStandardDeviationImage(:).');
+fixedParameters.kappa                          = double(kappa);
 
 hyperparameters = struct();
-hyperparameters.kappa = double(kappa(:).');
 end
 
 
