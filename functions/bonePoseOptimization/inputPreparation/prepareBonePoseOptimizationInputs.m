@@ -5,6 +5,41 @@ function [data, validationData] = prepareBonePoseOptimizationInputs(config)
 % tools/. It prepares fixed estimation data once so the cost function only
 % needs to evaluate candidate poses.
 %
+% Where it fits in the framework:
+%   The goal of the whole pipeline is to find where the bone is (its pose in
+%   the tracker "ref" frame) by moving the CT bone mesh until it agrees with
+%   the tracked ultrasound images. The optimizer (CMA-ES) does this by
+%   trying thousands of candidate poses and asking a cost function "how well
+%   does the bone fit the images at this pose?".
+%
+%   This function is the setup step that runs BEFORE that search starts. It
+%   is called once per hyperparameter combination (with the config made by
+%   createBonePoseOptimizationRunConfig), and its output is reused by every
+%   seed of that combination. It gathers everything the cost function will
+%   need and that does NOT change while the optimizer moves the bone:
+%     - the CT bone mesh (the shape we are moving around),
+%     - the ultrasound image planes in the ref frame (what we compare to),
+%     - optional bone-surface points extracted from those images,
+%     - the coarse start pose (where the search begins),
+%     - pre-built search structures such as the P-IMLOP PD-tree,
+%     - reference numbers measured at the start pose.
+%
+% Why it is needed:
+%   A cost function is called a huge number of times, so it must be fast.
+%   Loading files, checking that they belong together, and building search
+%   trees are slow, and their result is the same for every candidate pose.
+%   Doing that work once here, and handing over a ready "data" struct,
+%   keeps each cost evaluation down to the part that truly depends on the
+%   pose. It is also the one place where we check that all input files
+%   (made by different tools in tools/) are consistent with each other, so
+%   a mismatch is reported clearly instead of producing a wrong pose.
+%
+%   The function also separates what the optimizer is ALLOWED to see from
+%   what it must NOT see. The ground truth (true bone pose, true
+%   intersections) is only needed afterwards to judge how good the result
+%   is. It goes into validationData, never into data, so the estimation can
+%   never accidentally "cheat" by using the answer.
+%
 % Input:
 %   config         - Scalar configuration returned by
 %                    createBonePoseOptimizationRunConfig.
@@ -17,11 +52,20 @@ function [data, validationData] = prepareBonePoseOptimizationInputs(config)
 %   validationData - Saved ground-truth intersections, bone pose, and source
 %                    metadata. This output must not be passed to the optimizer.
 
-% Use one uppercase code to match the same bone across all standardized files.
+% Every input file can contain several bones (for example femur 'F' and
+% tibia 'T'), but one optimization run estimates the pose of ONE bone. The
+% bone code is how we pick the matching record out of each file. Using one
+% uppercase form avoids missing a match just because one tool wrote 'f'
+% and another wrote 'F'.
 targetBone = upper(char(config.input.bone));
 
 %% LOAD STANDARDIZED TOOL OUTPUTS
 
+% The reviewed snapshots are the heart of the measurement: each snapshot is
+% one tracked ultrasound image, together with where that image plane was in
+% the ref frame when it was taken. These are what the bone will be compared
+% to during optimization. The same file also stores the ground-truth bone
+% poses, which we only keep for evaluating the result afterwards.
 % snapshotOutput is structured as:
 %   snapshotOutput.validSnapshots = struct array of reviewed snapshots;
 %   snapshotOutput.validBonePoses  = struct containing ground-truth poses.
@@ -30,15 +74,23 @@ snapshotOutput            = loadRequiredVariables(config.input.validSnapshotsMat
 validSnapshots            = snapshotOutput.validSnapshots;
 validBonePoses            = snapshotOutput.validBonePoses;
 
-% Bone surfaces are another ultrasound measurement input. Load their tool
-% output here beside the snapshots, while keeping them optional for cost
-% models that only use image intensity.
+% Bone surfaces are the bright bone edges that were detected in each
+% ultrasound image, both as 2D pixel coordinates and as 3D points in the
+% ref frame. Point-based cost models (such as ICP-like or P-IMLOP) compare
+% the bone mesh to these points rather than to the raw image. Cost models
+% that only look at image intensity do not need them, so the file is
+% optional and only loaded when the config names one.
 hasBoneSurface = ~isempty(config.input.boneSurfaceMatFile);
 surfaceOutput = struct();
 if hasBoneSurface
     surfaceOutput = loadRequiredVariables(config.input.boneSurfaceMatFile, {'surfaceResults', 'extractionMetadata'});
 end
 
+% The CT file holds the bone shape we want to place: a triangle mesh
+% segmented from CT, in CT coordinates. The coarse-registration file holds a
+% rough first guess of where that mesh sits in the ref frame. The optimizer
+% needs both: the mesh is what it moves, and the coarse pose is where it
+% starts moving from.
 % bones and coarseRegistration are structured as arrays with one record per bone:
 %   bones(1).bone              = 'F';
 %   bones(2).bone              = 'T';
@@ -50,18 +102,24 @@ coarseOutput              = loadRequiredVariables(config.input.coarseRegistratio
 bones                     = ctOutput.bones;
 coarseRegistration        = coarseOutput.coarseRegistration;
 
+% Now pick out the record of the bone we are estimating from both files.
+% We search by bone code instead of assuming "femur is always element 1",
+% because different tools may save bones in a different order, and a silent
+% order mismatch would pair the femur mesh with the tibia's start pose.
 % currentCoarseRegistration is one record selected from coarseRegistration:
 %   currentCoarseRegistration.bone            = targetBone;
 %   currentCoarseRegistration.status          = "registered";
 %   currentCoarseRegistration.T_CT_ref_est    = 4-by-4 transform;
 %   currentCoarseRegistration.T_bone_ref_est  = 4-by-4 transform;
 %   currentCoarseRegistration.boneMeshRef_est = triangulation in ref coordinates.
-% So we find the matching bone codes instead of assuming a fixed array position.
 boneIndex                 = findUniqueBoneIndex(bones, targetBone, 'CT bone model');
 coarseIndex               = findUniqueBoneIndex(coarseRegistration, targetBone, 'coarse-registration result');
 currentBone               = bones(boneIndex);
 currentCoarseRegistration = coarseRegistration(coarseIndex);
 
+% The ground-truth pose of the same bone is picked the same way. It is the
+% "answer" we hope the optimizer will find, and it is used only after the
+% optimization to measure the pose error.
 % validBonePoses.bonePoses is also an array with one record per bone:
 %   validBonePoses.bonePoses(1).bone = 'F';
 %   validBonePoses.bonePoses(2).bone = 'T';
@@ -72,16 +130,21 @@ groundTruthIndex           = findUniqueBoneIndex(validBonePoses.bonePoses, targe
 currentGroundTruthBonePose = validBonePoses.bonePoses(groundTruthIndex);
 currentGroundTruthPose     = currentGroundTruthBonePose.data;
 
-% One optimization run currently evaluates one fixed ground-truth bone pose.
-% Reject a per-data-row pose series explicitly instead of accidentally reading
-% comma-separated struct fields as though they represented one transform.
+% The current optimization assumes the bone did not move while the images
+% were taken, so it looks for ONE pose that fits all images at once. A
+% recording where the bone moves (one pose per image row) would need a
+% different method. We stop here with a clear message, instead of letting
+% MATLAB quietly read only the first pose of the series and produce a
+% misleading result.
 if ~isstruct(currentGroundTruthPose) || ~isscalar(currentGroundTruthPose)
     error('prepareBonePoseOptimizationInputs:UnsupportedGroundTruthPoseSeries', ...
         ['The selected bone must contain exactly one ground-truth pose. ' ...
          'perDataRow kinematic ground truth is not yet supported by this optimization workflow.']);
 end
 
-% A skipped coarse-registration record cannot provide an optimization start pose.
+% The optimizer only searches in a limited region around its start pose, so
+% it needs a sensible start. If the coarse-registration tool skipped this
+% bone, there is no start pose to use, and continuing would make no sense.
 if ~strcmpi(string(currentCoarseRegistration.status), "registered")
     error('prepareBonePoseOptimizationInputs:BoneNotRegistered', ...
           'The coarse-registration result for bone %s is not registered: %s', ...
@@ -90,56 +153,92 @@ end
 
 %% COLLECT ESTIMATION AND VALIDATION RECORDS
 
-% Copy planes and ground truth into separate arrays while preserving source order.
+% The snapshot file groups images by recording (sweep), and each record
+% mixes things the optimizer may use (the image and its plane) with things
+% it must not use (the ground-truth intersection of bone and plane). Here we
+% flatten all records of this bone into simple arrays and split them:
+% imagePlanesRef goes to the optimizer, groundTruthIntersections goes to
+% validation, and snapshotSources remembers where each image came from so
+% results can be traced back to the original recording. The original order
+% is kept, so plane k always means the same image in every output.
 [imagePlanesRef, groundTruthIntersections, snapshotSources] = collectBoneSnapshots(validSnapshots, targetBone);
-% Validate imagePlanesRef whether the necessary fields are exist
+% Each image plane is used by the cost function to cut the bone mesh and
+% compare the cut with the image. Checking the plane fields now (origin,
+% axes, size, image) means a broken plane is reported here, by index,
+% rather than as a confusing error deep inside a cost evaluation.
 validateImagePlanes(imagePlanesRef);
 
-% Use the same stable output shape when no surface artifact is configured.
+% Fill in an "empty" bone-surface result first. Cost models can then always
+% read the same fields (isAvailable, measurements, ...) and simply check
+% isAvailable, instead of first testing whether the fields exist at all.
 boneSurface.isAvailable        = false;
 boneSurface.extractionMetadata = struct();
 boneSurface.measurements       = struct([]);
 
-% Collect surface records independently before comparing them with snapshots.
+% When surface points were provided, collect the ones belonging to this bone
+% and check them on their own first: correct coordinate convention (which
+% image axis is the beam direction), matching 2D and 3D points, valid
+% normals. A point-based cost model trusts these points completely, so an
+% axis or unit mix-up here would pull the bone to a wrong pose without any
+% visible error.
 if hasBoneSurface
     collectedBoneSurface = collectBoneSurfaceMeasurements(surfaceOutput, targetBone);
-
-    % Validate boneSurface whether the necessary fields are exist
     validateBoneSurfaceMeasurements(collectedBoneSurface);
 end
 
 %% VALIDATE AND ALIGN RELATED ULTRASOUND INPUTS
 
-% Bone surfaces come from the reviewed snapshots. Align them explicitly so
-% measurement k always belongs to image plane k in a future cost function.
+% The surface points were extracted from the same images, but they live in a
+% different file and may be stored in a different order. Cost models that
+% use both the image plane and its surface points assume that surface k
+% belongs to plane k. Aligning them here, by matching each surface to its
+% source snapshot, makes that assumption true, so the cost function can
+% simply use the same index for both.
 if hasBoneSurface
     boneSurface = alignBoneSurfacesToSnapshots(collectedBoneSurface, snapshotSources, config.input.validSnapshotsMatFile);
 end
 
 %% PREPARE THE CT MESH AND INITIAL POSE
 
-% Keep the source mesh in CT coordinates throughout optimization preparation.
+% The bone mesh stays in CT coordinates. During optimization, each candidate
+% pose moves this same mesh into the ref frame where the images are. Keeping
+% one fixed CT copy (instead of a pre-moved one) means every candidate pose
+% is applied to the same, unchanged shape.
 boneMeshCT = currentBone.mesh;
 if ~isa(boneMeshCT, 'triangulation')
     error('prepareBonePoseOptimizationInputs:InvalidBoneMesh', ...
           'bones(%d).mesh must be a triangulation.', boneIndex);
 end
 
-% Read the frame-explicit transforms produced by the CT and coarse-registration tools.
+% Two transforms describe where the bone is:
+%   - T_bone_CT moves points from the anatomical bone frame (axes aligned
+%     with the bone itself) into CT. It comes from the CT tool and never
+%     changes; it lets us report results in anatomical terms.
+%   - T_CT_ref_initial is the coarse estimate of where CT sits in the ref
+%     frame. This is the start pose: the optimizer searches for a small
+%     correction around it.
+% Both are checked to be proper rigid transforms, because a slightly
+% non-rigid matrix (e.g. a scaling sneaked in) would distort the bone shape
+% and make every cost value meaningless.
 T_bone_CT        = currentBone.T_bone_CT;
 T_CT_ref_initial = currentCoarseRegistration.T_CT_ref_est;
 validateRigidTransform(T_bone_CT, 'bones.T_bone_CT');
 validateRigidTransform(T_CT_ref_initial, 'coarseRegistration.T_CT_ref_est');
 
-% Read and validate the ground-truth transforms saved by spatial processing.
+% These are the true poses of the bone, measured independently during data
+% collection. The optimizer never sees them; they are used afterwards to
+% compute how far the estimated pose is from the truth. They are checked
+% like the other transforms so the error we report is trustworthy.
 T_CT_ref_groundTruth = currentGroundTruthPose.T_CT_ref;
 T_bone_ref_groundTruth = currentGroundTruthPose.T_bone_ref;
 validateRigidTransform(T_CT_ref_groundTruth, 'validBonePoses.bonePoses.data.T_CT_ref');
 validateRigidTransform(T_bone_ref_groundTruth, 'validBonePoses.bonePoses.data.T_bone_ref');
 
-% The current spatial-processing schema stores one source mesh in CT rather
-% than repeating a transformed mesh inside every pose record. Rebuild the
-% reference-frame mesh with the pose that produced the saved intersections.
+% For evaluation and plots we also want the bone mesh at its TRUE pose in
+% the ref frame, e.g. to compare it visually with the estimated mesh or to
+% recompute true intersections. The current files store the mesh once in CT
+% (to save space) rather than inside every pose record, so we rebuild the
+% ref-frame mesh by applying the ground-truth transform to it.
 if isfield(currentGroundTruthBonePose, 'meshCT')
     boneMeshCTGroundTruth = currentGroundTruthBonePose.meshCT;
     if ~isa(boneMeshCTGroundTruth, 'triangulation')
@@ -157,51 +256,79 @@ elseif isfield(currentGroundTruthPose, 'mesh')
         error('prepareBonePoseOptimizationInputs:InvalidGroundTruthMesh', ...
             'validBonePoses.bonePoses.data.mesh must be a triangulation.');
     end
-    
+
 else
     error('prepareBonePoseOptimizationInputs:MissingGroundTruthMesh', ...
         ['The ground-truth bone pose must contain meshCT at the bone level ' ...
          'or the legacy data.mesh field.']);
 end
 
-% The saved anatomical frame must come from the same CT pose and CT bone model.
+% The ground-truth file stores the true pose twice: as CT->ref and as
+% bone->ref. They must describe the same pose through the same T_bone_CT;
+% if not, the ground truth was made with a different CT model, and any
+% error we compute against it (in CT or anatomical terms) would be wrong.
 if norm(T_bone_ref_groundTruth - T_CT_ref_groundTruth * T_bone_CT, 'fro') > 1e-8
     error('prepareBonePoseOptimizationInputs:InconsistentGroundTruthTransform', ...
           'Ground-truth T_bone_ref does not equal T_CT_ref * T_bone_CT.');
 end
 
-% Derive the anatomical-frame pose from the CT pose so both always stay synchronized.
+% The start pose in the anatomical frame is computed from the CT start pose
+% instead of copied from the file, so the two can never disagree. Comparing
+% it with the saved T_bone_ref_est also confirms that the coarse
+% registration used the same CT model as we do.
 T_bone_ref_initial = T_CT_ref_initial * T_bone_CT;
 if norm(T_bone_ref_initial - currentCoarseRegistration.T_bone_ref_est, 'fro') > 1e-8
     error('prepareBonePoseOptimizationInputs:InconsistentBoneTransform', ...
           'T_bone_ref_est does not equal T_CT_ref_est * T_bone_CT.');
 end
 
-% Confirm that the coarse mesh belongs to this CT mesh and transform.
+% The coarse-registration tool also saved the mesh it placed. If moving our
+% CT mesh with its start pose does not give exactly that mesh, the start
+% pose was found for a different mesh (e.g. an older segmentation) and
+% would not be a valid starting point for this one.
 validateCoarseMesh(boneMeshCT, currentCoarseRegistration.boneMeshRef_est, T_CT_ref_initial);
 
 %% PREPARE THE P-IMLOP MODEL AND PD-TREE
 
-% The P-IMLOP cost searches the CT mesh for the most likely triangle for every
-% surface point. Building the PD-tree is slow, so it is done once here, in the
-% CT frame, instead of inside every cost evaluation. The tree depends only on
-% the CT mesh, so it is built for every cost model and uses the default settings.
+% P-IMLOP is a point-to-surface registration method: for every measured
+% bone-surface point it needs the most likely triangle on the bone mesh. A
+% brute-force search over all triangles for every point, in every cost
+% evaluation, would be far too slow. The PD-tree is a search tree over the
+% mesh triangles that makes this lookup fast. Because it only depends on the
+% mesh shape (not on the pose), it is built once here, in the CT frame; the
+% cost function then moves the measured points into CT for each candidate
+% pose instead of moving the whole mesh. The tree depends only on the CT
+% mesh, so it is built for every cost model and uses the default settings.
 PsiCT        = preparePIMLOPModel_batchedProcess(boneMeshCT);
 PsiCT.pdTree = buildPIMLOPPDTree_batchedProcess(PsiCT.mesh, PsiCT.validFaceMask);
 
 %% COMPUTE THE INITIAL COVERAGE REFERENCE
 
-% Recompute intersections at the coarse pose; saved intersections are validation data only.
+% Cut the bone mesh with every image plane at the START pose, and keep the
+% pixels where the bone surface faces the probe (the part that ultrasound
+% can actually see). We recompute this instead of using the saved
+% intersections, because those were made at the true pose and are
+% validation data that the optimizer must not see.
 [initialPoseEvaluation, ~] = computeProbeFacingPixelsForPose(boneMeshCT, imagePlanesRef, T_CT_ref_initial, config);
 
-% Store one fixed reference count per plane for active-plane and coverage scoring.
+% Store, per image plane, how many bone pixels were visible at the start
+% pose. Cost models use this as a fixed reference: a plane that showed bone
+% at the start is "active", and if a candidate pose makes the bone cut much
+% smaller (or move off the image), the cost can tell that coverage was lost.
+% Without this reference, a pose that simply slides the bone out of all
+% images could look attractive, because there would be nothing left to
+% disagree with the images.
 nInitialIntersectionPixels = arrayfun( ...
     @(evaluation) size(evaluation.probeFacingPixels, 1), ...
     initialPoseEvaluation);
 
 %% PACKAGE ESTIMATION DATA
 
-% Keep estimation fields together and name geometry by its coordinate frame.
+% Put everything the cost functions and optimizer need into one struct.
+% Geometry is named after the frame its coordinates are in (boneMeshCT,
+% imagePlanesRef) so code using it can see at a glance whether a transform
+% is still needed. The config is included so a cost function has all its
+% settings at hand without any extra argument.
 data.bone                       = targetBone;
 data.boneName                   = char(string(currentBone.name));
 data.boneMeshCT                 = boneMeshCT;
@@ -215,11 +342,15 @@ data.boneSurfaceMeasurements    = boneSurface.measurements;
 data.nInitialIntersectionPixels = nInitialIntersectionPixels;
 data.config                     = config;
 
-% Model-specific fixed inputs live under data.extra so they stay apart from
-% the shared fields that every cost model reads.
+% Inputs that only one cost model needs go under data.extra.<model>. This
+% keeps the shared top-level fields the same for all cost models, and makes
+% it clear which pre-computed pieces belong to which model.
 data.extra.pimlop.PsiCT         = PsiCT;
 
-% Keep ground truth outside data so estimation code cannot use it accidentally.
+% Everything about the true answer goes into a separate struct. Only the
+% evaluation code after the optimization receives it, so the estimation can
+% never use the ground truth, even by mistake. The snapshot sources are
+% kept here too, to trace each result back to the original recording.
 validationData.bone                            = targetBone;
 validationData.groundTruthIntersections        = groundTruthIntersections;
 validationData.snapshotSources                 = snapshotSources;
@@ -228,7 +359,9 @@ validationData.groundTruthBonePose.T_CT_ref    = T_CT_ref_groundTruth;
 validationData.groundTruthBonePose.T_bone_ref  = T_bone_ref_groundTruth;
 validationData.groundTruthBonePose.boneMeshRef = boneMeshRefGroundTruth;
 
-% Print a compact summary only when preparation logging is enabled.
+% A short summary lets the user confirm that the expected number of images
+% and a sensible PD-tree were prepared, before the long optimization starts.
+% It is optional so that large sweeps do not flood the command window.
 if config.logging.printPreparationProgress
     fprintf('Prepared %d image planes for bone %s.\n', ...
         numel(imagePlanesRef), targetBone);
