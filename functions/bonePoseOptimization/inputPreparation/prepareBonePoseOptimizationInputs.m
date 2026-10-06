@@ -12,6 +12,8 @@ function [data, validationData] = prepareBonePoseOptimizationInputs(config)
 % Outputs:
 %   data           - Estimation-only data containing the CT mesh, ultrasound
 %                    measurements, initial transforms, and initial pixel counts.
+%                    data.extra.pimlop.PsiCT holds the CT-frame P-IMLOP model
+%                    with its PD-tree, used by cost_PIMLOP_v01.
 %   validationData - Saved ground-truth intersections, bone pose, and source
 %                    metadata. This output must not be passed to the optimizer.
 
@@ -178,6 +180,15 @@ end
 % Confirm that the coarse mesh belongs to this CT mesh and transform.
 validateCoarseMesh(boneMeshCT, currentCoarseRegistration.boneMeshRef_est, T_CT_ref_initial);
 
+%% PREPARE THE P-IMLOP MODEL AND PD-TREE
+
+% The P-IMLOP cost searches the CT mesh for the most likely triangle for every
+% surface point. Building the PD-tree is slow, so it is done once here, in the
+% CT frame, instead of inside every cost evaluation. The tree depends only on
+% the CT mesh, so it is built for every cost model and uses the default settings.
+PsiCT        = preparePIMLOPModel_batchedProcess(boneMeshCT);
+PsiCT.pdTree = buildPIMLOPPDTree_batchedProcess(PsiCT.mesh, PsiCT.validFaceMask);
+
 %% COMPUTE THE INITIAL COVERAGE REFERENCE
 
 % Recompute intersections at the coarse pose; saved intersections are validation data only.
@@ -204,6 +215,10 @@ data.boneSurfaceMeasurements    = boneSurface.measurements;
 data.nInitialIntersectionPixels = nInitialIntersectionPixels;
 data.config                     = config;
 
+% Model-specific fixed inputs live under data.extra so they stay apart from
+% the shared fields that every cost model reads.
+data.extra.pimlop.PsiCT         = PsiCT;
+
 % Keep ground truth outside data so estimation code cannot use it accidentally.
 validationData.bone                            = targetBone;
 validationData.groundTruthIntersections        = groundTruthIntersections;
@@ -217,6 +232,9 @@ validationData.groundTruthBonePose.boneMeshRef = boneMeshRefGroundTruth;
 if config.logging.printPreparationProgress
     fprintf('Prepared %d image planes for bone %s.\n', ...
         numel(imagePlanesRef), targetBone);
+    fprintf('Prepared P-IMLOP PD-tree: %d valid faces, %d nodes, %d leaves.\n', ...
+        PsiCT.pdTree.numberOfDatums, PsiCT.pdTree.numberOfNodes, ...
+        PsiCT.pdTree.numberOfLeaves);
 end
 end
 

@@ -291,6 +291,44 @@ verifyError(testCase, ...
 end
 
 
+function testPIMLOPModelIsPreparedInCT(testCase)
+%TESTPIMLOPMODELISPREPAREDINCT Check the PD-tree built during preparation.
+% testCase supplies the prepared estimation data. This function has no output.
+
+data = testCase.TestData.data;
+verifyTrue(testCase, isfield(data, 'extra') && ...
+    isfield(data.extra, 'pimlop') && isfield(data.extra.pimlop, 'PsiCT'));
+PsiCT = data.extra.pimlop.PsiCT;
+
+% The model must describe the same CT mesh that the other cost models use.
+verifyEqual(testCase, PsiCT.mesh.Points, data.boneMeshCT.Points);
+verifyEqual(testCase, PsiCT.mesh.ConnectivityList, ...
+    data.boneMeshCT.ConnectivityList);
+verifyEqual(testCase, PsiCT.normalConvention.frame, 'CT');
+
+% Every valid triangle must enter the tree exactly once as one datum.
+verifyNotEmpty(testCase, PsiCT.pdTree);
+verifyGreaterThan(testCase, PsiCT.pdTree.numberOfNodes, 0);
+verifyGreaterThan(testCase, PsiCT.pdTree.numberOfLeaves, 0);
+verifyEqual(testCase, PsiCT.pdTree.numberOfDatums, nnz(PsiCT.validFaceMask));
+end
+
+
+function testExistingCostIgnoresPIMLOPModel(testCase)
+%TESTEXISTINGCOSTIGNORESPIMLOPMODEL Check that adding the PD-tree is harmless.
+% testCase supplies the prepared data and its initial cost. This function has
+% no output.
+
+% Removing the P-IMLOP field must not change the configured cost at all,
+% which shows that the existing cost models do not read it.
+dataWithoutPIMLOP = rmfield(testCase.TestData.data, 'extra');
+[costWithoutPIMLOP, detailsWithoutPIMLOP] = bonePoseCostFunction( ...
+    zeros(6, 1), dataWithoutPIMLOP, testCase.TestData.config);
+verifyEqual(testCase, costWithoutPIMLOP, testCase.TestData.initialCost);
+verifyEqual(testCase, detailsWithoutPIMLOP, testCase.TestData.initialDetails);
+end
+
+
 function testGroundTruthBonePoseIsPreparedForValidation(testCase)
 %TESTGROUNDTRUTHBONEPOSEISPREPAREDFORVALIDATION Check the selected saved pose.
 % testCase supplies the CT model, reviewed snapshot path, and validation-only

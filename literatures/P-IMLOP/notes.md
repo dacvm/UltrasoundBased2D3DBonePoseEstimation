@@ -64,5 +64,5 @@ The reusable functions are in `functions/PIMLOP/` (each with a scalar reference 
 
 ## How this repo differs from the paper
 - **Registration phase:** not reimplemented. `cost_PIMLOP_v01.m` exposes the summed match error as a cost over the project's 6D pose vector. The pose optimizer does the registration step, and correspondences are searched again for every candidate pose.
-- **Frames:** the search runs in the **CT** frame. Ultrasound queries are moved into CT, so the PD-tree is built only once.
+- **Frames:** the search runs in the **CT** frame. Ultrasound queries are moved into CT, so the PD-tree is built only once: `prepareBonePoseOptimizationInputs.m` builds it (default settings) for every prepared dataset and stores it at `data.extra.pimlop.PsiCT`.
 - **Model point:** may lie anywhere on a triangle, not only at its centre (`findMostLikelyPointOnTriangle.m`). Triangle centres are used only to organize the tree.

@@ -8,7 +8,7 @@ function [cost, details] = cost_PIMLOP_v01(poseVector, data, config)
 % Why this function is needed
 % ---------------------------
 % The PD-tree describes the fixed CT model and is expensive to construct.
-% The caller therefore prepares it once and stores it in
+% prepareBonePoseOptimizationInputs therefore builds it once and stores it in
 % data.extra.pimlop.PsiCT. This function only performs work that changes for
 % a candidate pose: it moves the ultrasound queries into CT, finds their
 % most-likely oriented model points, and sums their match errors.
