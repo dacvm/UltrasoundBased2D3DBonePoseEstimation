@@ -4,6 +4,34 @@ function experimentSpec = createBonePoseOptimizationExperimentConfig(configFileP
 % intersection candidates and repeat seeds, and resolves the experiment
 % output folder. Cost-model parameters are checked by their model validator.
 %
+% Where it fits in the framework:
+%   A bone-pose experiment runs in three configuration steps, always in
+%   this order (see main_bonePoseOptimization_*.m and
+%   runBonePoseOptimizationExperiment.m):
+%     1. createBonePoseOptimizationExperimentConfig (this function)
+%        JSON file  ->  experimentSpec (everything checked, nothing run yet)
+%     2. createBonePoseOptimizationExperimentPlan
+%        experimentSpec  ->  table of every combination and every run
+%     3. createBonePoseOptimizationRunConfig
+%        experimentSpec + one plan row  ->  config for one single run
+%   This function is the FIRST step and the only one that touches the JSON
+%   file. It is called once, at the very start of an experiment.
+%
+% Why it is needed:
+%   An experiment can take hours (many combinations x many seeds). If a
+%   typo or bad value in the JSON were only discovered when the run that
+%   uses it starts, hours of work could be wasted or, worse, results would
+%   be produced with wrong settings. So this function reads the whole JSON
+%   up front, checks every experiment-level setting, and turns relative
+%   paths into absolute ones. After it returns, later steps can trust
+%   experimentSpec without re-checking it, and the user gets any error
+%   within seconds instead of halfway through the sweep.
+%
+%   It builds on createBonePoseOptimizationConfig (the shared reader used
+%   for single runs too) and only adds what is specific to an experiment:
+%   candidate lists to sweep, repeat seeds, the experiment name, and the
+%   experiment output folder.
+%
 % Input:
 %   configFilePath - Path to a schemaVersion04 experiment configuration.
 %
@@ -13,32 +41,56 @@ function experimentSpec = createBonePoseOptimizationExperimentConfig(configFileP
 
 %% LOAD THE SHARED CONFIGURATION FIELDS
 
-% Reuse the shared schema, path, and cost-model parsing.
+% Why reuse the shared reader: data paths, schema version, intersection and
+% optimizer settings, and the cost model (including its own validator for
+% the cost parameters) are read in exactly the same way for a single run
+% and for an experiment. Calling the shared reader keeps that logic in one
+% place, so a fix there automatically applies to experiments too.
 experimentSpec  = createBonePoseOptimizationConfig(configFilePath);
 
-% The intersection tolerance remains one explicit non-cost sweep setting.
+% The face-toward-probe tolerance (in degrees) controls which mesh faces
+% count as visible to the probe. It is not a cost parameter, but we still
+% want to sweep it, so the JSON may give a list of candidate values. Here we
+% check that list (positive, no duplicates) and store it as a row vector,
+% because the plan step expects every sweep list in that same shape.
 experimentSpec.intersection.normalFacingToleranceDeg = normalizePositiveCandidates( ...
     experimentSpec.intersection.normalFacingToleranceDeg, 'intersection.normalFacingToleranceDeg');
 
 %% READ THE EXPERIMENT SETTINGS
 
-% Read the raw JSON once more because the shared reader does not own experiment settings.
+% The shared reader ignores the "experiment" section (single runs do not
+% have one), so we read the raw JSON again to get it. This is cheap: the
+% file is small and this happens only once per experiment.
 rawConfig        = jsondecode(fileread(configFilePath));
-% Require one experiment section because it identifies and repeats the complete sweep.
+% The "experiment" section is required: without it we would not know how
+% to name the experiment, how many repeats to run, or where to save results.
 experimentConfig = getRequiredField(rawConfig, 'experiment', 'experiment');
 
-% Use a readable name in folder names and saved metadata.
+% The name is used inside folder names and saved metadata, so it must be
+% safe for the file system (no spaces, slashes, etc.) and easy to recognise
+% when browsing results later.
 experimentSpec.experiment.name  = ensureSafeExperimentName(getRequiredField(experimentConfig, 'name', 'experiment.name'));
-% Normalize the explicit seed list so every combination receives the same repetitions.
+% Seeds control the random start of CMA-ES. Each combination is run once
+% per seed, so the spread of results shows how stable the optimizer is.
+% Using the same explicit seed list for every combination keeps the
+% comparison between combinations fair and makes every run reproducible.
 experimentSpec.experiment.seeds = normalizeSeeds(getRequiredField(experimentConfig, 'seeds', 'experiment.seeds'));
 
-% Resolve the experiment output against the project root, matching other project paths.
+% A relative output path would otherwise depend on MATLAB's current folder
+% at the time of saving, which can change (e.g. inside parfor workers).
+% Resolving it once against the project root, like all other project
+% paths, makes sure every run writes to the same, predictable place.
 configuredOutputFolder = ensureScalarText(getRequiredField(experimentConfig, 'outputFolder', 'experiment.outputFolder'), 'experiment.outputFolder');
 experimentSpec.experiment.outputFolder = makeAbsolutePath(configuredOutputFolder, experimentSpec.project.root);
 
 %% CHECK FIXED OPTIMIZER SETTINGS
 
-% These settings stay scalar because optimizer tuning is outside this sweep.
+% This experiment sweeps cost and intersection settings, not optimizer
+% settings. Each optimizer setting must therefore be ONE positive number
+% shared by all runs; otherwise differences between combinations could come
+% from the optimizer instead of from the parameters we want to study.
+% Checking them here (bounds and sigmas may be fractional, counts must be
+% integers) catches a bad value before the first expensive run starts.
 validatePositiveScalar(experimentSpec.optimizer.translationBoundMm,     'optimizer.translationBoundMm',     false);
 validatePositiveScalar(experimentSpec.optimizer.rotationBoundDeg,       'optimizer.rotationBoundDeg',       false);
 validatePositiveScalar(experimentSpec.optimizer.translationSigmaMm,     'optimizer.translationSigmaMm',     false);
@@ -48,6 +100,8 @@ validatePositiveScalar(experimentSpec.optimizer.maxFunctionEvaluations, 'optimiz
 validatePositiveScalar(experimentSpec.optimizer.parforWorkers,          'optimizer.parforWorkers',          true);
 validateattributes(experimentSpec.optimizer.useParfor, {'logical', 'numeric'}, {'scalar'}, mfilename, 'optimizer.useParfor');
 
+% JSON may give true/false or 1/0. Converting to logical once means the
+% runner can use it directly in an if-statement without guessing its type.
 experimentSpec.optimizer.useParfor = logical(experimentSpec.optimizer.useParfor);
 end
 
