@@ -39,7 +39,6 @@ demoFolder    = fileparts(mfilename('fullpath'));
 projectRoot   = fileparts(fileparts(demoFolder));
 setupFilePath = fullfile(demoFolder, 'optimization_setup.mat');
 addpath(genpath(fullfile(projectRoot, 'functions')));
-addpath(demoFolder);
 load(setupFilePath, 'data');
 
 % Keep the experiment controls together. Fraction 1 uses all valid points;

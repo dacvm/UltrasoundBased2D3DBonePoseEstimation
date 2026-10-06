@@ -29,7 +29,6 @@ function report = test_PIMLOPCostFunction()
 testFolder  = fileparts(mfilename('fullpath'));
 projectRoot = fileparts(fileparts(testFolder));
 addpath(genpath(fullfile(projectRoot, 'functions')));
-addpath(testFolder);
 
 loadedSetup = load(fullfile(testFolder, 'optimization_setup.mat'), 'data');
 data = loadedSetup.data;

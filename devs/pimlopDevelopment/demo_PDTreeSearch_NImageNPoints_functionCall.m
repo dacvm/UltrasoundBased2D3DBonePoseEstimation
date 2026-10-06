@@ -32,7 +32,6 @@ demoFolder    = fileparts(mfilename('fullpath'));
 projectRoot   = fileparts(fileparts(demoFolder));
 setupFilePath = fullfile(demoFolder, 'optimization_setup.mat');
 addpath(genpath(fullfile(projectRoot, 'functions')));
-addpath(demoFolder);
 
 % The saved DATA structure contains the CT mesh, coarse registration,
 % ultrasound image planes, and extracted bone-surface measurements. It does

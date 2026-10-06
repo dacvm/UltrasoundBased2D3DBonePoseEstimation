@@ -1,9 +1,9 @@
 function [cost, details] = cost_PIMLOP_v01(poseVector, data, config)
 %COST_PIMLOP_V01 Evaluate one candidate bone pose with the P-IMLOP cost.
-% This development version connects the existing batched PD-tree search to
-% the bone-pose optimization interface. It is intentionally written with the
-% same three inputs used by the production cost models so it can be promoted
-% later without changing its scientific workflow.
+% This cost model connects the batched PD-tree search in functions/PIMLOP/
+% to the bone-pose optimization interface. It uses the same three inputs as
+% the other cost models in this folder. Its configuration validator is
+% validate_cost_PIMLOP_v01.
 %
 % Why this function is needed
 % ---------------------------

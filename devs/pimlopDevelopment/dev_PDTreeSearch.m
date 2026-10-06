@@ -8,10 +8,8 @@ developmentFolder = fileparts(mfilename('fullpath'));
 projectRoot       = fileparts(fileparts(developmentFolder));
 setupFilePath     = fullfile(developmentFolder, 'optimization_setup.mat');
 
-% Add both the project helpers and this development folder. The latter makes
-% preparePIMLOPModel available even when MATLAB starts from another folder.
+% Add the project functions, including preparePIMLOPModel in functions/PIMLOP/.
 addpath(genpath(fullfile(projectRoot, 'functions')));
-addpath(developmentFolder);
 
 % Load the fixed fixture created from the one-sweep optimization workflow.
 % The variables remain visible in the workspace for the next E_match steps.

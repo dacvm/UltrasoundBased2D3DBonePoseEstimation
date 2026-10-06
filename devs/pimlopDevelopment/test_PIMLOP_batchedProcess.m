@@ -16,8 +16,10 @@ function report = test_PIMLOP_batchedProcess(includeRealData)
 %       costs, geometry, pruning, or batch-size invariance disagree.
 
 if nargin < 1, includeRealData = true; end
-folder = fileparts(mfilename('fullpath'));
-addpath(folder);
+% P-IMLOP functions live in functions/PIMLOP/; this folder keeps only the test data.
+folder      = fileparts(mfilename('fullpath'));
+projectRoot = fileparts(fileparts(folder));
+addpath(genpath(fullfile(projectRoot, 'functions')));
 previousRandomState = rng;
 restoreRandomState = onCleanup(@() rng(previousRandomState));
 rng(47);

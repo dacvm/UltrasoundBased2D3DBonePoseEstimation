@@ -7,9 +7,8 @@ developmentFolder = fileparts(mfilename('fullpath'));
 projectRoot       = fileparts(fileparts(developmentFolder));
 setupFilePath     = fullfile(developmentFolder, 'optimization_setup.mat');
 
-% Add the reusable project helpers and this development function folder.
+% Add the project functions, including the P-IMLOP functions in functions/PIMLOP/.
 addpath(genpath(fullfile(projectRoot, 'functions')));
-addpath(developmentFolder);
 
 % Only data is required to build this one-point development example.
 load(setupFilePath, 'data');

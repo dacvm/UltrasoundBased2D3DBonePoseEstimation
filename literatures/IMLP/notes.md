@@ -38,6 +38,6 @@ Keep the log term when the target covariances vary over the surface.
   - The paper bounds the covariance in three ways, from loosest to tightest: spherical (Eq. 14), simple ellipsoidal (Eq. 15), compact ellipsoidal (Eqs. 16–17).
 
 ## Where it lives in this repo
-IMLP itself is not implemented. Its PD-tree concepts are reused in the P-IMLOP code in `devs/pimlopDevelopment/`: see `buildPIMLOPPDTree.m`, `searchPDTree.m` and `ellipsoidIntersectsOBB.m`.
+IMLP itself is not implemented. Its PD-tree concepts are reused in the P-IMLOP code in `functions/PIMLOP/`: see `buildPIMLOPPDTree.m`, `searchPDTree.m` and `ellipsoidIntersectsOBB.m`.
 
 P-IMLOP drops the log term (its covariance is fixed for every match) and has no outlier test.

@@ -41,10 +41,9 @@ demoFolder    = fileparts(mfilename('fullpath'));
 projectRoot   = fileparts(fileparts(demoFolder));
 setupFilePath = fullfile(demoFolder, 'optimization_setup.mat');
 
-% The shared project functions provide rigid transformations and display
-% helpers. The demo folder contains the P-IMLOP model and search functions.
+% The shared project functions provide rigid transformations, display
+% helpers, and the P-IMLOP model and search functions (functions/PIMLOP/).
 addpath(genpath(fullfile(projectRoot, 'functions')));
-addpath(demoFolder);
 
 % The saved setup contains the CT tibia mesh, tracked image planes, extracted
 % ultrasound measurements, and the initial CT-to-ref registration.
