@@ -122,7 +122,7 @@ end
 boneMeshCT = currentBone.mesh;
 if ~isa(boneMeshCT, 'triangulation')
     error('prepareBonePoseOptimizationInputs:InvalidBoneMesh', ...
-        'bones(%d).mesh must be a triangulation.', boneIndex);
+          'bones(%d).mesh must be a triangulation.', boneIndex);
 end
 
 % Read the frame-explicit transforms produced by the CT and coarse-registration tools.
@@ -146,10 +146,9 @@ if isfield(currentGroundTruthBonePose, 'meshCT')
         error('prepareBonePoseOptimizationInputs:InvalidGroundTruthMesh', ...
             'validBonePoses.bonePoses.meshCT must be a triangulation.');
     end
-    bonePointsRefGroundTruth = applyRigidTransform( ...
-        boneMeshCTGroundTruth.Points, T_CT_ref_groundTruth);
-    boneMeshRefGroundTruth = triangulation( ...
-        boneMeshCTGroundTruth.ConnectivityList, bonePointsRefGroundTruth);
+    bonePointsRefGroundTruth = applyRigidTransform(boneMeshCTGroundTruth.Points, T_CT_ref_groundTruth);
+    boneMeshRefGroundTruth   = triangulation(boneMeshCTGroundTruth.ConnectivityList, bonePointsRefGroundTruth);
+
 elseif isfield(currentGroundTruthPose, 'mesh')
     % Older reviewed snapshot files stored the already transformed mesh here.
     % Retain this fallback so existing optimization inputs remain usable.
@@ -158,6 +157,7 @@ elseif isfield(currentGroundTruthPose, 'mesh')
         error('prepareBonePoseOptimizationInputs:InvalidGroundTruthMesh', ...
             'validBonePoses.bonePoses.data.mesh must be a triangulation.');
     end
+    
 else
     error('prepareBonePoseOptimizationInputs:MissingGroundTruthMesh', ...
         ['The ground-truth bone pose must contain meshCT at the bone level ' ...
