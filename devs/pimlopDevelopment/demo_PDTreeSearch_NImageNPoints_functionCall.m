@@ -55,10 +55,8 @@ config                 = struct();
 config.cost            = struct();
 config.cost.model      = 'PIMLOP_v1';
 config.cost.parameters = struct();
-config.cost.parameters.measurementSubsampleFraction      = measurementSubsampleFraction;
-config.cost.parameters.positionStandardDeviationImageXmm = positionStandardDeviationImageMm(1);
-config.cost.parameters.positionStandardDeviationImageYmm = positionStandardDeviationImageMm(2);
-config.cost.parameters.positionStandardDeviationImageZmm = positionStandardDeviationImageMm(3);
+config.cost.parameters.measurementSubsampleFraction   = measurementSubsampleFraction;
+config.cost.parameters.positionStandardDeviationImage = positionStandardDeviationImageMm;
 config.cost.parameters.kappa = kappa;
 
 % This value changes only the appearance of the ultrasound planes. It never
