@@ -493,12 +493,27 @@ end
 
 function testSkippedCoarseRegistrationCannotStartOptimization(testCase)
 %TESTSKIPPEDCOARSEREGISTRATIONCANNOTSTARTOPTIMIZATION Check skipped-bone handling.
-% testCase supplies the current files, whose femur registration is skipped.
-% This function has no output.
+% testCase supplies the current configuration. This function has no output.
 
-% Select femur to confirm that a retained but skipped record is not used as a pose.
+% Whether a bone is skipped depends on which coarse-registration file the
+% config points to, and newer files register every bone. So the test makes
+% its own copy of the current file and marks the selected bone as skipped,
+% with the same status text the coarse-registration tool writes. This keeps
+% the test independent of the data.
 config = testCase.TestData.config;
-config.input.bone = 'F';
+coarseOutput = load(config.input.coarseRegistrationMatFile, 'coarseRegistration');
+coarseRegistration = coarseOutput.coarseRegistration;
+selectedBoneIndex = find(strcmpi(string({coarseRegistration.bone}), config.input.bone));
+coarseRegistration(selectedBoneIndex).status = ...
+    "skipped: fewer than three non-collinear correspondence points";
+
+temporaryCoarsePath = [tempname, '.mat'];
+cleanupTemporaryCoarse = onCleanup( ...
+    @() deleteFileIfPresent(temporaryCoarsePath));
+save(temporaryCoarsePath, 'coarseRegistration');
+
+% The skipped record is still in the file, but it must not be used as a start pose.
+config.input.coarseRegistrationMatFile = temporaryCoarsePath;
 verifyError(testCase, @() prepareBonePoseOptimizationInputs(config), ...
     'prepareBonePoseOptimizationInputs:BoneNotRegistered');
 end

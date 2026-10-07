@@ -228,8 +228,10 @@ cost = sum over all retained measurements of min_y E_match(x, y)
 | Parameter | Type | Meaning |
 | --- | --- | --- |
 | `measurementSubsampleFraction` | Fixed | Fraction in `(0, 1]` of the valid surface points kept from every image, spread evenly along each surface curve. Smaller values make every evaluation faster. |
-| `positionStandardDeviationImage` | Fixed | Three positive position standard deviations `[sx, sy, sz]` in millimetres along the image x, y, and out-of-plane axes. |
-| `kappa` | Fixed | Nonnegative orientation concentration. `0` switches the orientation term off; `50` corresponds to roughly 8 degrees of angular spread. |
+| `positionXStandardDeviationImage` | Fixed | Positive position standard deviation in millimetres along the image x axis. |
+| `positionYStandardDeviationImage` | Fixed | Positive position standard deviation in millimetres along the image y axis. |
+| `positionZStandardDeviationImage` | Fixed | Positive position standard deviation in millimetres along the out-of-plane (image z) axis. |
+| `kappa` | Hyperparameter | Nonnegative orientation concentration. `0` switches the orientation term off; `50` corresponds to roughly 8 degrees of angular spread. Bigger values give a narrower spread (roughly `1/sqrt(kappa)` radians). |
 
 This model requires aligned 3D bone-surface measurements with 2D normals (`surfaceNormalXY` and `surfaceNormalMask`) from `boneSurfaceMatFile`. One evaluation takes several seconds, so keep `populationSize` and `maxFunctionEvaluations` small for first runs. The reference demos and regression tests in `devs/pimlopDevelopment/` still run independently.
 
@@ -252,6 +254,7 @@ Edit one of the following files:
 - `config/optconfig_oneSweep_intensityICP.json` for a combined interactive run after selecting it in the one-sweep script.
 - `config/optconfig_oneSweep_PIMLOP.json` for a P-IMLOP interactive run after selecting it in the one-sweep script.
 - `config/optconfig_hyperparamSweep_intensityCov.json` for the current unattended multi-parameter, multi-seed experiment.
+- `config/optconfig_hyperparamSweep_PIMLOP.json` for an unattended P-IMLOP sweep over `kappa` after selecting it in the hyperparameter-sweep script.
 
 The file under `config/legacy/` records the former schemaVersion02 layout for historical
 reference only. Active readers do not execute schema-less legacy configs.
