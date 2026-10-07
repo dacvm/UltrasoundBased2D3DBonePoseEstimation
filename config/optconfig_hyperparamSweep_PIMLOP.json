@@ -23,7 +23,7 @@
       "positionZStandardDeviationImage": 1.5
     },
     "hyperparameters": {
-      "kappa": [50]
+      "kappa": [10, 50, 200]
     }
   },
   "logging": {
@@ -35,14 +35,14 @@
     "rotationBoundDeg": 10.0,
     "translationSigmaMm": 3.0,
     "rotationSigmaDeg": 3.0,
-    "populationSize": 4,
-    "maxFunctionEvaluations": 10,
+    "populationSize": 32,
+    "maxFunctionEvaluations": 30,
     "useParfor": true,
     "parforWorkers": 6
   },
   "experiment": {
-    "name": "oneSweep_PIMLOP_v01",
-    "seeds": [1001],
-    "outputFolder": "output/bonePoseOptimization/oneSweeps/PIMLOP_v01"
+    "name": "PIMLOP_v01",
+    "seeds": [1001, 1002, 1003, 1004, 1005],
+    "outputFolder": "output/bonePoseOptimization/experiments"
   }
 }

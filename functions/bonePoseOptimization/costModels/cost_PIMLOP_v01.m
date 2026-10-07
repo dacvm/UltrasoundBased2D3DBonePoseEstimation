@@ -111,10 +111,13 @@ function [cost, details] = cost_PIMLOP_v01(poseVector, data, config)
 %     config.cost.parameters:
 %         measurementSubsampleFraction   - fraction (0,1] of valid points
 %                                          kept per image;
-%         positionStandardDeviationImage - three values [sx sy sz] in mm,
-%                                          the position noise along the
+%         positionXStandardDeviationImage,
+%         positionYStandardDeviationImage,
+%         positionZStandardDeviationImage - one scalar each, in mm: the
+%                                          position noise along the
 %                                          image x, y and out-of-plane z
-%                                          axes; Sigma_image = diag(s.^2);
+%                                          axes; Sigma_image =
+%                                          diag([sx sy sz].^2);
 %         kappa                          - von Mises concentration of the
 %                                          normal (0 turns orientation off).
 %     CONFIG may be omitted when the same structure is available as
@@ -414,7 +417,9 @@ function costSettings = readPIMLOPCostSettings(config)
 parameters = config.cost.parameters;
 requiredNames = { ...
     'measurementSubsampleFraction', ...
-    'positionStandardDeviationImage', ...
+    'positionXStandardDeviationImage', ...
+    'positionYStandardDeviationImage', ...
+    'positionZStandardDeviationImage', ...
     'kappa'};
 if ~all(isfield(parameters, requiredNames))
     error('cost_PIMLOP_v01:MissingCostSetting', ...
@@ -423,7 +428,12 @@ end
 
 costSettings = struct();
 costSettings.measurementSubsampleFraction = double(parameters.measurementSubsampleFraction);
-costSettings.positionStandardDeviationImageMm = double(parameters.positionStandardDeviationImage(:));
+% The config keeps one scalar per image axis; the covariance below needs
+% them together as one [sx; sy; sz] column.
+costSettings.positionStandardDeviationImageMm = double([ ...
+    parameters.positionXStandardDeviationImage; ...
+    parameters.positionYStandardDeviationImage; ...
+    parameters.positionZStandardDeviationImage]);
 costSettings.kappa = double(parameters.kappa);
 
 validateattributes(costSettings.measurementSubsampleFraction, {'numeric'}, ...
