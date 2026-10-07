@@ -44,7 +44,7 @@ frameDelaySeconds = 0.05;
 % false when only an interactive visualization is needed. While it is false,
 % MATLAB's Code Analyzer may warn that the recording branches are unreachable;
 % that is expected.
-recordVisualization = false;
+recordVisualization = true;
 
 % A positive value means that ultrasound pixels were recorded this many seconds
 % after the physical motion that produced them. The script therefore displays a
