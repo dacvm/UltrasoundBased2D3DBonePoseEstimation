@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 4,
+  "project": {
+    "root": "..",
+    "functionsFolderName": "functions"
+  },
+  "input": {
+    "bone": "T",
+    "validSnapshotsMatFile": "tools/ultrasoundSpatialProcessing/outputs/validSnapshots_20260910_172849.mat",
+    "boneSurfaceMatFile": "tools/boneSegmentationProcess/outputs/boneSurface_20260910_180217.mat",
+    "ctPostProcessedMatFile": "tools/ctkneePostProcess/outputs/kneephantom/kneephantom_bones_and_bonepins.mat",
+    "coarseRegistrationMatFile": "tools/bonePreRegistration/outputs/coarseRegistration_20260916_154020.mat"
+  },
+  "intersection": {
+    "normalFacingToleranceDeg": 30
+  },
+  "cost": {
+    "model": "intensityPIMLOP_v1",
+    "fixedParameters": {
+      "intensityMax": 255,
+      "measurementSubsampleFraction": 0.5,
+      "positionXStandardDeviationImage": 1.0,
+      "positionYStandardDeviationImage": 1.0,
+      "positionZStandardDeviationImage": 1.5
+    },
+    "hyperparameters": {
+      "minReferencePixels": [50],
+      "nMinPixels": [100],
+      "lambdaMissing": [1.0],
+      "kappa": [10, 50],
+      "weight": [0.25, 0.5, 0.75]
+    }
+  },
+  "logging": {
+    "printPreparationProgress": false,
+    "printEvaluationProgress": false
+  },
+  "optimizer": {
+    "translationBoundMm": 10.0,
+    "rotationBoundDeg": 10.0,
+    "translationSigmaMm": 3.0,
+    "rotationSigmaDeg": 3.0,
+    "populationSize": 32,
+    "maxFunctionEvaluations": 30,
+    "useParfor": true,
+    "parforWorkers": 6
+  },
+  "experiment": {
+    "name": "intensityPIMLOP_v01",
+    "seeds": [1001, 1002, 1003],
+    "outputFolder": "output/bonePoseOptimization/experiments"
+  }
+}

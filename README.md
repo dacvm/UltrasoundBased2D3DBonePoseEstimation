@@ -20,6 +20,7 @@
   - [5.2. `ICPLike_v1`: one-way 3D point-to-mesh distance](#52-icplike_v1-one-way-3d-point-to-mesh-distance)
   - [5.3. `intensityICP_v1`: combined intensity and 3D distance](#53-intensityicp_v1-combined-intensity-and-3d-distance)
   - [5.4. `PIMLOP_v1`: most-likely oriented point match](#54-pimlop_v1-most-likely-oriented-point-match)
+  - [5.5. `intensityPIMLOP_v1`: combined intensity and P-IMLOP](#55-intensitypimlop_v1-combined-intensity-and-p-imlop)
 - [6. Running the project](#6-running-the-project)
   - [6.1. Requirements](#61-requirements)
   - [6.2. Configure the input paths and settings](#62-configure-the-input-paths-and-settings)
@@ -158,7 +159,7 @@ The `experiment.seeds` array controls repeated stochastic runs. A one-sweep conf
 
 ## 5. Supported cost functions
 
-This is an ongoing list. The current framework registers the following four versioned cost models; more models can be added through the extension process described in [Processing workflow](#8-processing-workflow). Every model returns one scalar objective to CMA-ES, and a lower value is always better.
+This is an ongoing list. The current framework registers the following five versioned cost models; more models can be added through the extension process described in [Processing workflow](#8-processing-workflow). Every model returns one scalar objective to CMA-ES, and a lower value is always better.
 
 In the tables below, a **fixed parameter** has one value for the complete experiment. A **hyperparameter** is an array of candidate values; the experiment planner includes it in the Cartesian product used to create parameter combinations.
 
@@ -235,6 +236,36 @@ cost = sum over all retained measurements of min_y E_match(x, y)
 
 This model requires aligned 3D bone-surface measurements with 2D normals (`surfaceNormalXY` and `surfaceNormalMask`) from `boneSurfaceMatFile`. One evaluation takes several seconds, so keep `populationSize` and `maxFunctionEvaluations` small for first runs. The reference demos and regression tests in `devs/pimlopDevelopment/` still run independently.
 
+### 5.5. `intensityPIMLOP_v1`: combined intensity and P-IMLOP
+
+This model evaluates `intensityCov_v1` and `PIMLOP_v1` at the same candidate pose and blends them with one weight, in the same way `intensityICP_v1` blends intensity with the 3D point-to-mesh distance. The P-IMLOP total is a sum over all retained measurements, so it grows with the number of segmented points. It is therefore averaged over the measurements before it is blended:
+
+```text
+pimlopMeanMatchError = pimlopTotalMatchError / numberOfMeasurements
+
+cost = weight * intensityCoverageCost
+     + (1 - weight) * pimlopMeanMatchError
+```
+
+The same measurements are used for every candidate pose, so averaging divides by a fixed number and does not change the P-IMLOP best pose. A `weight` of `1` selects only the intensity-and-coverage term, while `0` selects only the mean P-IMLOP term. Every part of the equation is saved in `details.costTerms`, and the full diagnostics of both models are kept in `details.componentDetails`.
+
+**The two terms have different scales.** With 1/1/1.5 mm standard deviations and `kappa = 50`, the mean match error was about `2` at the coarse start pose of the knee-phantom data, about `4` after a 3 mm translation, and about `50` after a 5 degree rotation. The intensity-and-coverage term changed by only a few tenths over the same range, so the P-IMLOP term dominates unless `weight` is close to `1`. Because the orientation term is `kappa * (1 - cos)`, a larger `kappa` also raises the mean match error.
+
+| Parameter | Type | Meaning |
+| --- | --- | --- |
+| `intensityMax` | Fixed | Positive intensity used to normalize the mean sampled brightness, normally `255` for 8-bit images. |
+| `measurementSubsampleFraction` | Fixed | Fraction in `(0, 1]` of the valid surface points kept from every image, spread evenly along each surface curve. |
+| `positionXStandardDeviationImage` | Fixed | Positive position standard deviation in millimetres along the image x axis. |
+| `positionYStandardDeviationImage` | Fixed | Positive position standard deviation in millimetres along the image y axis. |
+| `positionZStandardDeviationImage` | Fixed | Positive position standard deviation in millimetres along the out-of-plane (image z) axis. |
+| `minReferencePixels` | Hyperparameter | Positive minimum intersection-pixel count at the initial pose. A plane below this threshold is inactive and does not contribute to the cost. |
+| `nMinPixels` | Hyperparameter | Positive minimum pixel count required at the current candidate pose. An active plane below this threshold is marked as missing. |
+| `lambdaMissing` | Hyperparameter | Nonnegative multiplier applied to the fraction of active planes marked as missing. `0` disables this penalty. |
+| `kappa` | Hyperparameter | Nonnegative P-IMLOP orientation concentration. `0` switches the orientation term off. |
+| `weight` | Hyperparameter | Convex blend coefficient in the inclusive range `[0, 1]`; it weights the intensity term, while `1 - weight` weights the mean P-IMLOP match error. |
+
+This model requires aligned 3D bone-surface measurements with 2D normals from `boneSurfaceMatFile`. Every evaluation runs the P-IMLOP search, so it is at least as slow as `PIMLOP_v1`.
+
 ## 6. Running the project
 
 ### 6.1. Requirements
@@ -255,6 +286,8 @@ Edit one of the following files:
 - `config/optconfig_oneSweep_PIMLOP.json` for a P-IMLOP interactive run after selecting it in the one-sweep script.
 - `config/optconfig_hyperparamSweep_intensityCov.json` for the current unattended multi-parameter, multi-seed experiment.
 - `config/optconfig_hyperparamSweep_PIMLOP.json` for an unattended P-IMLOP sweep over `kappa` after selecting it in the hyperparameter-sweep script.
+- `config/optconfig_oneSweep_intensityPIMLOP.json` for a combined intensity and P-IMLOP interactive run after selecting it in the one-sweep script.
+- `config/optconfig_hyperparamSweep_intensityPIMLOP.json` for an unattended combined sweep over `kappa` and `weight` after selecting it in the hyperparameter-sweep script.
 
 The file under `config/legacy/` records the former schemaVersion02 layout for historical
 reference only. Active readers do not execute schema-less legacy configs.
