@@ -16,12 +16,11 @@
   - [4.1. Optimization code organization](#41-optimization-code-organization)
   - [4.2. Optimizer parameters](#42-optimizer-parameters)
 - [5. Supported cost functions](#5-supported-cost-functions)
-  - [5.1. `intensityCov_v1`: intensity and coverage](#51-intensitycov_v1-intensity-and-coverage)
+  - [5.1. `intensityCov_v2`: smoothed intensity along the predicted bone](#51-intensitycov_v2-smoothed-intensity-along-the-predicted-bone)
   - [5.2. `ICPLike_v1`: one-way 3D point-to-mesh distance](#52-icplike_v1-one-way-3d-point-to-mesh-distance)
   - [5.3. `intensityICP_v1`: combined intensity and 3D distance](#53-intensityicp_v1-combined-intensity-and-3d-distance)
   - [5.4. `PIMLOP_v1`: most-likely oriented point match](#54-pimlop_v1-most-likely-oriented-point-match)
   - [5.5. `intensityPIMLOP_v1`: combined intensity and P-IMLOP](#55-intensitypimlop_v1-combined-intensity-and-p-imlop)
-  - [5.6. `intensityCov_v2`: smoothed intensity along the predicted bone](#56-intensitycov_v2-smoothed-intensity-along-the-predicted-bone)
 - [6. Running the project](#6-running-the-project)
   - [6.1. Requirements](#61-requirements)
   - [6.2. Configure the input paths and settings](#62-configure-the-input-paths-and-settings)
@@ -41,7 +40,7 @@
 
 This MATLAB project supports the development of optimization-based bone registration using tracked B-mode ultrasound images. Its purpose is to explore how much information conventional B-mode ultrasound can provide for estimating the three-dimensional pose of a bone when a CT-derived bone mesh and an approximate initial registration are available.
 
-For each candidate bone pose, the pipeline places the CT mesh in the experiment reference frame, intersects the mesh with the tracked ultrasound image planes, and keeps intersection segments whose mesh surfaces face the probe. The cost function then evaluates the brightness and coverage of the corresponding ultrasound pixels. A bounded CMA-ES optimizer searches for a six-degree-of-freedom correction to the coarse bone pose.
+For each candidate bone pose, the pipeline places the CT mesh in the experiment reference frame, intersects the mesh with the tracked ultrasound image planes, and keeps intersection segments whose mesh surfaces face the probe. The cost function then evaluates how well those predicted bone surfaces agree with the ultrasound data, for example how bright the images are along them. A bounded CMA-ES optimizer searches for a six-degree-of-freedom correction to the coarse bone pose.
 
 The project currently provides two entry points:
 
@@ -135,7 +134,7 @@ The three stable workflow entry points remain directly under
 one experiment run. Supporting functions are grouped one level below:
 
 - `configuration/` reads JSON and builds experiment and scalar run settings.
-- `costModels/` contains model registration, versioned cost functions, and validators.
+- `costModels/` contains model registration, versioned cost functions, and validators. Its `legacy/` subfolder keeps retired models for reference only; active code does not use them.
 - `inputPreparation/` loads and prepares reusable optimization inputs.
 - `poseEvaluation/` converts optimizer states and evaluates candidate-pose geometry.
 - `evaluationMetric/` and `evaluationPlot/` analyze saved results.
@@ -160,22 +159,37 @@ The `experiment.seeds` array controls repeated stochastic runs. A one-sweep conf
 
 ## 5. Supported cost functions
 
-This is an ongoing list. The current framework registers the following six versioned cost models; more models can be added through the extension process described in [Processing workflow](#8-processing-workflow). Every model returns one scalar objective to CMA-ES, and a lower value is always better.
+This is an ongoing list. The current framework registers the following five versioned cost models; more models can be added through the extension process described in [Processing workflow](#8-processing-workflow). Every model returns one scalar objective to CMA-ES, and a lower value is always better.
 
 In the tables below, a **fixed parameter** has one value for the complete experiment. A **hyperparameter** is an array of candidate values; the experiment planner includes it in the Cartesian product used to create parameter combinations.
 
-### 5.1. `intensityCov_v1`: intensity and coverage
+### 5.1. `intensityCov_v2`: smoothed intensity along the predicted bone
 
-This model intersects the candidate CT mesh with each tracked ultrasound plane and keeps pixels produced by probe-facing mesh faces. It rewards intersections that are both bright and sufficiently covered relative to the intersection at the coarse initial pose. It also penalizes active image planes whose candidate intersection contains too few pixels. This prevents a very small but bright intersection from appearing better than a physically meaningful one.
+This model cuts the candidate CT mesh with every ultrasound plane and keeps the probe-facing parts of the cut, which are the surfaces ultrasound should show as a bright echo. It then reads the image along those lines:
 
-For every active plane, the score is the normalized mean pixel intensity multiplied by its capped coverage ratio. The final cost is the negative mean score plus the weighted fraction of missing planes.
+```text
+evidence_i = mean smoothed intensity at points every sampleSpacingMm along
+             plane i's probe-facing intersection segments, / intensityMax
+             (0 when the bone does not cross plane i)
+
+cost = 1 - mean over all planes of evidence_i
+```
+
+The cost lies in `[0, 1]`, and lower is better. Three design choices shape it:
+
+- **No start-pose reference.** The coarse start pose is only a rough guess. Every plane is judged only by what the image shows at the candidate pose, so the best pose of the cost does not depend on where the search started. Every plane counts equally.
+- **Continuous sampling.** The image is read with bilinear interpolation at evenly spaced points along the intersection segments, instead of at whole rasterized pixels. The cost therefore changes smoothly with the pose instead of in pixel-sized steps.
+- **Smoothed images.** The bone echo is only about 1 mm thick, so on the raw image a line slightly off the echo reads only background and the cost gives no direction. `prepareBonePoseOptimizationInputs` therefore blurs every image once with a Gaussian of standard deviation `intensitySmoothingSigmaMm` and stores the result in `data.extra.intensityCov.smoothedImages`. A line near the echo then still reads part of it, so the cost points toward the bone. A larger sigma reaches further but gives a shallower minimum.
+
+On the knee-phantom data, a 0.5–1 mm blur gave a single minimum in four of six 1-D sweeps (±8 mm and ±8 degrees around the start pose). Rotation about the ref y axis stayed poorly defined, because it barely changes the intersection lines.
+
+A pose whose intersection is short but lies on a very bright spot can score well. The model is therefore meant to be combined with a cost that uses the segmented bone surface, such as P-IMLOP, which rules such poses out.
 
 | Parameter | Type | Meaning |
 | --- | --- | --- |
-| `intensityMax` | Fixed | Positive intensity used to normalize the mean sampled brightness, normally `255` for 8-bit images. |
-| `minReferencePixels` | Hyperparameter | Positive minimum intersection-pixel count at the initial pose. A plane below this threshold is inactive and does not contribute to the cost. |
-| `nMinPixels` | Hyperparameter | Positive minimum pixel count required at the current candidate pose. An active plane below this threshold is marked as missing. |
-| `lambdaMissing` | Hyperparameter | Nonnegative multiplier applied to the fraction of active planes marked as missing. `0` disables this penalty. |
+| `intensityMax` | Fixed | Positive intensity that counts as full evidence, normally `255` for 8-bit images. |
+| `sampleSpacingMm` | Fixed | Positive largest distance in millimetres between neighbouring sample points along an intersection segment. |
+| `intensitySmoothingSigmaMm` | Hyperparameter | Nonnegative Gaussian standard deviation in millimetres used to blur the images. `0` reads the raw images. |
 
 This model does not require `boneSurfaceMatFile`.
 
@@ -191,23 +205,22 @@ This model requires aligned 3D bone-surface measurements from `boneSurfaceMatFil
 
 ### 5.3. `intensityICP_v1`: combined intensity and 3D distance
 
-This model evaluates both models above at the same candidate pose. It divides the point-to-mesh RMSE by a reference distance to make that term dimensionless, then returns the convex blend
+This model evaluates `intensityCov_v2` and `ICPLike_v1` at the same candidate pose. It divides the point-to-mesh RMSE by a reference distance to make that term dimensionless, then returns the convex blend
 
 ```text
-cost = weight * intensityCoverageCost
+cost = weight * intensityCost
      + (1 - weight) * (pointCloudRmseMm / distanceReferenceMm)
 ```
 
-A `weight` of `1` selects only the intensity-and-coverage term, while `0` selects only the normalized point-to-mesh term.
+A `weight` of `1` selects only the smoothed-intensity term, while `0` selects only the normalized point-to-mesh term. Every part of the equation is saved in `details.costTerms`, and the full diagnostics of both models are kept in `details.componentDetails`.
 
 | Parameter | Type | Meaning |
 | --- | --- | --- |
-| `intensityMax` | Fixed | Positive intensity used to normalize the mean sampled brightness, normally `255` for 8-bit images. |
+| `intensityMax` | Fixed | Positive intensity that counts as full evidence, normally `255` for 8-bit images. |
+| `sampleSpacingMm` | Fixed | Positive largest distance in millimetres between neighbouring sample points along an intersection segment. |
 | `nearestVertexCount` | Fixed | Positive integer number of nearby mesh vertices used to seed the local candidate-triangle search for each measured 3D point. A larger value searches a wider mesh neighborhood but increases evaluation time. |
 | `distanceReferenceMm` | Fixed | Positive distance in millimetres used to normalize the point-to-mesh RMSE before it is combined with the dimensionless intensity term. |
-| `minReferencePixels` | Hyperparameter | Positive minimum intersection-pixel count at the initial pose. A plane below this threshold is inactive and does not contribute to the cost. |
-| `nMinPixels` | Hyperparameter | Positive minimum pixel count required at the current candidate pose. An active plane below this threshold is marked as missing. |
-| `lambdaMissing` | Hyperparameter | Nonnegative multiplier applied to the fraction of active planes marked as missing. `0` disables this penalty. |
+| `intensitySmoothingSigmaMm` | Hyperparameter | Nonnegative Gaussian standard deviation in millimetres used to blur the images. `0` reads the raw images. |
 | `weight` | Hyperparameter | Convex blend coefficient in the inclusive range `[0, 1]`; it weights the intensity term, while `1 - weight` weights the normalized 3D-distance term. |
 
 This model requires aligned 3D bone-surface measurements from `boneSurfaceMatFile`.
@@ -239,63 +252,32 @@ This model requires aligned 3D bone-surface measurements with 2D normals (`surfa
 
 ### 5.5. `intensityPIMLOP_v1`: combined intensity and P-IMLOP
 
-This model evaluates `intensityCov_v1` and `PIMLOP_v1` at the same candidate pose and blends them with one weight, in the same way `intensityICP_v1` blends intensity with the 3D point-to-mesh distance. The P-IMLOP total is a sum over all retained measurements, so it grows with the number of segmented points. It is therefore averaged over the measurements before it is blended:
+This model evaluates `intensityCov_v2` and `PIMLOP_v1` at the same candidate pose and blends them with one weight, in the same way `intensityICP_v1` blends intensity with the 3D point-to-mesh distance. The P-IMLOP total is a sum over all retained measurements, so it grows with the number of segmented points. It is therefore averaged over the measurements before it is blended:
 
 ```text
 pimlopMeanMatchError = pimlopTotalMatchError / numberOfMeasurements
 
-cost = weight * intensityCoverageCost
+cost = weight * intensityCost
      + (1 - weight) * pimlopMeanMatchError
 ```
 
-The same measurements are used for every candidate pose, so averaging divides by a fixed number and does not change the P-IMLOP best pose. A `weight` of `1` selects only the intensity-and-coverage term, while `0` selects only the mean P-IMLOP term. Every part of the equation is saved in `details.costTerms`, and the full diagnostics of both models are kept in `details.componentDetails`.
+The same measurements are used for every candidate pose, so averaging divides by a fixed number and does not change the P-IMLOP best pose. A `weight` of `1` selects only the smoothed-intensity term, while `0` selects only the mean P-IMLOP term. Every part of the equation is saved in `details.costTerms`, and the full diagnostics of both models are kept in `details.componentDetails`.
 
-**The two terms have different scales.** With 1/1/1.5 mm standard deviations and `kappa = 50`, the mean match error was about `2` at the coarse start pose of the knee-phantom data, about `4` after a 3 mm translation, and about `50` after a 5 degree rotation. The intensity-and-coverage term changed by only a few tenths over the same range, so the P-IMLOP term dominates unless `weight` is close to `1`. Because the orientation term is `kappa * (1 - cos)`, a larger `kappa` also raises the mean match error.
-
-| Parameter | Type | Meaning |
-| --- | --- | --- |
-| `intensityMax` | Fixed | Positive intensity used to normalize the mean sampled brightness, normally `255` for 8-bit images. |
-| `measurementSubsampleFraction` | Fixed | Fraction in `(0, 1]` of the valid surface points kept from every image, spread evenly along each surface curve. |
-| `positionXStandardDeviationImage` | Fixed | Positive position standard deviation in millimetres along the image x axis. |
-| `positionYStandardDeviationImage` | Fixed | Positive position standard deviation in millimetres along the image y axis. |
-| `positionZStandardDeviationImage` | Fixed | Positive position standard deviation in millimetres along the out-of-plane (image z) axis. |
-| `minReferencePixels` | Hyperparameter | Positive minimum intersection-pixel count at the initial pose. A plane below this threshold is inactive and does not contribute to the cost. |
-| `nMinPixels` | Hyperparameter | Positive minimum pixel count required at the current candidate pose. An active plane below this threshold is marked as missing. |
-| `lambdaMissing` | Hyperparameter | Nonnegative multiplier applied to the fraction of active planes marked as missing. `0` disables this penalty. |
-| `kappa` | Hyperparameter | Nonnegative P-IMLOP orientation concentration. `0` switches the orientation term off. |
-| `weight` | Hyperparameter | Convex blend coefficient in the inclusive range `[0, 1]`; it weights the intensity term, while `1 - weight` weights the mean P-IMLOP match error. |
-
-This model requires aligned 3D bone-surface measurements with 2D normals from `boneSurfaceMatFile`. Every evaluation runs the P-IMLOP search, so it is at least as slow as `PIMLOP_v1`.
-
-### 5.6. `intensityCov_v2`: smoothed intensity along the predicted bone
-
-Like `intensityCov_v1`, this model cuts the candidate CT mesh with every ultrasound plane and keeps the probe-facing parts of the cut, which are the surfaces ultrasound should show as a bright echo. It then reads the image along those lines:
-
-```text
-evidence_i = mean smoothed intensity at points every sampleSpacingMm along
-             plane i's probe-facing intersection segments, / intensityMax
-             (0 when the bone does not cross plane i)
-
-cost = 1 - mean over all planes of evidence_i
-```
-
-The cost lies in `[0, 1]`, and lower is better. It replaces three parts of version 1:
-
-- **No start-pose reference.** Version 1 compared every intersection with the intersection at the coarse start pose (coverage, active planes, missing-plane penalty), so its best pose depended on where the search started. Version 2 has no such reference, and every plane counts equally.
-- **Continuous sampling.** The image is read with bilinear interpolation at evenly spaced points along the intersection segments, instead of at whole rasterized pixels. The cost therefore changes smoothly with the pose instead of in pixel-sized steps.
-- **Smoothed images.** The bone echo is only about 1 mm thick, so a line that is slightly off it read only background in version 1, and the cost was flat. `prepareBonePoseOptimizationInputs` now blurs every image once with a Gaussian of standard deviation `intensitySmoothingSigmaMm` and stores the result in `data.extra.intensityCov.smoothedImages`. A line near the echo then still reads part of it, so the cost points toward the bone. A larger sigma reaches further but gives a shallower minimum.
-
-On the knee-phantom data, 1-D sweeps of ±8 mm and ±8 degrees around the start pose had four to eight local minima per direction with version 1. With a 0.5–1 mm blur, four of the six directions had a single minimum. Rotation about the ref y axis stayed poorly defined because it barely changes the intersection lines.
-
-Without the start-pose reference, a pose whose intersection is short but lies on a very bright spot can score well again. This model is meant to be combined with a cost that uses the segmented bone surface, such as P-IMLOP, which rules such poses out.
+**The two terms have different scales.** With 1/1/1.5 mm standard deviations and `kappa = 50`, the mean match error was about `2` at the coarse start pose of the knee-phantom data, about `4` after a 3 mm translation, and about `50` after a 5 degree rotation. The smoothed-intensity term lies in `[0, 1]` and changed by less than `0.1` over ±8 mm translations around the start pose, so the P-IMLOP term dominates unless `weight` is close to `1`. Because the orientation term is `kappa * (1 - cos)`, a larger `kappa` also raises the mean match error.
 
 | Parameter | Type | Meaning |
 | --- | --- | --- |
 | `intensityMax` | Fixed | Positive intensity that counts as full evidence, normally `255` for 8-bit images. |
 | `sampleSpacingMm` | Fixed | Positive largest distance in millimetres between neighbouring sample points along an intersection segment. |
+| `measurementSubsampleFraction` | Fixed | Fraction in `(0, 1]` of the valid surface points kept from every image, spread evenly along each surface curve. |
+| `positionXStandardDeviationImage` | Fixed | Positive position standard deviation in millimetres along the image x axis. |
+| `positionYStandardDeviationImage` | Fixed | Positive position standard deviation in millimetres along the image y axis. |
+| `positionZStandardDeviationImage` | Fixed | Positive position standard deviation in millimetres along the out-of-plane (image z) axis. |
 | `intensitySmoothingSigmaMm` | Hyperparameter | Nonnegative Gaussian standard deviation in millimetres used to blur the images. `0` reads the raw images. |
+| `kappa` | Hyperparameter | Nonnegative P-IMLOP orientation concentration. `0` switches the orientation term off. |
+| `weight` | Hyperparameter | Convex blend coefficient in the inclusive range `[0, 1]`; it weights the intensity term, while `1 - weight` weights the mean P-IMLOP match error. |
 
-This model does not require `boneSurfaceMatFile`.
+This model requires aligned 3D bone-surface measurements with 2D normals from `boneSurfaceMatFile`. Every evaluation runs the P-IMLOP search, so it is at least as slow as `PIMLOP_v1`.
 
 ## 6. Running the project
 
@@ -311,19 +293,17 @@ The external CMA-ES implementation used by this project is already stored under 
 
 Edit one of the following files:
 
-- `config/optconfig_oneSweep_intensityCov.json` for an intensity-only interactive run.
-- `config/optconfig_oneSweep_ICPLike.json` for an ICP-like point-cloud interactive run.
-- `config/optconfig_oneSweep_intensityICP.json` for a combined interactive run after selecting it in the one-sweep script.
-- `config/optconfig_oneSweep_PIMLOP.json` for a P-IMLOP interactive run after selecting it in the one-sweep script.
-- `config/optconfig_hyperparamSweep_intensityCov.json` for the current unattended multi-parameter, multi-seed experiment.
-- `config/optconfig_hyperparamSweep_PIMLOP.json` for an unattended P-IMLOP sweep over `kappa` after selecting it in the hyperparameter-sweep script.
+- `config/optconfig_oneSweep_intensityCov.json` for a smoothed-intensity interactive run after selecting it in the one-sweep script.
+- `config/optconfig_oneSweep_ICPLike.json` for an ICP-like point-cloud interactive run after selecting it in the one-sweep script.
+- `config/optconfig_oneSweep_intensityICP.json` for a combined intensity and 3D-distance interactive run after selecting it in the one-sweep script.
+- `config/optconfig_oneSweep_PIMLOP.json` for a P-IMLOP interactive run; this is the one-sweep script's default.
 - `config/optconfig_oneSweep_intensityPIMLOP.json` for a combined intensity and P-IMLOP interactive run after selecting it in the one-sweep script.
+- `config/optconfig_hyperparamSweep_intensityCov.json` for an unattended smoothed-intensity sweep over `intensitySmoothingSigmaMm`; this is the hyperparameter-sweep script's default.
+- `config/optconfig_hyperparamSweep_intensityICP.json` for an unattended combined sweep over `intensitySmoothingSigmaMm` and `weight` after selecting it in the hyperparameter-sweep script.
+- `config/optconfig_hyperparamSweep_PIMLOP.json` for an unattended P-IMLOP sweep over `kappa` after selecting it in the hyperparameter-sweep script.
 - `config/optconfig_hyperparamSweep_intensityPIMLOP.json` for an unattended combined sweep over `kappa` and `weight` after selecting it in the hyperparameter-sweep script.
-- `config/optconfig_oneSweep_intensityCovV2.json` for a smoothed-intensity interactive run after selecting it in the one-sweep script.
-- `config/optconfig_hyperparamSweep_intensityCovV2.json` for an unattended smoothed-intensity sweep over `intensitySmoothingSigmaMm` after selecting it in the hyperparameter-sweep script.
 
-The file under `config/legacy/` records the former schemaVersion02 layout for historical
-reference only. Active readers do not execute schema-less legacy configs.
+Files under `config/legacy/` are retired configurations kept for reference only. The current code does not support them.
 
 Set `project.root` relative to the configuration directory or provide an absolute path. The supplied configuration files use `".."`, which resolves to this repository root. Input paths are then resolved relative to that project root.
 
@@ -473,7 +453,7 @@ runResult
     +-- stack
 ```
 
-For a completed run, `optimizationResult` contains the initial and best pose vectors, initial and best rigid transforms, search bounds, sigma, raw CMA-ES outputs, seed, and optimizer output paths. `final.costDetails` contains the final candidate mesh, per-plane intersection geometry, sampled-pixel counts, brightness and coverage values, missing-plane flags, and separated cost terms.
+For a completed run, `optimizationResult` contains the initial and best pose vectors, initial and best rigid transforms, search bounds, sigma, raw CMA-ES outputs, seed, and optimizer output paths. `final.costDetails` contains the final candidate mesh, per-plane intersection geometry, and the diagnostics of the selected cost model, for example the per-plane evidence and sample points of the intensity cost, or the separated cost terms of a combined model.
 
 For a failed run, the same overall shape is retained where practical, while unavailable numeric values are stored as `NaN` or empty structs. The `error` group records whether the failure occurred during preparation or optimization and preserves the MATLAB exception information.
 

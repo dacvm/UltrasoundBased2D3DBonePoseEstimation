@@ -1,6 +1,6 @@
 function tests = testBonePoseCostDispatcher
 %TESTBONEPOSECOSTDISPATCHER Test the stable cost-function entry point.
-% This suite compares the public dispatcher with the version 1 intensity
+% This suite compares the public dispatcher with the versioned intensity
 % implementation. It ensures model selection does not change costs,
 % diagnostics, optional configuration, or established errors.
 %
@@ -47,8 +47,8 @@ testCase.TestData.combinedData = combinedData;
 end
 
 
-function testPublicCostMatchesVersion1Implementation(testCase)
-%TESTPUBLICCOSTMATCHESVERSION1IMPLEMENTATION Check dispatcher equivalence.
+function testPublicCostMatchesVersionedImplementation(testCase)
+%TESTPUBLICCOSTMATCHESVERSIONEDIMPLEMENTATION Check dispatcher equivalence.
 % testCase supplies prepared real inputs and verification methods. This
 % function has no output.
 
@@ -67,7 +67,7 @@ for poseIndex = 1:size(poseVectors, 2)
     poseVector = poseVectors(:, poseIndex);
     [publicCost, publicDetails] = bonePoseCostFunction(poseVector, data, config);
     [versionedCost, versionedDetails] = ...
-        cost_intensityCov_v01(poseVector, data, config);
+        cost_intensityCov_v02(poseVector, data, config);
 
     verifyCostEvaluationEqual(testCase, publicCost, publicDetails, ...
         versionedCost, versionedDetails);
@@ -119,7 +119,7 @@ poseVector = zeros(6, 1);
 
 % Calculate each established term independently before evaluating the blend.
 [intensityCost, intensityDetails] = ...
-    cost_intensityCov_v01(poseVector, data, config);
+    cost_intensityCov_v02(poseVector, data, config);
 [pointCloudCostMm, pointCloudDetails] = ...
     cost_ICPLike_v01(poseVector, data, config);
 [combinedCost, combinedDetails] = ...
@@ -130,7 +130,7 @@ expectedCombinedCost = 0.25 * intensityCost + ...
     0.75 * expectedPointCloudNormalized;
 
 % The saved terms must show the complete calculation without hidden scaling.
-verifyEqual(testCase, combinedDetails.costTerms.intensityCoverageRaw, intensityCost);
+verifyEqual(testCase, combinedDetails.costTerms.intensityRaw, intensityCost);
 verifyEqual(testCase, combinedDetails.costTerms.pointCloud3DRawMm, pointCloudCostMm);
 verifyEqual(testCase, combinedDetails.costTerms.pointCloud3DNormalized, ...
     expectedPointCloudNormalized);
@@ -168,32 +168,20 @@ function testPublicCostPreservesOptionalConfigAndEdgeCases(testCase)
 
 data = testCase.TestData.data;
 
-% Omitting config must continue to use the configuration stored with data.
+% Omitting config must use the configuration stored with data.
 [publicCost, publicDetails] = bonePoseCostFunction(zeros(6, 1), data);
 [versionedCost, versionedDetails] = ...
-    cost_intensityCov_v01(zeros(6, 1), data);
+    cost_intensityCov_v02(zeros(6, 1), data, data.config);
 verifyCostEvaluationEqual(testCase, publicCost, publicDetails, ...
     versionedCost, versionedDetails);
 
-% The no-active-plane fallback must also pass through the dispatcher unchanged.
-noActiveData = data;
-noActiveData.nInitialIntersectionPixels(:) = 0;
-[publicCost, publicDetails] = bonePoseCostFunction(zeros(6, 1), noActiveData);
+% A pose without any visible bone must also pass through the dispatcher unchanged.
+farAwayPose = [500; 500; 500; 0; 0; 0];
+[publicCost, publicDetails] = bonePoseCostFunction(farAwayPose, data);
 [versionedCost, versionedDetails] = ...
-    cost_intensityCov_v01(zeros(6, 1), noActiveData);
+    cost_intensityCov_v02(farAwayPose, data, data.config);
 verifyCostEvaluationEqual(testCase, publicCost, publicDetails, ...
     versionedCost, versionedDetails);
-
-% Keep the existing public error identifier when prepared counts are misaligned.
-invalidData = data;
-invalidData.nInitialIntersectionPixels = ...
-    invalidData.nInitialIntersectionPixels(1:end - 1);
-verifyError(testCase, ...
-    @() bonePoseCostFunction(zeros(6, 1), invalidData), ...
-    'bonePoseCostFunction:InitialCountSizeMismatch');
-verifyError(testCase, ...
-    @() cost_intensityCov_v01(zeros(6, 1), invalidData), ...
-    'bonePoseCostFunction:InitialCountSizeMismatch');
 
 % A runtime configuration must identify the model before geometry is evaluated.
 missingModelConfig = testCase.TestData.config;
@@ -212,7 +200,7 @@ function verifyCostEvaluationEqual(testCase, actualCost, actualDetails, expected
 
 % The dispatcher performs no calculation, so both scalar values should be identical.
 verifyEqual(testCase, actualCost, expectedCost);
-verifyEqual(testCase, actualDetails.costModel, 'intensityCov_v1');
+verifyEqual(testCase, actualDetails.costModel, 'intensityCov_v2');
 
 % Compare the triangulation explicitly so mesh geometry remains easy to diagnose.
 verifyEqual(testCase, actualDetails.boneMeshRefCandidate.ConnectivityList, ...
@@ -220,7 +208,7 @@ verifyEqual(testCase, actualDetails.boneMeshRefCandidate.ConnectivityList, ...
 verifyEqual(testCase, actualDetails.boneMeshRefCandidate.Points, ...
     expectedDetails.boneMeshRefCandidate.Points);
 
-% Compare every V1 diagnostic after removing dispatcher-owned model identity and the mesh.
+% Compare every diagnostic after removing dispatcher-owned model identity and the mesh.
 actualDetails = rmfield(actualDetails, {'boneMeshRefCandidate', 'costModel'});
 expectedDetails = rmfield(expectedDetails, 'boneMeshRefCandidate');
 verifyEqual(testCase, actualDetails, expectedDetails);

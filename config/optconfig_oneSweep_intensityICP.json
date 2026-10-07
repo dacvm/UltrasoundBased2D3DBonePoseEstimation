@@ -18,13 +18,12 @@
     "model": "intensityICP_v1",
     "fixedParameters": {
       "intensityMax": 255,
+      "sampleSpacingMm": 0.1,
       "nearestVertexCount": 20,
       "distanceReferenceMm": 5.0
     },
     "hyperparameters": {
-      "minReferencePixels": [50],
-      "nMinPixels": [100],
-      "lambdaMissing": [1.0],
+      "intensitySmoothingSigmaMm": [1.0],
       "weight": [0.25]
     }
   },

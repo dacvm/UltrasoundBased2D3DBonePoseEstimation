@@ -1,18 +1,18 @@
 function [fixedParameters, hyperparameters] = validate_cost_intensityPIMLOP_v01(fixedParameters, hyperparameters)
 %VALIDATE_COST_INTENSITYPIMLOP_V01 Validate combined intensity and P-IMLOP settings.
-% This validator checks the union of the existing intensity and P-IMLOP
+% This validator checks the union of the smoothed-intensity and P-IMLOP
 % settings plus the blend weight. It reuses
 % the two component validators so their established parameter rules stay in
 % one place while returning a stable field order for experiment planning.
 %
 % Inputs:
-%   fixedParameters - Struct containing intensityMax,
+%   fixedParameters - Struct containing intensityMax, sampleSpacingMm,
 %                     measurementSubsampleFraction,
 %                     positionXStandardDeviationImage,
 %                     positionYStandardDeviationImage, and
 %                     positionZStandardDeviationImage.
-%   hyperparameters - Struct containing minReferencePixels, nMinPixels,
-%                     lambdaMissing, kappa, and weight candidate arrays.
+%   hyperparameters - Struct containing intensitySmoothingSigmaMm, kappa,
+%                     and weight candidate arrays.
 %
 % Outputs:
 %   fixedParameters - Validated fixed settings stored as scalar doubles.
@@ -26,16 +26,16 @@ pimlopFixedNames = { ...
     'positionXStandardDeviationImage', ...
     'positionYStandardDeviationImage', ...
     'positionZStandardDeviationImage'};
-validateFieldNames(fixedParameters, [{'intensityMax'}, pimlopFixedNames], 'cost.fixedParameters');
-validateFieldNames(hyperparameters, {'minReferencePixels', 'nMinPixels', 'lambdaMissing', 'kappa', 'weight'}, 'cost.hyperparameters');
+validateFieldNames(fixedParameters, [{'intensityMax', 'sampleSpacingMm'}, pimlopFixedNames], 'cost.fixedParameters');
+validateFieldNames(hyperparameters, {'intensitySmoothingSigmaMm', 'kappa', 'weight'}, 'cost.hyperparameters');
 
 % Reuse each component validator on the settings that belong to that model.
-intensityFixed = struct('intensityMax', fixedParameters.intensityMax);
+intensityFixed = struct( ...
+    'intensityMax',    fixedParameters.intensityMax, ...
+    'sampleSpacingMm', fixedParameters.sampleSpacingMm);
 intensityHyper = struct( ...
-    'minReferencePixels', hyperparameters.minReferencePixels, ...
-    'nMinPixels', hyperparameters.nMinPixels, ...
-    'lambdaMissing', hyperparameters.lambdaMissing);
-[intensityFixed, intensityHyper] = validate_cost_intensityCov_v01(intensityFixed, intensityHyper);
+    'intensitySmoothingSigmaMm', hyperparameters.intensitySmoothingSigmaMm);
+[intensityFixed, intensityHyper] = validate_cost_intensityCov_v02(intensityFixed, intensityHyper);
 
 pimlopFixed = struct();
 for nameIndex = 1:numel(pimlopFixedNames)
@@ -50,17 +50,16 @@ weight = normalizeWeightCandidates(hyperparameters.weight);
 % Rebuild both groups in the order used for experiment table columns.
 fixedParameters = struct();
 fixedParameters.intensityMax                    = intensityFixed.intensityMax;
+fixedParameters.sampleSpacingMm                 = intensityFixed.sampleSpacingMm;
 fixedParameters.measurementSubsampleFraction    = pimlopFixed.measurementSubsampleFraction;
 fixedParameters.positionXStandardDeviationImage = pimlopFixed.positionXStandardDeviationImage;
 fixedParameters.positionYStandardDeviationImage = pimlopFixed.positionYStandardDeviationImage;
 fixedParameters.positionZStandardDeviationImage = pimlopFixed.positionZStandardDeviationImage;
 
 hyperparameters = struct();
-hyperparameters.minReferencePixels = intensityHyper.minReferencePixels;
-hyperparameters.nMinPixels         = intensityHyper.nMinPixels;
-hyperparameters.lambdaMissing      = intensityHyper.lambdaMissing;
-hyperparameters.kappa              = pimlopHyper.kappa;
-hyperparameters.weight             = weight;
+hyperparameters.intensitySmoothingSigmaMm = intensityHyper.intensitySmoothingSigmaMm;
+hyperparameters.kappa                     = pimlopHyper.kappa;
+hyperparameters.weight                    = weight;
 end
 
 

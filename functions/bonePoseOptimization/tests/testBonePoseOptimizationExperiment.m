@@ -30,8 +30,11 @@ ICPLikeOneSweepConfigPath = fullfile(projectRoot, 'config', ...
     'optconfig_oneSweep_ICPLike.json');
 combinedOneSweepConfigPath = fullfile(projectRoot, 'config', ...
     'optconfig_oneSweep_intensityICP.json');
+combinedSweepConfigPath = fullfile(projectRoot, 'config', ...
+    'optconfig_hyperparamSweep_intensityICP.json');
 testCase.TestData.projectRoot = projectRoot;
 testCase.TestData.sweepConfigPath = sweepConfigPath;
+testCase.TestData.combinedSweepConfigPath = combinedSweepConfigPath;
 testCase.TestData.oneSweepConfigPath = oneSweepConfigPath;
 testCase.TestData.ICPLikeOneSweepConfigPath = ICPLikeOneSweepConfigPath;
 testCase.TestData.combinedOneSweepConfigPath = combinedOneSweepConfigPath;
@@ -53,12 +56,11 @@ function testActiveConfigurationKeepsModelCandidatesAndSeeds(testCase)
 % Validate the experiment schema without depending on the user's current sweep values.
 spec = testCase.TestData.sweepSpec;
 verifyEqual(testCase, spec.schemaVersion, 4);
-verifyEqual(testCase, spec.cost.model, 'intensityCov_v1');
+verifyEqual(testCase, spec.cost.model, 'intensityCov_v2');
 verifyTrue(testCase, all(spec.intersection.normalFacingToleranceDeg > 0));
-verifyTrue(testCase, all(spec.cost.hyperparameters.minReferencePixels > 0));
-verifyTrue(testCase, all(spec.cost.hyperparameters.nMinPixels > 0));
-verifyTrue(testCase, all(spec.cost.hyperparameters.lambdaMissing >= 0));
+verifyTrue(testCase, all(spec.cost.hyperparameters.intensitySmoothingSigmaMm >= 0));
 verifyTrue(testCase, isscalar(spec.cost.fixedParameters.intensityMax));
+verifyTrue(testCase, isscalar(spec.cost.fixedParameters.sampleSpacingMm));
 verifyTrue(testCase, all(spec.experiment.seeds > 0));
 verifyEqual(testCase, numel(unique(spec.experiment.seeds)), ...
     numel(spec.experiment.seeds));
@@ -66,9 +68,9 @@ verifyTrue(testCase, isfolder(fileparts(spec.experiment.outputFolder)));
 
 % The model validator returns the parameter groups in their canonical order.
 verifyEqual(testCase, fieldnames(spec.cost.fixedParameters).', ...
-    {'intensityMax'});
+    {'intensityMax', 'sampleSpacingMm'});
 verifyEqual(testCase, fieldnames(spec.cost.hyperparameters).', ...
-    {'minReferencePixels', 'nMinPixels', 'lambdaMissing'});
+    {'intensitySmoothingSigmaMm'});
 end
 
 
@@ -117,16 +119,17 @@ verifyEqual(testCase, spec.experiment.name, 'oneSweep_intensityICP_v01');
 
 % Fixed settings define the two component models and point-cloud normalization.
 verifyEqual(testCase, fieldnames(spec.cost.fixedParameters).', ...
-    {'intensityMax', 'nearestVertexCount', 'distanceReferenceMm'});
+    {'intensityMax', 'sampleSpacingMm', 'nearestVertexCount', 'distanceReferenceMm'});
 verifyEqual(testCase, spec.cost.fixedParameters.intensityMax, 255);
+verifyEqual(testCase, spec.cost.fixedParameters.sampleSpacingMm, 0.1);
 verifyEqual(testCase, spec.cost.fixedParameters.nearestVertexCount, 20);
 verifyEqual(testCase, spec.cost.fixedParameters.distanceReferenceMm, 5);
 
 % The generic planner must retain the component parameters followed by weight.
 expectedParameterNames = {'normalFacingToleranceDeg', ...
-    'minReferencePixels', 'nMinPixels', 'lambdaMissing', 'weight'};
+    'intensitySmoothingSigmaMm', 'weight'};
 verifyEqual(testCase, fieldnames(spec.cost.hyperparameters).', ...
-    {'minReferencePixels', 'nMinPixels', 'lambdaMissing', 'weight'});
+    {'intensitySmoothingSigmaMm', 'weight'});
 verifyEqual(testCase, plan.parameterNames, expectedParameterNames);
 verifyEqual(testCase, plan.numberOfCombinations, 1);
 verifyEqual(testCase, plan.numberOfSeeds, 1);
@@ -148,20 +151,18 @@ function testPlanBuildsCartesianProductAndRepeatsSeeds(testCase)
 % Use a small mixed-size grid so the expected combination count is easy to verify.
 spec = testCase.TestData.sweepSpec;
 spec.intersection.normalFacingToleranceDeg = [20 30];
-spec.cost.hyperparameters.minReferencePixels = 50;
-spec.cost.hyperparameters.nMinPixels = [50 100];
-spec.cost.hyperparameters.lambdaMissing = [0.5 1.0];
+spec.cost.hyperparameters.intensitySmoothingSigmaMm = [0.5 1 2];
 spec.experiment.seeds = [7 8 9];
 plan = createBonePoseOptimizationExperimentPlan(spec);
 
-% Two-by-one-by-two-by-two candidates produce eight scalar combinations.
-verifyEqual(testCase, plan.numberOfCombinations, 8);
+% Two-by-three candidates produce six scalar combinations.
+verifyEqual(testCase, plan.numberOfCombinations, 6);
 verifyEqual(testCase, plan.numberOfSeeds, 3);
-verifyEqual(testCase, plan.numberOfRuns, 24);
+verifyEqual(testCase, plan.numberOfRuns, 18);
 
 % The explicit intersection setting stays first, followed by validator order.
 expectedParameterNames = {'normalFacingToleranceDeg', ...
-    'minReferencePixels', 'nMinPixels', 'lambdaMissing'};
+    'intensitySmoothingSigmaMm'};
 verifyEqual(testCase, plan.parameterNames, expectedParameterNames);
 verifyEqual(testCase, plan.combinations.Properties.VariableNames, ...
     [{'combinationNumber', 'combinationId', 'costModel'}, ...
@@ -172,14 +173,12 @@ verifyEqual(testCase, plan.runs.Properties.VariableNames, ...
 
 % Preserve the established NDGRID ordering so existing combination IDs keep their meaning.
 expectedCombinationValues = [ ...
-    20, 50,  50, 0.5; ...
-    30, 50,  50, 0.5; ...
-    20, 50, 100, 0.5; ...
-    30, 50, 100, 0.5; ...
-    20, 50,  50, 1.0; ...
-    30, 50,  50, 1.0; ...
-    20, 50, 100, 1.0; ...
-    30, 50, 100, 1.0];
+    20, 0.5; ...
+    30, 0.5; ...
+    20, 1.0; ...
+    30, 1.0; ...
+    20, 2.0; ...
+    30, 2.0];
 verifyEqual(testCase, plan.combinations{:, expectedParameterNames}, ...
     expectedCombinationValues);
 
@@ -188,14 +187,14 @@ for combinationNumber = 1:plan.numberOfCombinations
     selectedRows = plan.runs.combinationNumber == combinationNumber;
     verifyEqual(testCase, plan.runs.seed(selectedRows), [7; 8; 9]);
     verifyEqual(testCase, unique(plan.runs.costModel(selectedRows)), ...
-        "intensityCov_v1");
+        "intensityCov_v2");
 end
 
 % Every plan row stores scalar values that can be copied into a runtime config.
 verifyTrue(testCase, all(cellfun(@isscalar, ...
     num2cell(plan.runs.normalFacingToleranceDeg))));
 verifyTrue(testCase, all(cellfun(@isscalar, ...
-    num2cell(plan.runs.lambdaMissing))));
+    num2cell(plan.runs.intensitySmoothingSigmaMm))));
 end
 
 
@@ -215,11 +214,10 @@ verifyEqual(testCase, plan.numberOfRuns, 1);
 runConfig = createBonePoseOptimizationRunConfig( ...
     spec, plan.combinations(1, :), plan.runs.seed(1));
 verifyTrue(testCase, isscalar(runConfig.intersection.normalFacingToleranceDeg));
-verifyEqual(testCase, runConfig.cost.model, 'intensityCov_v1');
+verifyEqual(testCase, runConfig.cost.model, 'intensityCov_v2');
 verifyTrue(testCase, isscalar(runConfig.cost.parameters.intensityMax));
-verifyTrue(testCase, isscalar(runConfig.cost.parameters.minReferencePixels));
-verifyTrue(testCase, isscalar(runConfig.cost.parameters.nMinPixels));
-verifyTrue(testCase, isscalar(runConfig.cost.parameters.lambdaMissing));
+verifyTrue(testCase, isscalar(runConfig.cost.parameters.sampleSpacingMm));
+verifyTrue(testCase, isscalar(runConfig.cost.parameters.intensitySmoothingSigmaMm));
 verifyFalse(testCase, isfield(runConfig.cost, 'fixedParameters'));
 verifyFalse(testCase, isfield(runConfig.cost, 'hyperparameters'));
 verifyEqual(testCase, runConfig.optimizer.seed, spec.experiment.seeds(1));
@@ -247,28 +245,29 @@ function testDuplicateCandidatesAreRejected(testCase)
 %TESTDUPLICATECANDIDATESAREREJECTED Avoid duplicate hyperparameter combinations.
 % testCase supplies the checked-in sweep JSON path. This function has no output.
 
-% Duplicate lambda values would otherwise create two identical optimization groups.
+% Duplicate sigma values would otherwise create two identical optimization groups.
 rawConfig = jsondecode(fileread(testCase.TestData.sweepConfigPath));
-rawConfig.cost.hyperparameters.lambdaMissing = [1 1];
+rawConfig.cost.hyperparameters.intensitySmoothingSigmaMm = [1 1];
 [temporaryConfigPath, temporaryConfigCleanup] = writeTemporaryJson(rawConfig); %#ok<ASGLU>
 
 % Reject the duplicate while reporting that the candidate list is the problem.
 verifyError(testCase, ...
     @() createBonePoseOptimizationExperimentConfig(temporaryConfigPath), ...
-    'validate_cost_intensityCov_v01:DuplicateCandidate');
+    'validate_cost_intensityCov_v02:DuplicateCandidate');
 clear temporaryConfigCleanup;
 end
 
 
 function testValidatorSetsOrderIndependentlyOfJsonFieldOrder(testCase)
 %TESTVALIDATORSETSORDERINDEPENDENTLYOFJSONFIELDORDER Check stable columns.
-% testCase supplies the checked-in sweep JSON path. This function has no output.
+% testCase supplies the checked-in combined sweep JSON path, which has more
+% than one hyperparameter to reorder. This function has no output.
 
 % Write equivalent JSON settings with the cost fields in a different order.
-rawConfig = jsondecode(fileread(testCase.TestData.sweepConfigPath));
+rawConfig = jsondecode(fileread(testCase.TestData.combinedSweepConfigPath));
 rawConfig.cost.hyperparameters = orderfields( ...
     rawConfig.cost.hyperparameters, ...
-    {'lambdaMissing', 'nMinPixels', 'minReferencePixels'});
+    {'weight', 'intensitySmoothingSigmaMm'});
 [temporaryConfigPath, temporaryConfigCleanup] = ...
     writeTemporaryJson(rawConfig); %#ok<ASGLU>
 
@@ -276,10 +275,9 @@ rawConfig.cost.hyperparameters = orderfields( ...
 spec = createBonePoseOptimizationExperimentConfig(temporaryConfigPath);
 plan = createBonePoseOptimizationExperimentPlan(spec);
 verifyEqual(testCase, fieldnames(spec.cost.hyperparameters).', ...
-    {'minReferencePixels', 'nMinPixels', 'lambdaMissing'});
+    {'intensitySmoothingSigmaMm', 'weight'});
 verifyEqual(testCase, plan.parameterNames, ...
-    {'normalFacingToleranceDeg', 'minReferencePixels', ...
-     'nMinPixels', 'lambdaMissing'});
+    {'normalFacingToleranceDeg', 'intensitySmoothingSigmaMm', 'weight'});
 clear temporaryConfigCleanup;
 end
 
@@ -355,7 +353,7 @@ verifyError(testCase, ...
     'createBonePoseOptimizationRunConfig:CostModelMismatch');
 
 % Report an omitted parameter column directly instead of failing inside a cost evaluation.
-missingColumnRow = removevars(plan.combinations(1, :), 'lambdaMissing');
+missingColumnRow = removevars(plan.combinations(1, :), 'intensitySmoothingSigmaMm');
 verifyError(testCase, ...
     @() createBonePoseOptimizationRunConfig(spec, missingColumnRow), ...
     'createBonePoseOptimizationRunConfig:MissingParameterColumn');
@@ -387,17 +385,17 @@ end
 
 
 function testCostParameterSpellingIsValidated(testCase)
-%TESTCOSTPARAMETERSPELLINGISVALIDATED Check missing and unexpected V1 fields.
+%TESTCOSTPARAMETERSPELLINGISVALIDATED Check missing and unexpected model fields.
 % testCase supplies the active sweep JSON and MATLAB verification methods.
 
 rawConfig = jsondecode(fileread(testCase.TestData.sweepConfigPath));
-rawConfig.cost.hyperparameters = rmfield( ...
-    rawConfig.cost.hyperparameters, 'nMinPixels');
+rawConfig.cost.fixedParameters = rmfield( ...
+    rawConfig.cost.fixedParameters, 'sampleSpacingMm');
 [temporaryConfigPath, temporaryConfigCleanup] = ...
     writeTemporaryJson(rawConfig); %#ok<ASGLU>
 verifyError(testCase, ...
     @() createBonePoseOptimizationExperimentConfig(temporaryConfigPath), ...
-    'validate_cost_intensityCov_v01:MissingParameter');
+    'validate_cost_intensityCov_v02:MissingParameter');
 clear temporaryConfigCleanup;
 
 rawConfig = jsondecode(fileread(testCase.TestData.sweepConfigPath));
@@ -406,7 +404,7 @@ rawConfig.cost.hyperparameters.misspelledParameter = 1;
     writeTemporaryJson(rawConfig); %#ok<ASGLU>
 verifyError(testCase, ...
     @() createBonePoseOptimizationExperimentConfig(temporaryConfigPath), ...
-    'validate_cost_intensityCov_v01:UnexpectedParameter');
+    'validate_cost_intensityCov_v02:UnexpectedParameter');
 clear temporaryConfigCleanup;
 end
 
@@ -425,12 +423,8 @@ spec.experiment.outputFolder = temporaryOutputRoot;
 spec.experiment.seeds = [31 32];
 spec.intersection.normalFacingToleranceDeg = ...
     spec.intersection.normalFacingToleranceDeg(1);
-spec.cost.hyperparameters.minReferencePixels = ...
-    spec.cost.hyperparameters.minReferencePixels(1);
-spec.cost.hyperparameters.nMinPixels = ...
-    spec.cost.hyperparameters.nMinPixels(1);
-spec.cost.hyperparameters.lambdaMissing = ...
-    spec.cost.hyperparameters.lambdaMissing(1);
+spec.cost.hyperparameters.intensitySmoothingSigmaMm = ...
+    spec.cost.hyperparameters.intensitySmoothingSigmaMm(1);
 spec.input.validSnapshotsMatFile = fullfile(temporaryOutputRoot, 'missing.mat');
 
 % One preparation failure should create one failed result for each planned seed.
@@ -438,7 +432,7 @@ experimentResult = runBonePoseOptimizationExperiment(spec);
 verifyEqual(testCase, experimentResult.summaryTable.status, ...
     ["failed"; "failed"]);
 verifyEqual(testCase, experimentResult.summaryTable.costModel, ...
-    repmat("intensityCov_v1", 2, 1));
+    repmat("intensityCov_v2", 2, 1));
 verifyTrue(testCase, all(isfile(experimentResult.summaryTable.resultFilePath)));
 verifyTrue(testCase, isfile(fullfile( ...
     experimentResult.experimentFolder, 'summary.csv')));
@@ -454,9 +448,9 @@ verifyEqual(testCase, ...
 % Failed runs still record the exact scalar cost configuration that was attempted.
 savedRun = load(char(experimentResult.summaryTable.resultFilePath(1)), 'runResult');
 verifyEqual(testCase, savedRun.runResult.configuration.cost.model, ...
-    'intensityCov_v1');
+    'intensityCov_v2');
 verifyTrue(testCase, isscalar( ...
-    savedRun.runResult.configuration.cost.parameters.lambdaMissing));
+    savedRun.runResult.configuration.cost.parameters.intensitySmoothingSigmaMm));
 
 % A second invocation creates a separate experiment instead of resuming the first.
 secondResult = runBonePoseOptimizationExperiment(spec);

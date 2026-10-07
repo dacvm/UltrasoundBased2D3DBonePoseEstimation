@@ -15,14 +15,13 @@
     "normalFacingToleranceDeg": 30
   },
   "cost": {
-    "model": "intensityCov_v1",
+    "model": "intensityCov_v2",
     "fixedParameters": {
-      "intensityMax": 255
+      "intensityMax": 255,
+      "sampleSpacingMm": 0.1
     },
     "hyperparameters": {
-      "minReferencePixels": [50],
-      "nMinPixels": [100],
-      "lambdaMissing": [1.0]
+      "intensitySmoothingSigmaMm": [1.0]
     }
   },
   "logging": {
@@ -40,8 +39,8 @@
     "parforWorkers": 6
   },
   "experiment": {
-    "name": "oneSweep_intensityCov_v01",
+    "name": "oneSweep_intensityCov_v02",
     "seeds": [1001],
-    "outputFolder": "output/bonePoseOptimization/oneSweeps/intensityCov_v01"
+    "outputFolder": "output/bonePoseOptimization/oneSweeps/intensityCov_v02"
   }
 }

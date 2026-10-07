@@ -39,12 +39,6 @@ end
 
 % Keep the supported models together so a new developer can find the extension point.
 switch modelName
-    case 'intensityCov_v1'
-        definition.modelName                    = 'intensityCov_v1';
-        definition.evaluateFcn                  = @cost_intensityCov_v01;
-        definition.validateExperimentConfigFcn  = @validate_cost_intensityCov_v01;
-        definition.requiresBoneSurface          = false;
-
     case 'intensityCov_v2'
         definition.modelName                    = 'intensityCov_v2';
         definition.evaluateFcn                  = @cost_intensityCov_v02;

@@ -15,13 +15,14 @@
     "normalFacingToleranceDeg": 30
   },
   "cost": {
-    "model": "intensityCov_v2",
+    "model": "intensityCov_v1",
     "fixedParameters": {
-      "intensityMax": 255,
-      "sampleSpacingMm": 0.1
+      "intensityMax": 255
     },
     "hyperparameters": {
-      "intensitySmoothingSigmaMm": [1.0]
+      "minReferencePixels": [50, 100, 150],
+      "nMinPixels": [100, 200, 300],
+      "lambdaMissing": [1.0, 1.5, 2.0]
     }
   },
   "logging": {
@@ -33,14 +34,14 @@
     "rotationBoundDeg": 10.0,
     "translationSigmaMm": 3.0,
     "rotationSigmaDeg": 3.0,
-    "populationSize": 4,
-    "maxFunctionEvaluations": 10,
+    "populationSize": 32,
+    "maxFunctionEvaluations": 30,
     "useParfor": true,
     "parforWorkers": 6
   },
   "experiment": {
-    "name": "oneSweep_intensityCov_v02",
-    "seeds": [1001],
-    "outputFolder": "output/bonePoseOptimization/oneSweeps/intensityCov_v02"
+    "name": "intensityCov_v01",
+    "seeds": [1001, 1002, 1003, 1004, 1005],
+    "outputFolder": "output/bonePoseOptimization/experiments"
   }
 }

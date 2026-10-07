@@ -18,15 +18,14 @@
     "model": "intensityPIMLOP_v1",
     "fixedParameters": {
       "intensityMax": 255,
+      "sampleSpacingMm": 0.1,
       "measurementSubsampleFraction": 0.5,
       "positionXStandardDeviationImage": 1.0,
       "positionYStandardDeviationImage": 1.0,
       "positionZStandardDeviationImage": 1.5
     },
     "hyperparameters": {
-      "minReferencePixels": [50],
-      "nMinPixels": [100],
-      "lambdaMissing": [1.0],
+      "intensitySmoothingSigmaMm": [1.0],
       "kappa": [10, 50],
       "weight": [0.25, 0.5, 0.75]
     }

@@ -210,7 +210,7 @@ end
 
 
 function testIntensityCostDoesNotDependOnPreparedSurfaces(testCase)
-%TESTINTENSITYCOSTDOESNOTDEPENDONPREPAREDSURFACES Protect the v1 objective.
+%TESTINTENSITYCOSTDOESNOTDEPENDONPREPAREDSURFACES Protect the image-only objective.
 % testCase supplies the configured Stage 6 data and its initial cost. This
 % function has no output.
 
@@ -226,12 +226,10 @@ verifyEmpty(testCase, dataWithoutSurface.boneSurfaceMeasurements);
 verifyEmpty(testCase, fieldnames(dataWithoutSurface.boneSurfaceMetadata));
 verifyEqual(testCase, costWithoutSurface, testCase.TestData.initialCost, ...
     'AbsTol', 1e-12);
-verifyEqual(testCase, detailsWithoutSurface.intensityCoverageCost, ...
-    testCase.TestData.initialDetails.intensityCoverageCost, 'AbsTol', 1e-12);
-verifyEqual(testCase, detailsWithoutSurface.missingPenaltyCost, ...
-    testCase.TestData.initialDetails.missingPenaltyCost, 'AbsTol', 1e-12);
-verifyEqual(testCase, detailsWithoutSurface.activePlaneMask, ...
-    testCase.TestData.initialDetails.activePlaneMask);
+verifyEqual(testCase, detailsWithoutSurface.perPlaneEvidence, ...
+    testCase.TestData.initialDetails.perPlaneEvidence, 'AbsTol', 1e-12);
+verifyEqual(testCase, detailsWithoutSurface.perPlaneSampleCount, ...
+    testCase.TestData.initialDetails.perPlaneSampleCount);
 end
 
 
@@ -320,8 +318,11 @@ function testExistingCostIgnoresPIMLOPModel(testCase)
 % no output.
 
 % Removing the P-IMLOP field must not change the configured cost at all,
-% which shows that the existing cost models do not read it.
-dataWithoutPIMLOP = rmfield(testCase.TestData.data, 'extra');
+% which shows that the intensity cost does not read it. Only the P-IMLOP
+% part is removed, because the intensity cost needs its own smoothed images
+% from data.extra.
+dataWithoutPIMLOP = testCase.TestData.data;
+dataWithoutPIMLOP.extra = rmfield(dataWithoutPIMLOP.extra, 'pimlop');
 [costWithoutPIMLOP, detailsWithoutPIMLOP] = bonePoseCostFunction( ...
     zeros(6, 1), dataWithoutPIMLOP, testCase.TestData.config);
 verifyEqual(testCase, costWithoutPIMLOP, testCase.TestData.initialCost);
@@ -363,28 +364,25 @@ verifyEqual(testCase, groundTruthBonePose.boneMeshRef.Points, ...
 end
 
 
-function testInitialPoseProducesUsableCoverage(testCase)
-%TESTINITIALPOSEPRODUCESUSABLECOVERAGE Check preparation and initial scoring.
-% testCase supplies prepared counts and cost details. This function has no output.
+function testInitialPoseProducesUsableIntensityCost(testCase)
+%TESTINITIALPOSEPRODUCESUSABLEINTENSITYCOST Check preparation and initial scoring.
+% testCase supplies the prepared data and the start-pose cost details. This
+% function has no output.
 
-data = testCase.TestData.data;
+data    = testCase.TestData.data;
 details = testCase.TestData.initialDetails;
-minimumPixels = ...
-    testCase.TestData.config.cost.parameters.minReferencePixels;
 
-% Preparation must create one finite nonnegative reference count per plane.
-verifyEqual(testCase, numel(data.nInitialIntersectionPixels), ...
+% Preparation must store one blurred image per plane for the intensity cost.
+verifyEqual(testCase, numel(data.extra.intensityCov.smoothedImages), ...
     numel(data.imagePlanesRef));
-verifyTrue(testCase, all(isfinite(data.nInitialIntersectionPixels)));
-verifyTrue(testCase, all(data.nInitialIntersectionPixels >= 0));
 
-% The cost must activate exactly the planes that meet its configured threshold.
-expectedActivePlaneMask = ...
-    data.nInitialIntersectionPixels >= minimumPixels;
-verifyEqual(testCase, details.activePlaneMask, expectedActivePlaneMask);
-verifyTrue(testCase, any(details.activePlaneMask));
-verifyTrue(testCase, isfinite(testCase.TestData.initialCost));
-verifyEqual(testCase, details.status, 'intensity_coverage_cost_computed');
+% The coarse start pose must already show bone in some images; otherwise
+% the cost would have no evidence to start from.
+verifyEqual(testCase, numel(details.perPlaneEvidence), numel(data.imagePlanesRef));
+verifyTrue(testCase, any(details.perPlaneSampleCount > 0));
+verifyGreaterThanOrEqual(testCase, testCase.TestData.initialCost, 0);
+verifyLessThanOrEqual(testCase, testCase.TestData.initialCost, 1);
+verifyEqual(testCase, details.status, 'smoothed_intensity_cost_computed');
 end
 
 

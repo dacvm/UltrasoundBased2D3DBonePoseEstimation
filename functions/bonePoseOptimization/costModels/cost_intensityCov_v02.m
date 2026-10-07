@@ -6,20 +6,21 @@ function [cost, details] = cost_intensityCov_v02(poseVector, data, config)
 % It then reads the smoothed image along those lines. The brighter the image
 % under the predicted bone lines, the lower (better) the cost.
 %
-% Why version 2:
-%   Version 1 had three problems that this version removes.
-%   1. It compared each plane's intersection with the intersection at the
-%      start pose. The start pose is only a rough guess, so the best pose of
-%      the cost depended on where the search started. This version uses no
-%      start-pose reference at all.
-%   2. It read whole pixels along a rasterized line, so the cost jumped in
-%      small steps as the line crossed pixel borders, and it added a step
-%      penalty when a plane had too few pixels. This version reads the image
-%      at evenly spaced points (every sampleSpacingMm) along the continuous
-%      intersection segments, so the cost changes smoothly with the pose.
-%   3. It read the raw image. The bone echo is only about 1 mm thick, so the
-%      cost was flat as soon as the line was off the echo. This version
-%      reads images blurred by intensitySmoothingSigmaMm (done once in
+% Design choices:
+%   1. No start-pose reference. The start pose is only a rough guess. If
+%      the cost compared each candidate with it, the best pose of the cost
+%      would depend on where the search started. Every plane is therefore
+%      judged only by what the image shows at the candidate pose.
+%   2. Continuous sampling. Reading whole pixels along a rasterized line
+%      makes the cost jump in small steps as the line crosses pixel borders.
+%      The image is instead read at evenly spaced points (every
+%      sampleSpacingMm) along the continuous intersection segments, with
+%      interpolation between pixels, so the cost changes smoothly with the
+%      pose.
+%   3. Smoothed images. The bone echo is only about 1 mm thick. On the raw
+%      image the cost would be flat as soon as the line is off the echo, and
+%      the optimizer would get no hint where to move. The images are blurred
+%      by intensitySmoothingSigmaMm (done once in
 %      prepareBonePoseOptimizationInputs), so a line near the echo still
 %      reads part of it and the cost points toward the bone.
 %

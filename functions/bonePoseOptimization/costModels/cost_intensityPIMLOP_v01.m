@@ -1,7 +1,7 @@
 function [cost, details] = cost_intensityPIMLOP_v01(poseVector, data, config)
 %COST_INTENSITYPIMLOP_V01 Combine image intensity and P-IMLOP agreement.
-% This model evaluates the existing intensity-coverage and P-IMLOP costs at
-% the same candidate pose. The P-IMLOP total grows with the number of
+% This model evaluates the smoothed-intensity cost (intensityCov_v2) and the
+% P-IMLOP cost at the same candidate pose. The P-IMLOP total grows with the number of
 % measurements, so it is turned into a mean match error per measurement.
 % This keeps its size independent of how many surface points were
 % segmented, so it can be blended with the image term using one configured
@@ -12,7 +12,8 @@ function [cost, details] = cost_intensityPIMLOP_v01(poseVector, data, config)
 %   poseVector - Six-value perturbation around data.T_CT_ref_initial.
 %   data       - Prepared estimation data containing image planes, the CT
 %                mesh, initial transforms, aligned 3D surface points with
-%                2D normals, and the P-IMLOP model data.extra.pimlop.PsiCT.
+%                2D normals, the P-IMLOP model data.extra.pimlop.PsiCT, and
+%                the smoothed images data.extra.intensityCov.smoothedImages.
 %   config     - Scalar runtime configuration containing all component
 %                parameters and weight.
 %
@@ -27,7 +28,7 @@ function [cost, details] = cost_intensityPIMLOP_v01(poseVector, data, config)
 % candidate bone pose under identical experiment conditions. The P-IMLOP
 % details are always requested because they report the measurement count
 % needed for the mean match error below.
-[intensityCoverageCost, intensityCoverageDetails] = cost_intensityCov_v01(poseVector, data, config);
+[intensityCost, intensityDetails]      = cost_intensityCov_v02(poseVector, data, config);
 [pimlopTotalMatchError, pimlopDetails] = cost_PIMLOP_v01(poseVector, data, config);
 
 %% NORMALIZE AND COMBINE THE COSTS
@@ -48,33 +49,33 @@ validateattributes(weight, {'numeric'}, ...
 pimlopMeanMatchError = pimlopTotalMatchError / pimlopDetails.numberOfMeasurements;
 
 % Weight multiplies the first cost, matching f3 = weight*f1 + (1-weight)*f2.
-intensityCoverageWeighted = weight * intensityCoverageCost;
-pimlopWeighted            = (1 - weight) * pimlopMeanMatchError;
-cost                      = intensityCoverageWeighted + pimlopWeighted;
+intensityWeighted = weight * intensityCost;
+pimlopWeighted    = (1 - weight) * pimlopMeanMatchError;
+cost              = intensityWeighted + pimlopWeighted;
 
 %% PACKAGE READABLE DIAGNOSTICS
 
 % Keep the common geometry at the top level because evaluation code expects
 % to find the final candidate mesh without knowing the selected cost model.
-details.T_CT_ref_candidate   = intensityCoverageDetails.T_CT_ref_candidate;
-details.T_bone_ref_candidate = intensityCoverageDetails.T_bone_ref_candidate;
-details.boneMeshRefCandidate = intensityCoverageDetails.boneMeshRefCandidate;
-details.poseEvaluation       = intensityCoverageDetails.poseEvaluation;
+details.T_CT_ref_candidate   = intensityDetails.T_CT_ref_candidate;
+details.T_bone_ref_candidate = intensityDetails.T_bone_ref_candidate;
+details.boneMeshRefCandidate = intensityDetails.boneMeshRefCandidate;
+details.poseEvaluation       = intensityDetails.poseEvaluation;
 
 % Store the calculation in the same order as the equation so users can
 % reconstruct the returned scalar directly from the saved result.
-details.costTerms.intensityCoverageRaw       = intensityCoverageCost;
+details.costTerms.intensityRaw               = intensityCost;
 details.costTerms.pimlopTotalMatchError      = pimlopTotalMatchError;
 details.costTerms.pimlopNumberOfMeasurements = pimlopDetails.numberOfMeasurements;
 details.costTerms.pimlopMeanMatchError       = pimlopMeanMatchError;
-details.costTerms.intensityCoverageWeighted  = intensityCoverageWeighted;
+details.costTerms.intensityWeighted          = intensityWeighted;
 details.costTerms.pimlopWeighted             = pimlopWeighted;
 details.costTerms.combined                   = cost;
 
 % Preserve the exact scalar settings and the full component diagnostics for
 % later research inspection without changing either existing cost model.
-details.costSettings                       = config.cost.parameters;
-details.componentDetails.intensityCoverage = intensityCoverageDetails;
-details.componentDetails.pimlop            = pimlopDetails;
+details.costSettings               = config.cost.parameters;
+details.componentDetails.intensity = intensityDetails;
+details.componentDetails.pimlop    = pimlopDetails;
 details.status = 'intensity_pimlop_combined_cost_computed';
 end

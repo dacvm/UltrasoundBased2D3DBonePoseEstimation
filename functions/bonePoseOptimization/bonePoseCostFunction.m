@@ -8,7 +8,8 @@ function [cost, details] = bonePoseCostFunction(poseVector, data, config)
 % Inputs:
 %   poseVector - Six-value perturbation around data.T_CT_ref_initial.
 %   data       - Prepared estimation data containing the CT mesh, tracked
-%                ultrasound planes, initial transforms, and reference counts.
+%                ultrasound planes, initial transforms, and model-specific
+%                inputs under data.extra.
 %   config     - Optional scalar runtime configuration. When omitted or
 %                empty, the versioned implementation uses data.config.
 %

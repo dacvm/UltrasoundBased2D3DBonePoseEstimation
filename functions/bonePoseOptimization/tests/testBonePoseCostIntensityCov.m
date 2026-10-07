@@ -1,5 +1,5 @@
-function tests = testBonePoseCostIntensityCovV2
-%TESTBONEPOSECOSTINTENSITYCOVV2 Test the smoothed-intensity cost model.
+function tests = testBonePoseCostIntensityCov
+%TESTBONEPOSECOSTINTENSITYCOV Test the smoothed-intensity cost model.
 % This suite checks that intensityCov_v2 is registered and validated, that
 % the image blur behaves like a Gaussian in mm, that preparation stores the
 % blurred images, and that the cost reads them at the right image positions.
@@ -22,7 +22,7 @@ projectRoot  = fileparts(fileparts(fileparts(fileparts(testFilePath))));
 addpath(genpath(fullfile(projectRoot, 'functions')));
 
 % Use the same selectable configuration a user would choose for this model.
-configPath     = fullfile(projectRoot, 'config', 'optconfig_oneSweep_intensityCovV2.json');
+configPath     = fullfile(projectRoot, 'config', 'optconfig_oneSweep_intensityCov.json');
 experimentSpec = createBonePoseOptimizationExperimentConfig(configPath);
 experimentPlan = createBonePoseOptimizationExperimentPlan(experimentSpec);
 config         = createBonePoseOptimizationRunConfig( ...
@@ -74,10 +74,10 @@ verifyError(testCase, @() validate_cost_intensityCov_v02( ...
     rmfield(validFixed, 'sampleSpacingMm'), validHyper), ...
     'validate_cost_intensityCov_v02:MissingParameter');
 
-% A version 1 setting must not be accepted silently: it has no effect here.
-version1Hyper = validHyper;
-version1Hyper.lambdaMissing = 1;
-verifyError(testCase, @() validate_cost_intensityCov_v02(validFixed, version1Hyper), ...
+% A setting this model does not have must not be accepted silently.
+unknownHyper = validHyper;
+unknownHyper.misspelledParameter = 1;
+verifyError(testCase, @() validate_cost_intensityCov_v02(validFixed, unknownHyper), ...
     'validate_cost_intensityCov_v02:UnexpectedParameter');
 
 negativeSigma = struct('intensitySmoothingSigmaMm', -0.5);

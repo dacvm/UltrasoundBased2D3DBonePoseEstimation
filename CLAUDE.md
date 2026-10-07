@@ -6,7 +6,7 @@ MATLAB project: estimate 3D bone pose by registering CT bone meshes to tracked 2
 - Write everything in MATLAB, including one-off helpers in `tools/` and `devs/`. No Python.
 - Never modify `functions/external/` (third-party code, used as-is).
 - Never modify or delete files in `data/` (source recordings, calibrations, meshes).
-- Never use `functions/bonePoseOptimization/legacy/` in active code.
+- Never use any `legacy/` folder (e.g. `functions/bonePoseOptimization/costModels/legacy/`, `config/legacy/`) in active code. They hold retired code and configs kept only for reference.
 - Write generated results only to `output/`; don't edit them by hand.
 
 ## Setup and verification
