@@ -21,6 +21,7 @@
   - [5.3. `intensityICP_v1`: combined intensity and 3D distance](#53-intensityicp_v1-combined-intensity-and-3d-distance)
   - [5.4. `PIMLOP_v1`: most-likely oriented point match](#54-pimlop_v1-most-likely-oriented-point-match)
   - [5.5. `intensityPIMLOP_v1`: combined intensity and P-IMLOP](#55-intensitypimlop_v1-combined-intensity-and-p-imlop)
+  - [5.6. `intensityCov_v2`: smoothed intensity along the predicted bone](#56-intensitycov_v2-smoothed-intensity-along-the-predicted-bone)
 - [6. Running the project](#6-running-the-project)
   - [6.1. Requirements](#61-requirements)
   - [6.2. Configure the input paths and settings](#62-configure-the-input-paths-and-settings)
@@ -159,7 +160,7 @@ The `experiment.seeds` array controls repeated stochastic runs. A one-sweep conf
 
 ## 5. Supported cost functions
 
-This is an ongoing list. The current framework registers the following five versioned cost models; more models can be added through the extension process described in [Processing workflow](#8-processing-workflow). Every model returns one scalar objective to CMA-ES, and a lower value is always better.
+This is an ongoing list. The current framework registers the following six versioned cost models; more models can be added through the extension process described in [Processing workflow](#8-processing-workflow). Every model returns one scalar objective to CMA-ES, and a lower value is always better.
 
 In the tables below, a **fixed parameter** has one value for the complete experiment. A **hyperparameter** is an array of candidate values; the experiment planner includes it in the Cartesian product used to create parameter combinations.
 
@@ -266,6 +267,36 @@ The same measurements are used for every candidate pose, so averaging divides by
 
 This model requires aligned 3D bone-surface measurements with 2D normals from `boneSurfaceMatFile`. Every evaluation runs the P-IMLOP search, so it is at least as slow as `PIMLOP_v1`.
 
+### 5.6. `intensityCov_v2`: smoothed intensity along the predicted bone
+
+Like `intensityCov_v1`, this model cuts the candidate CT mesh with every ultrasound plane and keeps the probe-facing parts of the cut, which are the surfaces ultrasound should show as a bright echo. It then reads the image along those lines:
+
+```text
+evidence_i = mean smoothed intensity at points every sampleSpacingMm along
+             plane i's probe-facing intersection segments, / intensityMax
+             (0 when the bone does not cross plane i)
+
+cost = 1 - mean over all planes of evidence_i
+```
+
+The cost lies in `[0, 1]`, and lower is better. It replaces three parts of version 1:
+
+- **No start-pose reference.** Version 1 compared every intersection with the intersection at the coarse start pose (coverage, active planes, missing-plane penalty), so its best pose depended on where the search started. Version 2 has no such reference, and every plane counts equally.
+- **Continuous sampling.** The image is read with bilinear interpolation at evenly spaced points along the intersection segments, instead of at whole rasterized pixels. The cost therefore changes smoothly with the pose instead of in pixel-sized steps.
+- **Smoothed images.** The bone echo is only about 1 mm thick, so a line that is slightly off it read only background in version 1, and the cost was flat. `prepareBonePoseOptimizationInputs` now blurs every image once with a Gaussian of standard deviation `intensitySmoothingSigmaMm` and stores the result in `data.extra.intensityCov.smoothedImages`. A line near the echo then still reads part of it, so the cost points toward the bone. A larger sigma reaches further but gives a shallower minimum.
+
+On the knee-phantom data, 1-D sweeps of ±8 mm and ±8 degrees around the start pose had four to eight local minima per direction with version 1. With a 0.5–1 mm blur, four of the six directions had a single minimum. Rotation about the ref y axis stayed poorly defined because it barely changes the intersection lines.
+
+Without the start-pose reference, a pose whose intersection is short but lies on a very bright spot can score well again. This model is meant to be combined with a cost that uses the segmented bone surface, such as P-IMLOP, which rules such poses out.
+
+| Parameter | Type | Meaning |
+| --- | --- | --- |
+| `intensityMax` | Fixed | Positive intensity that counts as full evidence, normally `255` for 8-bit images. |
+| `sampleSpacingMm` | Fixed | Positive largest distance in millimetres between neighbouring sample points along an intersection segment. |
+| `intensitySmoothingSigmaMm` | Hyperparameter | Nonnegative Gaussian standard deviation in millimetres used to blur the images. `0` reads the raw images. |
+
+This model does not require `boneSurfaceMatFile`.
+
 ## 6. Running the project
 
 ### 6.1. Requirements
@@ -288,6 +319,8 @@ Edit one of the following files:
 - `config/optconfig_hyperparamSweep_PIMLOP.json` for an unattended P-IMLOP sweep over `kappa` after selecting it in the hyperparameter-sweep script.
 - `config/optconfig_oneSweep_intensityPIMLOP.json` for a combined intensity and P-IMLOP interactive run after selecting it in the one-sweep script.
 - `config/optconfig_hyperparamSweep_intensityPIMLOP.json` for an unattended combined sweep over `kappa` and `weight` after selecting it in the hyperparameter-sweep script.
+- `config/optconfig_oneSweep_intensityCovV2.json` for a smoothed-intensity interactive run after selecting it in the one-sweep script.
+- `config/optconfig_hyperparamSweep_intensityCovV2.json` for an unattended smoothed-intensity sweep over `intensitySmoothingSigmaMm` after selecting it in the hyperparameter-sweep script.
 
 The file under `config/legacy/` records the former schemaVersion02 layout for historical
 reference only. Active readers do not execute schema-less legacy configs.

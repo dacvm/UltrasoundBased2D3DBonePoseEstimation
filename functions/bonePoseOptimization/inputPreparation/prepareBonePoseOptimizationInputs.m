@@ -48,7 +48,10 @@ function [data, validationData] = prepareBonePoseOptimizationInputs(config)
 %   data           - Estimation-only data containing the CT mesh, ultrasound
 %                    measurements, initial transforms, and initial pixel counts.
 %                    data.extra.pimlop.PsiCT holds the CT-frame P-IMLOP model
-%                    with its PD-tree, used by cost_PIMLOP_v01.
+%                    with its PD-tree, used by cost_PIMLOP_v01. When the
+%                    config sets intensitySmoothingSigmaMm,
+%                    data.extra.intensityCov.smoothedImages holds one
+%                    blurred image per plane, used by cost_intensityCov_v02.
 %   validationData - Saved ground-truth intersections, bone pose, and source
 %                    metadata. This output must not be passed to the optimizer.
 
@@ -346,6 +349,17 @@ data.config                     = config;
 % keeps the shared top-level fields the same for all cost models, and makes
 % it clear which pre-computed pieces belong to which model.
 data.extra.pimlop.PsiCT         = PsiCT;
+
+% Smoothed-intensity cost models (intensityCov_v2) read the images through
+% a Gaussian blur so they still get a hint about the bone when the predicted
+% line is slightly off the echo. Blurring every image is slow, so it is done
+% here once. Its width is a hyperparameter, and this function runs once per
+% hyperparameter combination, so each combination gets its own blur. Other
+% cost models do not have this setting and skip the work.
+if isfield(config.cost.parameters, 'intensitySmoothingSigmaMm')
+    data.extra.intensityCov.smoothedImages = smoothUltrasoundImages( ...
+        imagePlanesRef, config.cost.parameters.intensitySmoothingSigmaMm);
+end
 
 % Everything about the true answer goes into a separate struct. Only the
 % evaluation code after the optimization receives it, so the estimation can
