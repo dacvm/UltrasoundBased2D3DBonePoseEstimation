@@ -116,117 +116,171 @@ The project `functions` tree and this tool's `helpers` directory are added to th
 
 ## Output MAT-file structure
 
-**Export Selected** writes a MATLAB v7.3 file after at least one record is approved. Its save dialog initially opens in the configured `output.ultrasoundIntersectionOutputPath`. The in-memory arrays remain aligned by group and local index:
+**Export Selected** writes a MATLAB v7.3 file once at least one record is approved. The save dialog opens in `output.ultrasoundIntersectionOutputPath`. The file contains two variables:
 
-```text
-snapshotPlanes(1..G)                 intersections(1..G)
-+-- name, bone, path                 +-- name, bone, path
-+-- data(1..N)                       +-- data(1..N)
-```
+| Variable | What it holds |
+| --- | --- |
+| `validSnapshots` | The approved ultrasound records, grouped by source folder. Each record has its image plane (`plane`) and its bone intersection (`intersection`). See [section 1](#1-validsnapshots). |
+| `validBonePoses` | The CT bone meshes and their poses in the `ref` frame. See [section 2](#2-validboneposes). |
 
-The exported file contains `validSnapshots` and `validBonePoses`:
-
-```text
-validSnapshots(1..G)
-+-- name, bone, path
-+-- data(1..N_selected)
-    +-- sourceIndex
-    +-- plane
-    +-- intersection
-
-validBonePoses
-+-- processingMode
-+-- poseHandlingMode
-+-- ctPostProcessedMatFile
-+-- bonePoses(1..B)
-    +-- bone
-    +-- meshCT
-    +-- T_bone_CT
-    +-- data(1..P)
-    +-- baselineData       # perDataRow export only
-```
-
-Every source group is preserved even if its exported `data` is empty. Static pose `data` has one record per bone. A `perDataRow` export filters pose `data` to the approved source groups and time rows; `baselineData` separately retains row 1 as visualization context without approving it.
+Load them with:
 
 ```matlab
-loadedOutput = load('validSnapshots_yyyyMMdd_HHmmss.mat', ...
-    'validSnapshots', 'validBonePoses');
+loadedOutput   = load('validSnapshots_yyyyMMdd_HHmmss.mat', 'validSnapshots', 'validBonePoses');
 validSnapshots = loadedOutput.validSnapshots;
 validBonePoses = loadedOutput.validBonePoses;
 ```
 
-### Fields in each source-directory group
+### Conventions used in all tables
 
-| Field | Explanation |
-| --- | --- |
-| `name` | Source-directory name and browser tab title. |
-| `bone` | `F` or `T`, assigned from the directory name. |
-| `path` | Absolute source-directory path. |
-| `data` | Approved records in original acquisition order; empty if none were selected. |
+- **Frames.** All 3D points and directions are in the tracker reference frame `ref`. Lengths use the tracker/CT unit (normally mm).
+- **Transforms.** `T_<source>_<target>` is a 4-by-4 rigid matrix that maps points from `source` to `target`: `p_target = T_source_target * p_source`.
+- **Plane coordinates `(u, v)`.** A point on the image plane is `x = p0 + u*ex + v*ey`, with `0 <= u <= W` and `0 <= v <= H`. `p0` is the top-left image corner, `u` runs along the columns (left to right), and `v` runs along the rows (top to bottom, which is depth). `(u, v)` are physical distances, not pixels.
+- **Pixels.** With `du = W/nCols` and `dv = H/nRows`, a plane point falls in pixel `col = floor(u/du) + 1`, `row = floor(v/dv) + 1`.
+- **Valid vs. empty.** Records carry `isValid` and `status`. An empty result with `isValid = true` is a real result (for example, the plane does not cross the bone). `isValid = false` means the record was skipped, and `status` says why.
 
-### Fields in each selected `data` record
+### 1. `validSnapshots`
 
-| Field | Explanation |
-| --- | --- |
-| `sourceIndex` | Local index in the retained processed group before browser selection. |
-| `plane` | Ultrasound image, finite-plane geometry, validity, and provenance. |
-| `intersection` | Processing status, raw intersection, and probe-facing subset. |
+```text
+validSnapshots(1..G)          one element per source folder (browser tab)
++-- name, bone, path
++-- data(1..N_selected)       one element per approved record
+    +-- sourceIndex
+    +-- plane                 ultrasound image placed in ref        (section 1.3)
+    +-- intersection          bone mesh cut by that image plane     (section 1.4)
+```
 
-### Fields in `validBonePoses`
+`plane` and `intersection` in the same `data(k)` always describe the same acquisition record.
 
-| Field | Explanation |
-| --- | --- |
-| `processingMode` | `static` or `kinematic`, derived from `poseHandlingMode`. |
-| `poseHandlingMode` | `average`, `first`, `last`, or `perDataRow`. |
-| `ctPostProcessedMatFile` | Absolute path of the source CT MAT file. |
-| `bonePoses` | One record per processed bone. |
+#### 1.1 Source-folder group: `validSnapshots(g)`
 
-Each bone record contains `bone`, the CT-coordinate `triangulation` `meshCT`, `T_bone_CT`, and pose `data`. A kinematic export also has `baselineData`. Pose records contain:
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `name` | char | Source-folder name; also the browser tab title. |
+| `bone` | char | `F` (femur) or `T` (tibia), from the folder name. |
+| `path` | char | Absolute source-folder path. |
+| `data` | 1 x N struct | Approved records in acquisition order. Empty if none were approved; the group itself is always kept. |
 
-| Field | Explanation |
-| --- | --- |
-| `sourceIndex` | Raw row index in its source group; the averaged pose keeps its template value. |
-| `snapshotIndex`, `sequenceIndex` | Source-folder and MHA/CSV-pair indices. |
-| `packetIndex`, `rigidBodyRowIndex` | Coupled MHA packet and CSV row indices. |
-| `rigidBodyTimestamp` | CSV timestamp used by endpoint modes. |
-| `sourceSampleCount` | Valid source count for an average, or `1` for a valid unreduced row. |
-| `isValid`, `status` | Pose usability and explanation. |
-| `T_pin_ref` | Pin-to-reference 4-by-4 transform. |
-| `T_CT_ref` | CT-to-reference transform applied to `meshCT.Points`. |
-| `T_bone_ref` | Anatomical-bone-to-reference transform. |
+#### 1.2 Approved record: `validSnapshots(g).data(k)`
 
-### Fields in `plane`
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `sourceIndex` | scalar | Position of this record in the processed group before browser selection. |
+| `plane` | struct | The image plane, see section 1.3. |
+| `intersection` | struct | The bone intersection, see section 1.4. |
 
-| Field | Explanation |
-| --- | --- |
-| `sourceIndex` | Raw packet index across the source group's pairs. |
-| `T_image_ref` | Image-to-reference 4-by-4 transform. |
-| `p0`, `ex`, `ey`, `n` | Plane origin, image-axis directions, and normal in the reference frame. |
-| `W`, `H` | Physical image width and height across pixel-center intervals. |
-| `nRows`, `nCols`, `image` | Raster dimensions and ultrasound pixels. |
-| `timestamp`, `rigidBodyTimestamp` | MHA and paired CSV timestamps. |
-| `bone`, `snapshotName` | Bone code and owning source folder. |
-| `snapshotIndex`, `sequenceIndex` | Source-folder and pair indices. |
-| `packetIndex`, `rigidBodyRowIndex` | Coupled packet and CSV row indices. |
-| `isValid`, `status` | Plane usability and explanation. Invalid kinematic geometry is `NaN`. |
+In `perDataRow` mode, approval is per time row: approving a row exports it from every source folder that has that row.
 
-The plane uses `x = p0 + u*ex + v*ey`, with `0 <= u <= W` and `0 <= v <= H`.
+#### 1.3 Image plane: `validSnapshots(g).data(k).plane`
 
-### Fields in `intersection`
+The ultrasound image placed in 3D, using the fCal `ImageToProbe` calibration and the tracked probe and reference poses.
 
-| Field | Explanation |
-| --- | --- |
-| `mask`, `pixelList` | Rasterized raw intersection mask and `[row, column]` pixels. |
-| `segments3D`, `segmentsUV` | Raw segments in reference coordinates and finite-plane coordinates. |
-| `segmentFaceIdx` | CT mesh-face index for each raw segment. |
-| `probeFacingSegmentMask` | Raw segments passing the 25-degree facing test. |
-| `probeFacingSegments3D`, `probeFacingSegmentsUV` | Facing segment subsets. |
-| `probeFacingPixels` | Rasterized `[row, column]` pixels from facing segments. |
-| `segmentFacingScore` | Dot product of each source face normal with `-plane.ey`. |
-| `timestamp` | Copy of the MHA timestamp. |
-| `isValid`, `status` | Whether geometry was computed and, if skipped, why. |
+| Field | Type / size | Meaning |
+| --- | --- | --- |
+| `image` | `nCols x nRows` uint8 | Ultrasound pixels as stored by the MHA reader (width x height). **Transpose it** (`image.'`) to get the `nRows x nCols` layout used by `intersection.mask`. |
+| `nRows`, `nCols` | scalar | Image height and width in pixels. |
+| `W`, `H` | scalar | Physical image width and height: `nCols - 1` and `nRows - 1` pixel spacings, measured between pixel centers. |
+| `T_image_ref` | 4 x 4 | Image-to-`ref` transform. Its columns give `ex`, `ey`, `n`, and `p0`. |
+| `p0` | 3 x 1 | Top-left image corner in `ref`. |
+| `ex` | 3 x 1 | Unit direction of increasing column (`u`) in `ref`. |
+| `ey` | 3 x 1 | Unit direction of increasing row (`v`), pointing deeper, away from the probe, in `ref`. |
+| `n` | 3 x 1 | Plane normal in `ref`. |
+| `timestamp` | scalar | MHA packet timestamp. |
+| `rigidBodyTimestamp` | scalar | Timestamp of the paired Qualisys CSV row. |
+| `bone` | char | `F` or `T`, from the owning folder. |
+| `snapshotName` | char | Owning source-folder name. |
+| `sourceIndex` | scalar | Raw packet index, counted across all MHA/CSV pairs in the folder. |
+| `snapshotIndex` | scalar | Source-folder index. |
+| `sequenceIndex` | scalar | MHA/CSV pair index inside the folder. |
+| `packetIndex`, `rigidBodyRowIndex` | scalar | Coupled MHA packet index and CSV row index (always equal). |
+| `isValid`, `status` | logical, char | Whether the plane geometry can be used, and why not. In kinematic mode, invalid geometry is `NaN`. |
 
-Empty geometry can mean a valid calculation found no crossing. Use `isValid` and `status` to distinguish that from a skipped row.
+#### 1.4 Bone intersection: `validSnapshots(g).data(k).intersection`
+
+How it is computed: the matching CT bone mesh is moved into `ref` with `T_CT_ref`, and every mesh triangle is cut by the image plane. Each triangle that crosses the plane inside the image gives one short straight line, a **segment**. Together, the segments form the bone outline in the image. A segment is **probe-facing** when its triangle's outward normal points back toward the probe (`-ey`) within 25 degrees. Ultrasound mostly shows these surfaces, so they form the expected bright bone echo.
+
+In the table, `S` is the number of raw segments.
+
+| Field | Type / size | Meaning |
+| --- | --- | --- |
+| `mask` | `nRows x nCols` logical | `true` where any raw segment passes through the pixel. Overlay it on `plane.image.'`. |
+| `pixelList` | K x 2 | The `true` pixels of `mask` as `[row, col]` (from `find(mask)`). Ordered by column, **not** along the contour. |
+| `segments3D` | 1 x S cell, each 2 x 3 | The two 3D endpoints `[x y z]` of each segment, in `ref`. **Not clipped** to the image border, so a segment at the edge can reach slightly outside the image. |
+| `segmentsUV` | 1 x S cell, each 2 x 2 | The same segments as `[u v]` plane coordinates, **clipped** to the image rectangle. Physical units; convert to pixels with `col = u/du + 1`, `row = v/dv + 1`. |
+| `segmentFaceIdx` | S x 1 | For each segment, the triangle (row of `meshCT.ConnectivityList`) that produced it. |
+| `segmentFacingScore` | S x 1 | `dot(unit outward face normal, -plane.ey)`, the cosine of the angle to the probe direction. `+1` = faces the probe, `0` = parallel to the beam, `-1` = faces away. `NaN` for zero-area triangles. |
+| `probeFacingSegmentMask` | S x 1 logical | `segmentFacingScore >= cosd(25)` (about `0.906`). Selects the three subsets below. |
+| `probeFacingSegments3D` | cell, each 2 x 3 | `segments3D(probeFacingSegmentMask)`. |
+| `probeFacingSegmentsUV` | cell, each 2 x 2 | `segmentsUV(probeFacingSegmentMask)`. |
+| `probeFacingPixels` | M x 2 | `[row, col]` pixels drawn from the probe-facing segments only. There is no mask version of this field. |
+| `timestamp` | scalar | Copy of `plane.timestamp`. |
+| `isValid`, `status` | logical, char | `true` and `'Computed'` when the geometry was calculated. Otherwise `'Skipped: <reason>'`, for example an invalid plane or a missing bone pin in that CSV row. |
+
+Notes:
+
+- The segments are in mesh-face order, not contour order. Draw each segment separately, or order them first; joining them into one polyline gives zigzags.
+- The outward normal direction is estimated from the mesh centroid. If the probe-facing subset looks empty or flipped for a bone, check this first.
+
+Example overlay (green = probe-facing, red = other raw segments):
+
+```matlab
+s  = validSnapshots(1).data(1);
+p  = s.plane;  in = s.intersection;
+du = p.W / p.nCols;  dv = p.H / p.nRows;
+
+figure; imshow(p.image.', []); hold on
+for k = 1:numel(in.segmentsUV)
+    uv = in.segmentsUV{k};
+    c  = 'r'; if in.probeFacingSegmentMask(k), c = 'g'; end
+    plot(uv(:,1)/du + 1, uv(:,2)/dv + 1, c, 'LineWidth', 1.5);
+end
+```
+
+### 2. `validBonePoses`
+
+```text
+validBonePoses
++-- processingMode, poseHandlingMode, ctPostProcessedMatFile
++-- bonePoses(1..B)           one element per bone (femur, tibia)
+    +-- bone, meshCT, T_bone_CT
+    +-- data(1..P)            pose records                       (section 2.3)
+    +-- baselineData          perDataRow export only
+```
+
+#### 2.1 Top level: `validBonePoses`
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `processingMode` | char | `static` or `kinematic`, derived from `poseHandlingMode`. |
+| `poseHandlingMode` | char | The configured `bonePoseMode`: `average`, `first`, `last`, or `perDataRow`. |
+| `ctPostProcessedMatFile` | char | Absolute path of the source CT MAT file. |
+| `bonePoses` | 1 x B struct | One record per processed bone, see section 2.2. |
+
+#### 2.2 Bone: `validBonePoses.bonePoses(b)`
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `bone` | char | `F` or `T`. Matches `validSnapshots(g).bone`. |
+| `meshCT` | `triangulation` | Bone surface mesh in CT coordinates. Stored once per bone. |
+| `T_bone_CT` | 4 x 4 | Anatomical-bone-frame to CT transform. |
+| `data` | 1 x P struct | Pose records, see section 2.3. Static modes: exactly one record. `perDataRow`: one record per approved time row in the approved source groups. |
+| `baselineData` | struct | `perDataRow` export only. Pose of CSV row 1, kept as visualization context; it is **not** an approved record. |
+
+#### 2.3 Pose record: `validBonePoses.bonePoses(b).data(p)`
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `T_CT_ref` | 4 x 4 | CT-to-`ref` transform. Apply it to `meshCT.Points` to place the mesh in the same frame as the image planes. |
+| `T_bone_ref` | 4 x 4 | Anatomical-bone-frame to `ref` transform. Do **not** apply it to mesh points. |
+| `T_pin_ref` | 4 x 4 | Tracked bone-pin to `ref` transform. |
+| `sourceIndex` | scalar | Raw row index in its source group. An averaged pose keeps the value of its template row. |
+| `snapshotIndex`, `sequenceIndex` | scalar | Source-folder and MHA/CSV pair indices. |
+| `packetIndex`, `rigidBodyRowIndex` | scalar | Coupled MHA packet and CSV row indices. |
+| `rigidBodyTimestamp` | scalar | CSV timestamp, used by the `first` and `last` modes. |
+| `sourceSampleCount` | scalar | Number of valid rows averaged (`average`), or `1` for a single row. |
+| `isValid`, `status` | logical, char | Whether the pose is usable, and why not. |
+
+To find the pose for a snapshot record: in static modes, take the single `data` record of the bone with the same `bone` code. In `perDataRow`, match `snapshotIndex`, `sequenceIndex`, and `rigidBodyRowIndex` with the plane's values.
 
 ## Common input problems
 
