@@ -23,9 +23,9 @@ addpath(genpath(fullfile(projectRoot, 'functions')));
 
 % Parse the active multi-sweep and one-sweep configurations used by the main scripts.
 sweepConfigPath = fullfile(projectRoot, 'config', ...
-    'optconfig_hyperparamSweep_intensityCov.json');
+    'optconfig_hyperparamSweep_intensityLine.json');
 oneSweepConfigPath = fullfile(projectRoot, 'config', ...
-    'optconfig_oneSweep_intensityCov.json');
+    'optconfig_oneSweep_intensityLine.json');
 ICPLikeOneSweepConfigPath = fullfile(projectRoot, 'config', ...
     'optconfig_oneSweep_ICPLike.json');
 combinedOneSweepConfigPath = fullfile(projectRoot, 'config', ...
@@ -56,7 +56,7 @@ function testActiveConfigurationKeepsModelCandidatesAndSeeds(testCase)
 % Validate the experiment schema without depending on the user's current sweep values.
 spec = testCase.TestData.sweepSpec;
 verifyEqual(testCase, spec.schemaVersion, 4);
-verifyEqual(testCase, spec.cost.model, 'intensityCov_v2');
+verifyEqual(testCase, spec.cost.model, 'intensityLine_v1');
 verifyTrue(testCase, all(spec.intersection.normalFacingToleranceDeg > 0));
 verifyTrue(testCase, all(spec.cost.hyperparameters.intensitySmoothingSigmaMm >= 0));
 verifyTrue(testCase, isscalar(spec.cost.fixedParameters.intensityMax));
@@ -187,7 +187,7 @@ for combinationNumber = 1:plan.numberOfCombinations
     selectedRows = plan.runs.combinationNumber == combinationNumber;
     verifyEqual(testCase, plan.runs.seed(selectedRows), [7; 8; 9]);
     verifyEqual(testCase, unique(plan.runs.costModel(selectedRows)), ...
-        "intensityCov_v2");
+        "intensityLine_v1");
 end
 
 % Every plan row stores scalar values that can be copied into a runtime config.
@@ -214,7 +214,7 @@ verifyEqual(testCase, plan.numberOfRuns, 1);
 runConfig = createBonePoseOptimizationRunConfig( ...
     spec, plan.combinations(1, :), plan.runs.seed(1));
 verifyTrue(testCase, isscalar(runConfig.intersection.normalFacingToleranceDeg));
-verifyEqual(testCase, runConfig.cost.model, 'intensityCov_v2');
+verifyEqual(testCase, runConfig.cost.model, 'intensityLine_v1');
 verifyTrue(testCase, isscalar(runConfig.cost.parameters.intensityMax));
 verifyTrue(testCase, isscalar(runConfig.cost.parameters.sampleSpacingMm));
 verifyTrue(testCase, isscalar(runConfig.cost.parameters.intensitySmoothingSigmaMm));
@@ -253,7 +253,7 @@ rawConfig.cost.hyperparameters.intensitySmoothingSigmaMm = [1 1];
 % Reject the duplicate while reporting that the candidate list is the problem.
 verifyError(testCase, ...
     @() createBonePoseOptimizationExperimentConfig(temporaryConfigPath), ...
-    'validate_cost_intensityCov_v02:DuplicateCandidate');
+    'validate_cost_intensityLine_v01:DuplicateCandidate');
 clear temporaryConfigCleanup;
 end
 
@@ -395,7 +395,7 @@ rawConfig.cost.fixedParameters = rmfield( ...
     writeTemporaryJson(rawConfig); %#ok<ASGLU>
 verifyError(testCase, ...
     @() createBonePoseOptimizationExperimentConfig(temporaryConfigPath), ...
-    'validate_cost_intensityCov_v02:MissingParameter');
+    'validate_cost_intensityLine_v01:MissingParameter');
 clear temporaryConfigCleanup;
 
 rawConfig = jsondecode(fileread(testCase.TestData.sweepConfigPath));
@@ -404,7 +404,7 @@ rawConfig.cost.hyperparameters.misspelledParameter = 1;
     writeTemporaryJson(rawConfig); %#ok<ASGLU>
 verifyError(testCase, ...
     @() createBonePoseOptimizationExperimentConfig(temporaryConfigPath), ...
-    'validate_cost_intensityCov_v02:UnexpectedParameter');
+    'validate_cost_intensityLine_v01:UnexpectedParameter');
 clear temporaryConfigCleanup;
 end
 
@@ -432,7 +432,7 @@ experimentResult = runBonePoseOptimizationExperiment(spec);
 verifyEqual(testCase, experimentResult.summaryTable.status, ...
     ["failed"; "failed"]);
 verifyEqual(testCase, experimentResult.summaryTable.costModel, ...
-    repmat("intensityCov_v2", 2, 1));
+    repmat("intensityLine_v1", 2, 1));
 verifyTrue(testCase, all(isfile(experimentResult.summaryTable.resultFilePath)));
 verifyTrue(testCase, isfile(fullfile( ...
     experimentResult.experimentFolder, 'summary.csv')));
@@ -448,7 +448,7 @@ verifyEqual(testCase, ...
 % Failed runs still record the exact scalar cost configuration that was attempted.
 savedRun = load(char(experimentResult.summaryTable.resultFilePath(1)), 'runResult');
 verifyEqual(testCase, savedRun.runResult.configuration.cost.model, ...
-    'intensityCov_v2');
+    'intensityLine_v1');
 verifyTrue(testCase, isscalar( ...
     savedRun.runResult.configuration.cost.parameters.intensitySmoothingSigmaMm));
 

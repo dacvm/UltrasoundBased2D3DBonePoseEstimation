@@ -1,5 +1,5 @@
-function [cost, details] = cost_intensityCov_v02(poseVector, data, config)
-%COST_INTENSITYCOV_V02 Score how bright the image is where the bone should be.
+function [cost, details] = cost_intensityLine_v01(poseVector, data, config)
+%COST_INTENSITYLINE_V01 Score how bright the image is where the bone should be.
 % For one candidate pose, this cost cuts the CT bone mesh with every
 % ultrasound image plane and keeps the parts of the cut that face the probe:
 % these are the bone surfaces that ultrasound should show as a bright echo.
@@ -42,7 +42,7 @@ function [cost, details] = cost_intensityCov_v02(poseVector, data, config)
 % Inputs:
 %   poseVector - Six-value perturbation around data.T_CT_ref_initial.
 %   data       - Prepared data from prepareBonePoseOptimizationInputs. It
-%                must contain data.extra.intensityCov.smoothedImages, which
+%                must contain data.extra.intensityLine.smoothedImages, which
 %                preparation builds when the config sets
 %                intensitySmoothingSigmaMm.
 %   config     - Scalar runtime configuration whose cost.parameters holds
@@ -71,7 +71,7 @@ T_bone_ref_candidate = T_CT_ref_candidate * data.T_bone_CT;
 %% READ THE SMOOTHED IMAGE ALONG THE PREDICTED BONE LINES
 
 costParameters = config.cost.parameters;
-smoothedImages = data.extra.intensityCov.smoothedImages;
+smoothedImages = data.extra.intensityLine.smoothedImages;
 nPlanes        = numel(data.imagePlanesRef);
 
 % A plane that keeps the initial zero has no visible bone at this pose.

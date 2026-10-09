@@ -27,7 +27,7 @@ intensityFixed = struct( ...
     'sampleSpacingMm', fixedParameters.sampleSpacingMm);
 intensityHyper = struct( ...
     'intensitySmoothingSigmaMm', hyperparameters.intensitySmoothingSigmaMm);
-[intensityFixed, intensityHyper] = validate_cost_intensityCov_v02(intensityFixed, intensityHyper);
+[intensityFixed, intensityHyper] = validate_cost_intensityLine_v01(intensityFixed, intensityHyper);
 
 pointCloudFixed = struct('nearestVertexCount', fixedParameters.nearestVertexCount);
 [pointCloudFixed, ~] = validate_cost_ICPLike_v01(pointCloudFixed, struct());

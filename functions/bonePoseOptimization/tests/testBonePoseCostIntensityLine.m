@@ -1,6 +1,6 @@
-function tests = testBonePoseCostIntensityCov
-%TESTBONEPOSECOSTINTENSITYCOV Test the smoothed-intensity cost model.
-% This suite checks that intensityCov_v2 is registered and validated, that
+function tests = testBonePoseCostIntensityLine
+%TESTBONEPOSECOSTINTENSITYLINE Test the smoothed-intensity cost model.
+% This suite checks that intensityLine_v1 is registered and validated, that
 % the image blur behaves like a Gaussian in mm, that preparation stores the
 % blurred images, and that the cost reads them at the right image positions.
 % Preparation is slow, so the suite prepares the real data only once.
@@ -13,7 +13,7 @@ end
 
 
 function setupOnce(testCase)
-%SETUPONCE Prepare the intensityCov_v2 one-sweep inputs once for this suite.
+%SETUPONCE Prepare the intensityLine_v1 one-sweep inputs once for this suite.
 % testCase stores the resolved scalar configuration and prepared data for
 % all tests in this suite. This function has no output.
 
@@ -22,7 +22,7 @@ projectRoot  = fileparts(fileparts(fileparts(fileparts(testFilePath))));
 addpath(genpath(fullfile(projectRoot, 'functions')));
 
 % Use the same selectable configuration a user would choose for this model.
-configPath     = fullfile(projectRoot, 'config', 'optconfig_oneSweep_intensityCov.json');
+configPath     = fullfile(projectRoot, 'config', 'optconfig_oneSweep_intensityLine.json');
 experimentSpec = createBonePoseOptimizationExperimentConfig(configPath);
 experimentPlan = createBonePoseOptimizationExperimentPlan(experimentSpec);
 config         = createBonePoseOptimizationRunConfig( ...
@@ -37,11 +37,11 @@ function testModelIsRegistered(testCase)
 %TESTMODELISREGISTERED Check the registry connection.
 % testCase provides MATLAB verification methods. This function has no output.
 
-definition = getBonePoseCostDefinition('intensityCov_v2');
+definition = getBonePoseCostDefinition('intensityLine_v1');
 
-verifyEqual(testCase, definition.modelName, 'intensityCov_v2');
-verifyEqual(testCase, definition.evaluateFcn, @cost_intensityCov_v02);
-verifyEqual(testCase, definition.validateExperimentConfigFcn, @validate_cost_intensityCov_v02);
+verifyEqual(testCase, definition.modelName, 'intensityLine_v1');
+verifyEqual(testCase, definition.evaluateFcn, @cost_intensityLine_v01);
+verifyEqual(testCase, definition.validateExperimentConfigFcn, @validate_cost_intensityLine_v01);
 verifyFalse(testCase, definition.requiresBoneSurface);
 end
 
@@ -55,7 +55,7 @@ function testValidatorReturnsCanonicalSettings(testCase)
 fixedParameters = struct('sampleSpacingMm', single(0.1), 'intensityMax', 255);
 hyperparameters = struct('intensitySmoothingSigmaMm', [0; 0.5; 1]);
 [fixedParameters, hyperparameters] = ...
-    validate_cost_intensityCov_v02(fixedParameters, hyperparameters);
+    validate_cost_intensityLine_v01(fixedParameters, hyperparameters);
 
 verifyEqual(testCase, fieldnames(fixedParameters).', {'intensityMax', 'sampleSpacingMm'});
 verifyClass(testCase, fixedParameters.sampleSpacingMm, 'double');
@@ -70,28 +70,28 @@ function testValidatorRejectsInvalidSettings(testCase)
 validFixed = struct('intensityMax', 255, 'sampleSpacingMm', 0.1);
 validHyper = struct('intensitySmoothingSigmaMm', [0.5 1]);
 
-verifyError(testCase, @() validate_cost_intensityCov_v02( ...
+verifyError(testCase, @() validate_cost_intensityLine_v01( ...
     rmfield(validFixed, 'sampleSpacingMm'), validHyper), ...
-    'validate_cost_intensityCov_v02:MissingParameter');
+    'validate_cost_intensityLine_v01:MissingParameter');
 
 % A setting this model does not have must not be accepted silently.
 unknownHyper = validHyper;
 unknownHyper.misspelledParameter = 1;
-verifyError(testCase, @() validate_cost_intensityCov_v02(validFixed, unknownHyper), ...
-    'validate_cost_intensityCov_v02:UnexpectedParameter');
+verifyError(testCase, @() validate_cost_intensityLine_v01(validFixed, unknownHyper), ...
+    'validate_cost_intensityLine_v01:UnexpectedParameter');
 
 negativeSigma = struct('intensitySmoothingSigmaMm', -0.5);
-verifyError(testCase, @() validate_cost_intensityCov_v02(validFixed, negativeSigma), ...
-    'MATLAB:validate_cost_intensityCov_v02:expectedNonnegative');
+verifyError(testCase, @() validate_cost_intensityLine_v01(validFixed, negativeSigma), ...
+    'MATLAB:validate_cost_intensityLine_v01:expectedNonnegative');
 
 duplicateSigma = struct('intensitySmoothingSigmaMm', [1 1]);
-verifyError(testCase, @() validate_cost_intensityCov_v02(validFixed, duplicateSigma), ...
-    'validate_cost_intensityCov_v02:DuplicateCandidate');
+verifyError(testCase, @() validate_cost_intensityLine_v01(validFixed, duplicateSigma), ...
+    'validate_cost_intensityLine_v01:DuplicateCandidate');
 
 zeroSpacing = validFixed;
 zeroSpacing.sampleSpacingMm = 0;
-verifyError(testCase, @() validate_cost_intensityCov_v02(zeroSpacing, validHyper), ...
-    'MATLAB:validate_cost_intensityCov_v02:expectedPositive');
+verifyError(testCase, @() validate_cost_intensityLine_v01(zeroSpacing, validHyper), ...
+    'MATLAB:validate_cost_intensityLine_v01:expectedPositive');
 end
 
 
@@ -129,7 +129,7 @@ function testPreparationStoresSmoothedImages(testCase)
 % testCase supplies the prepared data. This function has no output.
 
 data           = testCase.TestData.data;
-smoothedImages = data.extra.intensityCov.smoothedImages;
+smoothedImages = data.extra.intensityLine.smoothedImages;
 
 verifyEqual(testCase, numel(smoothedImages), numel(data.imagePlanesRef));
 verifyEqual(testCase, size(smoothedImages{1}), size(data.imagePlanesRef(1).image));
@@ -152,7 +152,7 @@ config = testCase.TestData.config;
 
 constantIntensity = 51;   % 51 / 255 = 0.2 evidence
 for planeIndex = 1:numel(data.imagePlanesRef)
-    data.extra.intensityCov.smoothedImages{planeIndex} = ...
+    data.extra.intensityLine.smoothedImages{planeIndex} = ...
         constantIntensity * ones(size(data.imagePlanesRef(planeIndex).image));
 end
 
@@ -172,7 +172,7 @@ function testPoseWithoutVisibleBoneHasMaximumCost(testCase)
 % Moving the bone half a metre away leaves no bone in any image, so no
 % plane has evidence and the cost must be exactly 1.
 
-[cost, details] = cost_intensityCov_v02([500; 500; 500; 0; 0; 0], ...
+[cost, details] = cost_intensityLine_v01([500; 500; 500; 0; 0; 0], ...
     testCase.TestData.data, testCase.TestData.config);
 
 verifyEqual(testCase, details.perPlaneSampleCount, zeros(size(details.perPlaneSampleCount)));
@@ -201,13 +201,13 @@ for rampAxis = ["column", "row"]
         imageSize = size(data.imagePlanesRef(planeIndex).image);   % [nCols, nRows]
         [columnNumber, rowNumber] = ndgrid(1:imageSize(1), 1:imageSize(2));
         if rampAxis == "column"
-            rampData.extra.intensityCov.smoothedImages{planeIndex} = columnNumber;
+            rampData.extra.intensityLine.smoothedImages{planeIndex} = columnNumber;
         else
-            rampData.extra.intensityCov.smoothedImages{planeIndex} = rowNumber;
+            rampData.extra.intensityLine.smoothedImages{planeIndex} = rowNumber;
         end
     end
 
-    [~, details] = cost_intensityCov_v02(zeros(6, 1), rampData, config);
+    [~, details] = cost_intensityLine_v01(zeros(6, 1), rampData, config);
 
     for planeIndex = find(details.perPlaneSampleCount > 0)
         plane    = data.imagePlanesRef(planeIndex);

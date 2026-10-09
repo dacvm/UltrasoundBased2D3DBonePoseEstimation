@@ -35,7 +35,7 @@ intensityFixed = struct( ...
     'sampleSpacingMm', fixedParameters.sampleSpacingMm);
 intensityHyper = struct( ...
     'intensitySmoothingSigmaMm', hyperparameters.intensitySmoothingSigmaMm);
-[intensityFixed, intensityHyper] = validate_cost_intensityCov_v02(intensityFixed, intensityHyper);
+[intensityFixed, intensityHyper] = validate_cost_intensityLine_v01(intensityFixed, intensityHyper);
 
 pimlopFixed = struct();
 for nameIndex = 1:numel(pimlopFixedNames)

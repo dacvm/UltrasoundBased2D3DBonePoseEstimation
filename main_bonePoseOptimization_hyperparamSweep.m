@@ -47,7 +47,7 @@ addpath(genpath('functions'));
 % Choose the JSON file that describes the sweep. Such a file lists the input
 % data, the cost model, the candidate values to try for each setting, the
 % seeds to repeat each combination with, and where to save results.
-configFilePath = fullfile(pwd, 'config', 'optconfig_hyperparamSweep_intensityCov.json');
+configFilePath = fullfile(pwd, 'config', 'optconfig_hyperparamSweep_intensityLine.json');
 
 % createBonePoseOptimizationExperimentConfig reads that JSON file, checks
 % every setting (paths exist, values are valid, no duplicate candidates or

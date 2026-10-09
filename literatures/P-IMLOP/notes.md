@@ -61,7 +61,7 @@ Framework-level tests are in `functions/bonePoseOptimization/tests/testBonePoseC
 | PD-tree search, Algorithm 2 | `searchPDTree.m` (and `*_batchedProcess.m` versions) |
 | Exhaustive reference used to check the tree search | `searchPIMLOPBruteForce.m` |
 | Cost for the bone-pose optimizer | `cost_PIMLOP_v01.m`, `validate_cost_PIMLOP_v01.m` (costModels), registered as `PIMLOP_v1`; select it with `config/optconfig_oneSweep_PIMLOP.json` |
-| Cost combined with intensity coverage (not in the paper) | `cost_intensityPIMLOP_v01.m`, `validate_cost_intensityPIMLOP_v01.m` (costModels), registered as `intensityPIMLOP_v1`; blends the intensity cost with the mean match error per measurement |
+| Cost combined with the intensity-line cost (not in the paper) | `cost_intensityPIMLOP_v01.m`, `validate_cost_intensityPIMLOP_v01.m` (costModels), registered as `intensityPIMLOP_v1`; blends the intensity cost with the mean match error per measurement |
 
 ## How this repo differs from the paper
 - **Registration phase:** not reimplemented. `cost_PIMLOP_v01.m` exposes the summed match error as a cost over the project's 6D pose vector. The pose optimizer does the registration step, and correspondences are searched again for every candidate pose.

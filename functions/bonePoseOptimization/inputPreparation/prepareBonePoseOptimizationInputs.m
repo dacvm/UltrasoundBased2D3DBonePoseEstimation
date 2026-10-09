@@ -50,8 +50,8 @@ function [data, validationData] = prepareBonePoseOptimizationInputs(config)
 %                    data.extra.pimlop.PsiCT holds the CT-frame P-IMLOP model
 %                    with its PD-tree, used by cost_PIMLOP_v01. When the
 %                    config sets intensitySmoothingSigmaMm,
-%                    data.extra.intensityCov.smoothedImages holds one
-%                    blurred image per plane, used by cost_intensityCov_v02.
+%                    data.extra.intensityLine.smoothedImages holds one
+%                    blurred image per plane, used by cost_intensityLine_v01.
 %   validationData - Saved ground-truth intersections, bone pose, and source
 %                    metadata. This output must not be passed to the optimizer.
 
@@ -329,7 +329,7 @@ data.config                  = config;
 % it clear which pre-computed pieces belong to which model.
 data.extra.pimlop.PsiCT      = PsiCT;
 
-% Intensity cost models (intensityCov_v2 and the combined models built on
+% Intensity cost models (intensityLine_v1 and the combined models built on
 % it) read the images through a Gaussian blur so they still get a hint
 % about the bone when the predicted line is slightly off the echo. Blurring
 % every image is slow, so it is done here once. Its width is a
@@ -337,7 +337,7 @@ data.extra.pimlop.PsiCT      = PsiCT;
 % combination, so each combination gets its own blur. Cost models without
 % this setting skip the work.
 if isfield(config.cost.parameters, 'intensitySmoothingSigmaMm')
-    data.extra.intensityCov.smoothedImages = smoothUltrasoundImages( ...
+    data.extra.intensityLine.smoothedImages = smoothUltrasoundImages( ...
         imagePlanesRef, config.cost.parameters.intensitySmoothingSigmaMm);
 end
 

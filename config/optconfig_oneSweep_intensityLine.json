@@ -15,7 +15,7 @@
     "normalFacingToleranceDeg": 30
   },
   "cost": {
-    "model": "intensityCov_v2",
+    "model": "intensityLine_v1",
     "fixedParameters": {
       "intensityMax": 255,
       "sampleSpacingMm": 0.1
@@ -39,8 +39,8 @@
     "parforWorkers": 6
   },
   "experiment": {
-    "name": "oneSweep_intensityCov_v02",
+    "name": "oneSweep_intensityLine_v01",
     "seeds": [1001],
-    "outputFolder": "output/bonePoseOptimization/oneSweeps/intensityCov_v02"
+    "outputFolder": "output/bonePoseOptimization/oneSweeps/intensityLine_v01"
   }
 }

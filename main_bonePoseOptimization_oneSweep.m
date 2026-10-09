@@ -43,7 +43,7 @@ addpath(genpath('functions'));
 
 % Choose the JSON file that describes this run. It names the input data, the
 % bone, the cost model and its settings, the seed, and the output folder.
-% Select another cost model by choosing its file, e.g. optconfig_oneSweep_intensityCov.json,
+% Select another cost model by choosing its file, e.g. optconfig_oneSweep_intensityLine.json,
 % optconfig_oneSweep_ICPLike.json, optconfig_oneSweep_intensityICP.json,
 % optconfig_oneSweep_PIMLOP.json, or optconfig_oneSweep_intensityPIMLOP.json.
 configFilePath = fullfile(pwd, 'config', 'optconfig_oneSweep_PIMLOP.json');

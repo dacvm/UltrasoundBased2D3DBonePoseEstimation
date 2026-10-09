@@ -121,7 +121,7 @@ verifyError(testCase, @() validate_cost_intensityPIMLOP_v01(validFixed, duplicat
 badSigma = validHyper;
 badSigma.intensitySmoothingSigmaMm = -1;
 verifyError(testCase, @() validate_cost_intensityPIMLOP_v01(validFixed, badSigma), ...
-    'MATLAB:validate_cost_intensityCov_v02:expectedNonnegative');
+    'MATLAB:validate_cost_intensityLine_v01:expectedNonnegative');
 badKappa = validHyper;
 badKappa.kappa = -1;
 verifyError(testCase, @() validate_cost_intensityPIMLOP_v01(validFixed, badKappa), ...
@@ -140,7 +140,7 @@ config     = testCase.TestData.config;
 poseVector = [1; -0.5; 0.25; deg2rad(0.5); 0; deg2rad(-0.25)];
 
 % Calculate each established term independently before evaluating the blend.
-intensityCost = cost_intensityCov_v02(poseVector, data, config);
+intensityCost = cost_intensityLine_v01(poseVector, data, config);
 [pimlopTotal, pimlopDetails] = cost_PIMLOP_v01(poseVector, data, config);
 [combinedCost, combinedDetails] = ...
     bonePoseCostFunction(poseVector, data, config);

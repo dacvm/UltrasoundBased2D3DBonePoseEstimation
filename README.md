@@ -16,7 +16,7 @@
   - [4.1. Optimization code organization](#41-optimization-code-organization)
   - [4.2. Optimizer parameters](#42-optimizer-parameters)
 - [5. Supported cost functions](#5-supported-cost-functions)
-  - [5.1. `intensityCov_v2`: smoothed intensity along the predicted bone](#51-intensitycov_v2-smoothed-intensity-along-the-predicted-bone)
+  - [5.1. `intensityLine_v1`: smoothed intensity along the predicted bone](#51-intensityline_v1-smoothed-intensity-along-the-predicted-bone)
   - [5.2. `ICPLike_v1`: one-way 3D point-to-mesh distance](#52-icplike_v1-one-way-3d-point-to-mesh-distance)
   - [5.3. `intensityICP_v1`: combined intensity and 3D distance](#53-intensityicp_v1-combined-intensity-and-3d-distance)
   - [5.4. `PIMLOP_v1`: most-likely oriented point match](#54-pimlop_v1-most-likely-oriented-point-match)
@@ -163,7 +163,7 @@ This is an ongoing list. The current framework registers the following five vers
 
 In the tables below, a **fixed parameter** has one value for the complete experiment. A **hyperparameter** is an array of candidate values; the experiment planner includes it in the Cartesian product used to create parameter combinations.
 
-### 5.1. `intensityCov_v2`: smoothed intensity along the predicted bone
+### 5.1. `intensityLine_v1`: smoothed intensity along the predicted bone
 
 This model cuts the candidate CT mesh with every ultrasound plane and keeps the probe-facing parts of the cut, which are the surfaces ultrasound should show as a bright echo. It then reads the image along those lines:
 
@@ -179,7 +179,7 @@ The cost lies in `[0, 1]`, and lower is better. Three design choices shape it:
 
 - **No start-pose reference.** The coarse start pose is only a rough guess. Every plane is judged only by what the image shows at the candidate pose, so the best pose of the cost does not depend on where the search started. Every plane counts equally.
 - **Continuous sampling.** The image is read with bilinear interpolation at evenly spaced points along the intersection segments, instead of at whole rasterized pixels. The cost therefore changes smoothly with the pose instead of in pixel-sized steps.
-- **Smoothed images.** The bone echo is only about 1 mm thick, so on the raw image a line slightly off the echo reads only background and the cost gives no direction. `prepareBonePoseOptimizationInputs` therefore blurs every image once with a Gaussian of standard deviation `intensitySmoothingSigmaMm` and stores the result in `data.extra.intensityCov.smoothedImages`. A line near the echo then still reads part of it, so the cost points toward the bone. A larger sigma reaches further but gives a shallower minimum.
+- **Smoothed images.** The bone echo is only about 1 mm thick, so on the raw image a line slightly off the echo reads only background and the cost gives no direction. `prepareBonePoseOptimizationInputs` therefore blurs every image once with a Gaussian of standard deviation `intensitySmoothingSigmaMm` and stores the result in `data.extra.intensityLine.smoothedImages`. A line near the echo then still reads part of it, so the cost points toward the bone. A larger sigma reaches further but gives a shallower minimum.
 
 On the knee-phantom data, a 0.5–1 mm blur gave a single minimum in four of six 1-D sweeps (±8 mm and ±8 degrees around the start pose). Rotation about the ref y axis stayed poorly defined, because it barely changes the intersection lines.
 
@@ -205,7 +205,7 @@ This model requires aligned 3D bone-surface measurements from `boneSurfaceMatFil
 
 ### 5.3. `intensityICP_v1`: combined intensity and 3D distance
 
-This model evaluates `intensityCov_v2` and `ICPLike_v1` at the same candidate pose. It divides the point-to-mesh RMSE by a reference distance to make that term dimensionless, then returns the convex blend
+This model evaluates `intensityLine_v1` and `ICPLike_v1` at the same candidate pose. It divides the point-to-mesh RMSE by a reference distance to make that term dimensionless, then returns the convex blend
 
 ```text
 cost = weight * intensityCost
@@ -252,7 +252,7 @@ This model requires aligned 3D bone-surface measurements with 2D normals (`surfa
 
 ### 5.5. `intensityPIMLOP_v1`: combined intensity and P-IMLOP
 
-This model evaluates `intensityCov_v2` and `PIMLOP_v1` at the same candidate pose and blends them with one weight, in the same way `intensityICP_v1` blends intensity with the 3D point-to-mesh distance. The P-IMLOP total is a sum over all retained measurements, so it grows with the number of segmented points. It is therefore averaged over the measurements before it is blended:
+This model evaluates `intensityLine_v1` and `PIMLOP_v1` at the same candidate pose and blends them with one weight, in the same way `intensityICP_v1` blends intensity with the 3D point-to-mesh distance. The P-IMLOP total is a sum over all retained measurements, so it grows with the number of segmented points. It is therefore averaged over the measurements before it is blended:
 
 ```text
 pimlopMeanMatchError = pimlopTotalMatchError / numberOfMeasurements
@@ -293,12 +293,12 @@ The external CMA-ES implementation used by this project is already stored under 
 
 Edit one of the following files:
 
-- `config/optconfig_oneSweep_intensityCov.json` for a smoothed-intensity interactive run after selecting it in the one-sweep script.
+- `config/optconfig_oneSweep_intensityLine.json` for a smoothed-intensity interactive run after selecting it in the one-sweep script.
 - `config/optconfig_oneSweep_ICPLike.json` for an ICP-like point-cloud interactive run after selecting it in the one-sweep script.
 - `config/optconfig_oneSweep_intensityICP.json` for a combined intensity and 3D-distance interactive run after selecting it in the one-sweep script.
 - `config/optconfig_oneSweep_PIMLOP.json` for a P-IMLOP interactive run; this is the one-sweep script's default.
 - `config/optconfig_oneSweep_intensityPIMLOP.json` for a combined intensity and P-IMLOP interactive run after selecting it in the one-sweep script.
-- `config/optconfig_hyperparamSweep_intensityCov.json` for an unattended smoothed-intensity sweep over `intensitySmoothingSigmaMm`; this is the hyperparameter-sweep script's default.
+- `config/optconfig_hyperparamSweep_intensityLine.json` for an unattended smoothed-intensity sweep over `intensitySmoothingSigmaMm`; this is the hyperparameter-sweep script's default.
 - `config/optconfig_hyperparamSweep_intensityICP.json` for an unattended combined sweep over `intensitySmoothingSigmaMm` and `weight` after selecting it in the hyperparameter-sweep script.
 - `config/optconfig_hyperparamSweep_PIMLOP.json` for an unattended P-IMLOP sweep over `kappa` after selecting it in the hyperparameter-sweep script.
 - `config/optconfig_hyperparamSweep_intensityPIMLOP.json` for an unattended combined sweep over `kappa` and `weight` after selecting it in the hyperparameter-sweep script.

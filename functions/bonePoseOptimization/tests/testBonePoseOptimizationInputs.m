@@ -26,7 +26,7 @@ addpath(genpath(fullfile(projectRoot, 'functions')));
 
 % Prepare the current standardized tibia inputs only once because intersection work is slow.
 configPath = fullfile(projectRoot, 'config', ...
-    'optconfig_oneSweep_intensityCov.json');
+    'optconfig_oneSweep_intensityLine.json');
 experimentSpec = createBonePoseOptimizationExperimentConfig(configPath);
 experimentPlan = createBonePoseOptimizationExperimentPlan(experimentSpec);
 config = createBonePoseOptimizationRunConfig( ...
@@ -373,7 +373,7 @@ data    = testCase.TestData.data;
 details = testCase.TestData.initialDetails;
 
 % Preparation must store one blurred image per plane for the intensity cost.
-verifyEqual(testCase, numel(data.extra.intensityCov.smoothedImages), ...
+verifyEqual(testCase, numel(data.extra.intensityLine.smoothedImages), ...
     numel(data.imagePlanesRef));
 
 % The coarse start pose must already show bone in some images; otherwise

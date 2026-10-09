@@ -1,6 +1,6 @@
 function [cost, details] = cost_intensityPIMLOP_v01(poseVector, data, config)
 %COST_INTENSITYPIMLOP_V01 Combine image intensity and P-IMLOP agreement.
-% This model evaluates the smoothed-intensity cost (intensityCov_v2) and the
+% This model evaluates the smoothed-intensity cost (intensityLine_v1) and the
 % P-IMLOP cost at the same candidate pose. The P-IMLOP total grows with the number of
 % measurements, so it is turned into a mean match error per measurement.
 % This keeps its size independent of how many surface points were
@@ -13,7 +13,7 @@ function [cost, details] = cost_intensityPIMLOP_v01(poseVector, data, config)
 %   data       - Prepared estimation data containing image planes, the CT
 %                mesh, initial transforms, aligned 3D surface points with
 %                2D normals, the P-IMLOP model data.extra.pimlop.PsiCT, and
-%                the smoothed images data.extra.intensityCov.smoothedImages.
+%                the smoothed images data.extra.intensityLine.smoothedImages.
 %   config     - Scalar runtime configuration containing all component
 %                parameters and weight.
 %
@@ -28,7 +28,7 @@ function [cost, details] = cost_intensityPIMLOP_v01(poseVector, data, config)
 % candidate bone pose under identical experiment conditions. The P-IMLOP
 % details are always requested because they report the measurement count
 % needed for the mean match error below.
-[intensityCost, intensityDetails]      = cost_intensityCov_v02(poseVector, data, config);
+[intensityCost, intensityDetails]      = cost_intensityLine_v01(poseVector, data, config);
 [pimlopTotalMatchError, pimlopDetails] = cost_PIMLOP_v01(poseVector, data, config);
 
 %% NORMALIZE AND COMBINE THE COSTS

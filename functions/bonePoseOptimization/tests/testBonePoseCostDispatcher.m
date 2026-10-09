@@ -22,7 +22,7 @@ addpath(genpath(fullfile(projectRoot, 'functions')));
 
 % Use the maintained one-sweep configuration rather than legacy inputs.
 configPath = fullfile(projectRoot, 'config', ...
-    'optconfig_oneSweep_intensityCov.json');
+    'optconfig_oneSweep_intensityLine.json');
 experimentSpec = createBonePoseOptimizationExperimentConfig(configPath);
 experimentPlan = createBonePoseOptimizationExperimentPlan(experimentSpec);
 config = createBonePoseOptimizationRunConfig( ...
@@ -67,7 +67,7 @@ for poseIndex = 1:size(poseVectors, 2)
     poseVector = poseVectors(:, poseIndex);
     [publicCost, publicDetails] = bonePoseCostFunction(poseVector, data, config);
     [versionedCost, versionedDetails] = ...
-        cost_intensityCov_v02(poseVector, data, config);
+        cost_intensityLine_v01(poseVector, data, config);
 
     verifyCostEvaluationEqual(testCase, publicCost, publicDetails, ...
         versionedCost, versionedDetails);
@@ -119,7 +119,7 @@ poseVector = zeros(6, 1);
 
 % Calculate each established term independently before evaluating the blend.
 [intensityCost, intensityDetails] = ...
-    cost_intensityCov_v02(poseVector, data, config);
+    cost_intensityLine_v01(poseVector, data, config);
 [pointCloudCostMm, pointCloudDetails] = ...
     cost_ICPLike_v01(poseVector, data, config);
 [combinedCost, combinedDetails] = ...
@@ -171,7 +171,7 @@ data = testCase.TestData.data;
 % Omitting config must use the configuration stored with data.
 [publicCost, publicDetails] = bonePoseCostFunction(zeros(6, 1), data);
 [versionedCost, versionedDetails] = ...
-    cost_intensityCov_v02(zeros(6, 1), data, data.config);
+    cost_intensityLine_v01(zeros(6, 1), data, data.config);
 verifyCostEvaluationEqual(testCase, publicCost, publicDetails, ...
     versionedCost, versionedDetails);
 
@@ -179,7 +179,7 @@ verifyCostEvaluationEqual(testCase, publicCost, publicDetails, ...
 farAwayPose = [500; 500; 500; 0; 0; 0];
 [publicCost, publicDetails] = bonePoseCostFunction(farAwayPose, data);
 [versionedCost, versionedDetails] = ...
-    cost_intensityCov_v02(farAwayPose, data, data.config);
+    cost_intensityLine_v01(farAwayPose, data, data.config);
 verifyCostEvaluationEqual(testCase, publicCost, publicDetails, ...
     versionedCost, versionedDetails);
 
@@ -200,7 +200,7 @@ function verifyCostEvaluationEqual(testCase, actualCost, actualDetails, expected
 
 % The dispatcher performs no calculation, so both scalar values should be identical.
 verifyEqual(testCase, actualCost, expectedCost);
-verifyEqual(testCase, actualDetails.costModel, 'intensityCov_v2');
+verifyEqual(testCase, actualDetails.costModel, 'intensityLine_v1');
 
 % Compare the triangulation explicitly so mesh geometry remains easy to diagnose.
 verifyEqual(testCase, actualDetails.boneMeshRefCandidate.ConnectivityList, ...
