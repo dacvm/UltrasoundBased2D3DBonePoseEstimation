@@ -1,15 +1,15 @@
-function [fixedParameters, hyperparameters] = validate_cost_intensityICP_v01(fixedParameters, hyperparameters)
-%VALIDATE_COST_INTENSITYICP_V01 Validate combined settings.
-% This validator checks the union of the existing intensity and point-cloud
+function [fixedParameters, hyperparameters] = validate_cost_intensityICP(fixedParameters, hyperparameters)
+%VALIDATE_COST_INTENSITYICP Validate combined settings.
+% This validator checks the union of the smoothed-intensity and point-cloud
 % settings plus the distance normalization and blend weight. It reuses the
 % two component validators so their established parameter rules stay in one
 % place while returning a stable field order for experiment planning.
 %
 % Inputs:
-%   fixedParameters - Struct containing intensityMax, nearestVertexCount,
-%                     and distanceReferenceMm.
-%   hyperparameters - Struct containing minReferencePixels, nMinPixels,
-%                     lambdaMissing, and weight candidate arrays.
+%   fixedParameters - Struct containing intensityMax, sampleSpacingMm,
+%                     nearestVertexCount, and distanceReferenceMm.
+%   hyperparameters - Struct containing intensitySmoothingSigmaMm and
+%                     weight candidate arrays.
 %
 % Outputs:
 %   fixedParameters - Validated fixed settings stored as scalar doubles.
@@ -18,19 +18,19 @@ function [fixedParameters, hyperparameters] = validate_cost_intensityICP_v01(fix
 
 % Require the complete combined-model schema so spelling mistakes are
 % reported before data preparation or optimization begins.
-validateFieldNames(fixedParameters, {'intensityMax', 'nearestVertexCount', 'distanceReferenceMm'}, 'cost.fixedParameters');
-validateFieldNames(hyperparameters, {'minReferencePixels', 'nMinPixels', 'lambdaMissing', 'weight'}, 'cost.hyperparameters');
+validateFieldNames(fixedParameters, {'intensityMax', 'sampleSpacingMm', 'nearestVertexCount', 'distanceReferenceMm'}, 'cost.fixedParameters');
+validateFieldNames(hyperparameters, {'intensitySmoothingSigmaMm', 'weight'}, 'cost.hyperparameters');
 
 % Reuse each component validator on the settings that belong to that model.
-intensityFixed = struct('intensityMax', fixedParameters.intensityMax);
+intensityFixed = struct( ...
+    'intensityMax',    fixedParameters.intensityMax, ...
+    'sampleSpacingMm', fixedParameters.sampleSpacingMm);
 intensityHyper = struct( ...
-    'minReferencePixels', hyperparameters.minReferencePixels, ...
-    'nMinPixels', hyperparameters.nMinPixels, ...
-    'lambdaMissing', hyperparameters.lambdaMissing);
-[intensityFixed, intensityHyper] = validate_cost_intensityCov_v01(intensityFixed, intensityHyper);
+    'intensitySmoothingSigmaMm', hyperparameters.intensitySmoothingSigmaMm);
+[intensityFixed, intensityHyper] = validate_cost_intensityLine(intensityFixed, intensityHyper);
 
 pointCloudFixed = struct('nearestVertexCount', fixedParameters.nearestVertexCount);
-[pointCloudFixed, ~] = validate_cost_ICPLike_v01(pointCloudFixed, struct());
+[pointCloudFixed, ~] = validate_cost_ICPLike(pointCloudFixed, struct());
 
 % The reference distance removes the millimetre unit from the point-cloud RMSE.
 distanceReferenceMm = fixedParameters.distanceReferenceMm;
@@ -42,14 +42,13 @@ weight = normalizeWeightCandidates(hyperparameters.weight);
 % Rebuild both groups in the order used for experiment table columns.
 fixedParameters = struct();
 fixedParameters.intensityMax        = intensityFixed.intensityMax;
+fixedParameters.sampleSpacingMm     = intensityFixed.sampleSpacingMm;
 fixedParameters.nearestVertexCount  = pointCloudFixed.nearestVertexCount;
 fixedParameters.distanceReferenceMm = double(distanceReferenceMm);
 
 hyperparameters = struct();
-hyperparameters.minReferencePixels = intensityHyper.minReferencePixels;
-hyperparameters.nMinPixels         = intensityHyper.nMinPixels;
-hyperparameters.lambdaMissing      = intensityHyper.lambdaMissing;
-hyperparameters.weight             = weight;
+hyperparameters.intensitySmoothingSigmaMm = intensityHyper.intensitySmoothingSigmaMm;
+hyperparameters.weight                    = weight;
 end
 
 
@@ -61,7 +60,7 @@ function validateFieldNames(sourceStruct, expectedNames, displayName)
 % accepted fields, and displayName identifies the group in error messages.
 
 if ~isstruct(sourceStruct) || ~isscalar(sourceStruct)
-    error('validate_cost_intensityICP_v01:InvalidParameterGroup', ...
+    error('validate_cost_intensityICP:InvalidParameterGroup', ...
         '%s must be a JSON object.', displayName);
 end
 
@@ -70,11 +69,11 @@ missingNames    = setdiff(expectedNames, actualNames, 'stable');
 unexpectedNames = setdiff(actualNames, expectedNames, 'stable');
 
 if ~isempty(missingNames)
-    error('validate_cost_intensityICP_v01:MissingParameter', ...
+    error('validate_cost_intensityICP:MissingParameter', ...
         '%s is missing: %s.', displayName, strjoin(missingNames, ', '));
 end
 if ~isempty(unexpectedNames)
-    error('validate_cost_intensityICP_v01:UnexpectedParameter', ...
+    error('validate_cost_intensityICP:UnexpectedParameter', ...
         '%s contains an unsupported field: %s.', ...
         displayName, strjoin(unexpectedNames, ', '));
 end
@@ -91,7 +90,7 @@ validateattributes(rawWeight, {'numeric'}, ...
     mfilename, 'cost.hyperparameters.weight');
 
 if numel(unique(rawWeight)) ~= numel(rawWeight)
-    error('validate_cost_intensityICP_v01:DuplicateWeight', ...
+    error('validate_cost_intensityICP:DuplicateWeight', ...
         'cost.hyperparameters.weight must not contain duplicate values.');
 end
 

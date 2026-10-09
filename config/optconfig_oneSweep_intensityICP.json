@@ -15,16 +15,15 @@
     "normalFacingToleranceDeg": 30
   },
   "cost": {
-    "model": "intensityICP_v1",
+    "model": "intensityICP",
     "fixedParameters": {
       "intensityMax": 255,
+      "sampleSpacingMm": 0.1,
       "nearestVertexCount": 20,
       "distanceReferenceMm": 5.0
     },
     "hyperparameters": {
-      "minReferencePixels": [50],
-      "nMinPixels": [100],
-      "lambdaMissing": [1.0],
+      "intensitySmoothingSigmaMm": [1.0],
       "weight": [0.25]
     }
   },
@@ -43,7 +42,7 @@
     "parforWorkers": 6
   },
   "experiment": {
-    "name": "oneSweep_intensityICP_v01",
+    "name": "oneSweep_intensityICP",
     "seeds": [1001],
     "outputFolder": "output/bonePoseOptimization/oneSweeps/intensity_ICP_v01"
   }

@@ -1,15 +1,16 @@
-function [cost, details] = cost_intensityICP_v01(poseVector, data, config)
-%COST_INTENSITYICP_V01 Combine image and 3D surface agreement.
-% This model evaluates the existing intensity-coverage and 3D point-cloud
-% costs at the same candidate pose. It converts the point-cloud RMSE from
-% millimetres to a dimensionless value, then blends both costs with one
-% configured weight. Keeping the two established models unchanged makes the
-% combined objective easy to inspect and extend.
+function [cost, details] = cost_intensityICP(poseVector, data, config)
+%COST_INTENSITYICP Combine image and 3D surface agreement.
+% This model evaluates the smoothed-intensity cost (intensityLine) and the
+% 3D point-cloud cost (ICPLike) at the same candidate pose. It converts
+% the point-cloud RMSE from millimetres to a dimensionless value, then
+% blends both costs with one configured weight. Keeping the two established
+% models unchanged makes the combined objective easy to inspect and extend.
 %
 % Inputs:
 %   poseVector - Six-value perturbation around data.T_CT_ref_initial.
 %   data       - Prepared estimation data containing image planes, the CT
-%                mesh, initial transforms, and aligned 3D surface points.
+%                mesh, initial transforms, aligned 3D surface points, and
+%                the smoothed images data.extra.intensityLine.smoothedImages.
 %   config     - Scalar runtime configuration containing all component
 %                parameters, distanceReferenceMm, and weight.
 %
@@ -22,8 +23,8 @@ function [cost, details] = cost_intensityICP_v01(poseVector, data, config)
 
 % Use the same pose, data, and scalar settings so both terms describe one
 % candidate bone pose under identical experiment conditions.
-[intensityCoverageCost, intensityCoverageDetails] = cost_intensityCov_v01(poseVector, data, config);
-[pointCloudCostMm, pointCloudDetails] = cost_ICPLike_v01(poseVector, data, config);
+[intensityCost, intensityDetails]     = cost_intensityLine(poseVector, data, config);
+[pointCloudCostMm, pointCloudDetails] = cost_ICPLike(poseVector, data, config);
 
 %% NORMALIZE AND COMBINE THE COSTS
 
@@ -45,32 +46,32 @@ validateattributes(weight, {'numeric'}, ...
 pointCloudCostNormalized = pointCloudCostMm / distanceReferenceMm;
 
 % Weight multiplies the first cost, matching f3 = weight*f1 + (1-weight)*f2.
-intensityCoverageWeighted = weight * intensityCoverageCost;
-pointCloudWeighted        = (1 - weight) * pointCloudCostNormalized;
-cost                      = intensityCoverageWeighted + pointCloudWeighted;
+intensityWeighted  = weight * intensityCost;
+pointCloudWeighted = (1 - weight) * pointCloudCostNormalized;
+cost               = intensityWeighted + pointCloudWeighted;
 
 %% PACKAGE READABLE DIAGNOSTICS
 
 % Keep the common geometry at the top level because evaluation code expects
 % to find the final candidate mesh without knowing the selected cost model.
-details.T_CT_ref_candidate   = intensityCoverageDetails.T_CT_ref_candidate;
-details.T_bone_ref_candidate = intensityCoverageDetails.T_bone_ref_candidate;
-details.boneMeshRefCandidate = intensityCoverageDetails.boneMeshRefCandidate;
-details.poseEvaluation       = intensityCoverageDetails.poseEvaluation;
+details.T_CT_ref_candidate   = intensityDetails.T_CT_ref_candidate;
+details.T_bone_ref_candidate = intensityDetails.T_bone_ref_candidate;
+details.boneMeshRefCandidate = intensityDetails.boneMeshRefCandidate;
+details.poseEvaluation       = intensityDetails.poseEvaluation;
 
 % Store the calculation in the same order as the equation so users can
 % reconstruct the returned scalar directly from the saved result.
-details.costTerms.intensityCoverageRaw      = intensityCoverageCost;
-details.costTerms.pointCloud3DRawMm         = pointCloudCostMm;
-details.costTerms.pointCloud3DNormalized    = pointCloudCostNormalized;
-details.costTerms.intensityCoverageWeighted = intensityCoverageWeighted;
-details.costTerms.pointCloud3DWeighted      = pointCloudWeighted;
-details.costTerms.combined                  = cost;
+details.costTerms.intensityRaw           = intensityCost;
+details.costTerms.pointCloud3DRawMm      = pointCloudCostMm;
+details.costTerms.pointCloud3DNormalized = pointCloudCostNormalized;
+details.costTerms.intensityWeighted      = intensityWeighted;
+details.costTerms.pointCloud3DWeighted   = pointCloudWeighted;
+details.costTerms.combined               = cost;
 
 % Preserve the exact scalar settings and the full component diagnostics for
 % later research inspection without changing either existing cost model.
-details.costSettings                      = config.cost.parameters;
-details.componentDetails.intensityCoverage = intensityCoverageDetails;
-details.componentDetails.pointCloud3D      = pointCloudDetails;
+details.costSettings                  = config.cost.parameters;
+details.componentDetails.intensity    = intensityDetails;
+details.componentDetails.pointCloud3D = pointCloudDetails;
 details.status = 'intensity_point_cloud_combined_cost_computed';
 end

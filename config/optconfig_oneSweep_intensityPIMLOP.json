@@ -15,11 +15,20 @@
     "normalFacingToleranceDeg": 30
   },
   "cost": {
-    "model": "ICPLike",
+    "model": "intensityPIMLOP",
     "fixedParameters": {
-      "nearestVertexCount": 20
+      "intensityMax": 255,
+      "sampleSpacingMm": 0.1,
+      "measurementSubsampleFraction": 0.5,
+      "positionXStandardDeviationImage": 1.0,
+      "positionYStandardDeviationImage": 1.0,
+      "positionZStandardDeviationImage": 1.5
     },
-    "hyperparameters": {}
+    "hyperparameters": {
+      "intensitySmoothingSigmaMm": [1.0],
+      "kappa": [50],
+      "weight": [0.5]
+    }
   },
   "logging": {
     "printPreparationProgress": false,
@@ -36,8 +45,8 @@
     "parforWorkers": 6
   },
   "experiment": {
-    "name": "oneSweep_ICPLike",
+    "name": "oneSweep_intensityPIMLOP",
     "seeds": [1001],
-    "outputFolder": "output/bonePoseOptimization/oneSweeps/ICPLike"
+    "outputFolder": "output/bonePoseOptimization/oneSweeps/intensityPIMLOP"
   }
 }

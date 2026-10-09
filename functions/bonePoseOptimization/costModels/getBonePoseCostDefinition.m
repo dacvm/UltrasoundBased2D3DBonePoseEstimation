@@ -39,28 +39,34 @@ end
 
 % Keep the supported models together so a new developer can find the extension point.
 switch modelName
-    case 'intensityCov_v1'
-        definition.modelName                    = 'intensityCov_v1';
-        definition.evaluateFcn                  = @cost_intensityCov_v01;
-        definition.validateExperimentConfigFcn  = @validate_cost_intensityCov_v01;
+    case 'intensityLine'
+        definition.modelName                    = 'intensityLine';
+        definition.evaluateFcn                  = @cost_intensityLine;
+        definition.validateExperimentConfigFcn  = @validate_cost_intensityLine;
         definition.requiresBoneSurface          = false;
 
-    case 'ICPLike_v1'
-        definition.modelName                    = 'ICPLike_v1';
-        definition.evaluateFcn                  = @cost_ICPLike_v01;
-        definition.validateExperimentConfigFcn  = @validate_cost_ICPLike_v01;
+    case 'ICPLike'
+        definition.modelName                    = 'ICPLike';
+        definition.evaluateFcn                  = @cost_ICPLike;
+        definition.validateExperimentConfigFcn  = @validate_cost_ICPLike;
         definition.requiresBoneSurface          = true;
 
-    case 'intensityICP_v1'
-        definition.modelName                    = 'intensityICP_v1';
-        definition.evaluateFcn                  = @cost_intensityICP_v01;
-        definition.validateExperimentConfigFcn  = @validate_cost_intensityICP_v01;
+    case 'intensityICP'
+        definition.modelName                    = 'intensityICP';
+        definition.evaluateFcn                  = @cost_intensityICP;
+        definition.validateExperimentConfigFcn  = @validate_cost_intensityICP;
         definition.requiresBoneSurface          = true;
 
-    case 'PIMLOP_v1'
-        definition.modelName                    = 'PIMLOP_v1';
-        definition.evaluateFcn                  = @cost_PIMLOP_v01;
-        definition.validateExperimentConfigFcn  = @validate_cost_PIMLOP_v01;
+    case 'PIMLOP'
+        definition.modelName                    = 'PIMLOP';
+        definition.evaluateFcn                  = @cost_PIMLOP;
+        definition.validateExperimentConfigFcn  = @validate_cost_PIMLOP;
+        definition.requiresBoneSurface          = true;
+
+    case 'intensityPIMLOP'
+        definition.modelName                    = 'intensityPIMLOP';
+        definition.evaluateFcn                  = @cost_intensityPIMLOP;
+        definition.validateExperimentConfigFcn  = @validate_cost_intensityPIMLOP;
         definition.requiresBoneSurface          = true;
 
     otherwise

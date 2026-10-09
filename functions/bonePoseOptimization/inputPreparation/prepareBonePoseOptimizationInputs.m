@@ -21,8 +21,8 @@ function [data, validationData] = prepareBonePoseOptimizationInputs(config)
 %     - the ultrasound image planes in the ref frame (what we compare to),
 %     - optional bone-surface points extracted from those images,
 %     - the coarse start pose (where the search begins),
-%     - pre-built search structures such as the P-IMLOP PD-tree,
-%     - reference numbers measured at the start pose.
+%     - pre-built structures such as the P-IMLOP PD-tree and the
+%       smoothed images used by the intensity cost.
 %
 % Why it is needed:
 %   A cost function is called a huge number of times, so it must be fast.
@@ -46,9 +46,12 @@ function [data, validationData] = prepareBonePoseOptimizationInputs(config)
 %
 % Outputs:
 %   data           - Estimation-only data containing the CT mesh, ultrasound
-%                    measurements, initial transforms, and initial pixel counts.
+%                    measurements, and initial transforms.
 %                    data.extra.pimlop.PsiCT holds the CT-frame P-IMLOP model
-%                    with its PD-tree, used by cost_PIMLOP_v01.
+%                    with its PD-tree, used by cost_PIMLOP. When the
+%                    config sets intensitySmoothingSigmaMm,
+%                    data.extra.intensityLine.smoothedImages holds one
+%                    blurred image per plane, used by cost_intensityLine.
 %   validationData - Saved ground-truth intersections, bone pose, and source
 %                    metadata. This output must not be passed to the optimizer.
 
@@ -302,26 +305,6 @@ validateCoarseMesh(boneMeshCT, currentCoarseRegistration.boneMeshRef_est, T_CT_r
 PsiCT        = preparePIMLOPModel_batchedProcess(boneMeshCT);
 PsiCT.pdTree = buildPIMLOPPDTree_batchedProcess(PsiCT.mesh, PsiCT.validFaceMask);
 
-%% COMPUTE THE INITIAL COVERAGE REFERENCE
-
-% Cut the bone mesh with every image plane at the START pose, and keep the
-% pixels where the bone surface faces the probe (the part that ultrasound
-% can actually see). We recompute this instead of using the saved
-% intersections, because those were made at the true pose and are
-% validation data that the optimizer must not see.
-[initialPoseEvaluation, ~] = computeProbeFacingPixelsForPose(boneMeshCT, imagePlanesRef, T_CT_ref_initial, config);
-
-% Store, per image plane, how many bone pixels were visible at the start
-% pose. Cost models use this as a fixed reference: a plane that showed bone
-% at the start is "active", and if a candidate pose makes the bone cut much
-% smaller (or move off the image), the cost can tell that coverage was lost.
-% Without this reference, a pose that simply slides the bone out of all
-% images could look attractive, because there would be nothing left to
-% disagree with the images.
-nInitialIntersectionPixels = arrayfun( ...
-    @(evaluation) size(evaluation.probeFacingPixels, 1), ...
-    initialPoseEvaluation);
-
 %% PACKAGE ESTIMATION DATA
 
 % Put everything the cost functions and optimizer need into one struct.
@@ -329,23 +312,34 @@ nInitialIntersectionPixels = arrayfun( ...
 % imagePlanesRef) so code using it can see at a glance whether a transform
 % is still needed. The config is included so a cost function has all its
 % settings at hand without any extra argument.
-data.bone                       = targetBone;
-data.boneName                   = char(string(currentBone.name));
-data.boneMeshCT                 = boneMeshCT;
-data.T_bone_CT                  = T_bone_CT;
-data.T_CT_ref_initial           = T_CT_ref_initial;
-data.T_bone_ref_initial         = T_bone_ref_initial;
-data.imagePlanesRef             = imagePlanesRef;
-data.hasBoneSurface             = boneSurface.isAvailable;
-data.boneSurfaceMetadata        = boneSurface.extractionMetadata;
-data.boneSurfaceMeasurements    = boneSurface.measurements;
-data.nInitialIntersectionPixels = nInitialIntersectionPixels;
-data.config                     = config;
+data.bone                    = targetBone;
+data.boneName                = char(string(currentBone.name));
+data.boneMeshCT              = boneMeshCT;
+data.T_bone_CT               = T_bone_CT;
+data.T_CT_ref_initial        = T_CT_ref_initial;
+data.T_bone_ref_initial      = T_bone_ref_initial;
+data.imagePlanesRef          = imagePlanesRef;
+data.hasBoneSurface          = boneSurface.isAvailable;
+data.boneSurfaceMetadata     = boneSurface.extractionMetadata;
+data.boneSurfaceMeasurements = boneSurface.measurements;
+data.config                  = config;
 
 % Inputs that only one cost model needs go under data.extra.<model>. This
 % keeps the shared top-level fields the same for all cost models, and makes
 % it clear which pre-computed pieces belong to which model.
-data.extra.pimlop.PsiCT         = PsiCT;
+data.extra.pimlop.PsiCT      = PsiCT;
+
+% Intensity cost models (intensityLine and the combined models built on
+% it) read the images through a Gaussian blur so they still get a hint
+% about the bone when the predicted line is slightly off the echo. Blurring
+% every image is slow, so it is done here once. Its width is a
+% hyperparameter, and this function runs once per hyperparameter
+% combination, so each combination gets its own blur. Cost models without
+% this setting skip the work.
+if isfield(config.cost.parameters, 'intensitySmoothingSigmaMm')
+    data.extra.intensityLine.smoothedImages = smoothUltrasoundImages( ...
+        imagePlanesRef, config.cost.parameters.intensitySmoothingSigmaMm);
+end
 
 % Everything about the true answer goes into a separate struct. Only the
 % evaluation code after the optimization receives it, so the estimation can
@@ -600,7 +594,7 @@ for measurementIndex = 1:numel(measurements)
               measurementIndex);
     end
 
-    % Surface normals are optional here so historical ICPLike_v1 and
+    % Surface normals are optional here so historical ICPLike and
     % intensity artifacts remain usable. When either new field is present,
     % require the complete row-aligned contract so a future P-IMLOP model
     % cannot silently consume ambiguous orientation data.

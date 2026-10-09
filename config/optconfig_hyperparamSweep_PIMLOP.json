@@ -15,7 +15,7 @@
     "normalFacingToleranceDeg": 30
   },
   "cost": {
-    "model": "PIMLOP_v1",
+    "model": "PIMLOP",
     "fixedParameters": {
       "measurementSubsampleFraction": 0.5,
       "positionXStandardDeviationImage": 1.0,
@@ -41,7 +41,7 @@
     "parforWorkers": 6
   },
   "experiment": {
-    "name": "PIMLOP_v01",
+    "name": "PIMLOP",
     "seeds": [1001, 1002, 1003, 1004, 1005],
     "outputFolder": "output/bonePoseOptimization/experiments"
   }

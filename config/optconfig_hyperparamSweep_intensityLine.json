@@ -15,11 +15,14 @@
     "normalFacingToleranceDeg": 30
   },
   "cost": {
-    "model": "ICPLike",
+    "model": "intensityLine",
     "fixedParameters": {
-      "nearestVertexCount": 20
+      "intensityMax": 255,
+      "sampleSpacingMm": 0.1
     },
-    "hyperparameters": {}
+    "hyperparameters": {
+      "intensitySmoothingSigmaMm": [0.5, 1.0]
+    }
   },
   "logging": {
     "printPreparationProgress": false,
@@ -30,14 +33,14 @@
     "rotationBoundDeg": 10.0,
     "translationSigmaMm": 3.0,
     "rotationSigmaDeg": 3.0,
-    "populationSize": 4,
-    "maxFunctionEvaluations": 10,
+    "populationSize": 32,
+    "maxFunctionEvaluations": 30,
     "useParfor": true,
     "parforWorkers": 6
   },
   "experiment": {
-    "name": "oneSweep_ICPLike",
-    "seeds": [1001],
-    "outputFolder": "output/bonePoseOptimization/oneSweeps/ICPLike"
+    "name": "intensityLine",
+    "seeds": [1001, 1002, 1003, 1004, 1005],
+    "outputFolder": "output/bonePoseOptimization/experiments"
   }
 }

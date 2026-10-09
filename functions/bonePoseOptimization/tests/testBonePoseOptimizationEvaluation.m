@@ -106,7 +106,7 @@ verifyEqual(testCase, ...
     perCombinationTable.Properties.VariableNames(1:numel(expectedLeadingColumns)), ...
     expectedLeadingColumns);
 verifyEqual(testCase, perCombinationTable.costModel, ...
-    repmat("intensityCov_v1", 2, 1));
+    repmat("intensityPIMLOP", 2, 1));
 end
 
 
@@ -155,7 +155,7 @@ function testInconsistentCombinationMetadataIsRejected(testCase)
 
 % All seeds of one combination must use the same scalar parameter values.
 inconsistentParameters = perRunTable;
-inconsistentParameters.minReferencePixels(2) = 75;
+inconsistentParameters.intensitySmoothingSigmaMm(2) = 0.75;
 verifyError(testCase, ...
     @() createCombinationEvaluationTable(inconsistentParameters, parameterNames), ...
     'createCombinationEvaluationTable:InconsistentCombinationMetadata');
@@ -209,12 +209,12 @@ defaultFigure = plotHyperparameterPaneledHeatmaps( ...
 verifyEqual(testCase, numel(findall(defaultFigure, 'Type', 'image')), 1);
 
 % A user may keep two parameters on the axes and fix every other parameter.
-simpleSettings.xParameter = 'minReferencePixels';
-simpleSettings.yParameter = 'nMinPixels';
+simpleSettings.xParameter = 'intensitySmoothingSigmaMm';
+simpleSettings.yParameter = 'kappa';
 simpleSettings.panelRowParameter = '';
 simpleSettings.panelColumnParameter = '';
 simpleSettings.parametersToHold.normalFacingToleranceDeg = 30;
-simpleSettings.parametersToHold.lambdaMissing = 1;
+simpleSettings.parametersToHold.weight = 0.5;
 simpleFigure = plotHyperparameterPaneledHeatmaps( ...
     perCombinationTable, parameterNames, simpleSettings);
 verifyEqual(testCase, numel(findall(simpleFigure, 'Type', 'image')), 1);
@@ -224,7 +224,7 @@ perCombinationTable.futureWeight = [1; 2];
 futureParameterNames = [parameterNames, {'futureWeight'}];
 futureSettings = defaultSettings;
 futureSettings.panelColumnParameter = 'futureWeight';
-futureSettings.parametersToHold.lambdaMissing = 1;
+futureSettings.parametersToHold.weight = 0.5;
 futureFigure = plotHyperparameterPaneledHeatmaps( ...
     perCombinationTable, futureParameterNames, futureSettings);
 verifyEqual(testCase, numel(findall(futureFigure, 'Type', 'image')), 2);
@@ -267,7 +267,7 @@ verifyError(testCase, @() plotHyperparameterPaneledHeatmaps( ...
 % A fixed value must be one of the values recorded by the experiment.
 missingValueSettings = defaultSettings;
 missingValueSettings.panelColumnParameter = '';
-missingValueSettings.parametersToHold.lambdaMissing = 99;
+missingValueSettings.parametersToHold.weight = 99;
 verifyError(testCase, @() plotHyperparameterPaneledHeatmaps( ...
     perCombinationTable, parameterNames, missingValueSettings), ...
     'plotHyperparameterPaneledHeatmaps:HeldValueNotFound');
@@ -290,28 +290,29 @@ runNumber = (1:5).';
 runId = compose("run_%06d", runNumber);
 combinationNumber = [1; 1; 1; 2; 2];
 combinationId = compose("combination_%04d", combinationNumber);
-costModel = repmat("intensityCov_v1", 5, 1);
+costModel = repmat("intensityPIMLOP", 5, 1);
 seed = [1001; 1002; 1003; 1001; 1002];
 normalFacingToleranceDeg = 30 * ones(5, 1);
-minReferencePixels = [50; 50; 50; 100; 100];
-nMinPixels = 100 * ones(5, 1);
-lambdaMissing = ones(5, 1);
+intensitySmoothingSigmaMm = [0.5; 0.5; 0.5; 1; 1];
+kappa = 50 * ones(5, 1);
+weight = 0.5 * ones(5, 1);
 status = ["completed"; "completed"; "failed"; "completed"; "completed"];
 runtimeSeconds = [10; 12; 0; 14; 16];
-bestCost = [-0.8; -0.7; NaN; -0.6; -0.5];
+bestCost = [0.8; 0.9; NaN; 1.0; 1.1];
 evaluationStatus = ["evaluated"; "evaluated"; "skipped"; "evaluated"; "evaluated"];
 translationErrorMm = [1; 3; NaN; 5; 7];
 rotationErrorDeg = [2; 4; NaN; 6; 8];
 surfaceRmseMm = [2; 4; NaN; 5; 7];
 
 perRunTable = table(runNumber, runId, combinationNumber, combinationId, ...
-    costModel, seed, normalFacingToleranceDeg, minReferencePixels, nMinPixels, ...
-    lambdaMissing, status, runtimeSeconds, bestCost, evaluationStatus, ...
+    costModel, seed, normalFacingToleranceDeg, intensitySmoothingSigmaMm, kappa, ...
+    weight, status, runtimeSeconds, bestCost, evaluationStatus, ...
     translationErrorMm, rotationErrorDeg, surfaceRmseMm);
 
-% Match the canonical parameter order returned by the V1 validator and planner.
-parameterNames = {'normalFacingToleranceDeg', 'minReferencePixels', ...
-    'nMinPixels', 'lambdaMissing'};
+% Match the canonical parameter order returned by the intensityPIMLOP
+% validator and planner.
+parameterNames = {'normalFacingToleranceDeg', 'intensitySmoothingSigmaMm', ...
+    'kappa', 'weight'};
 end
 
 
@@ -320,10 +321,10 @@ function heatmapSettings = createDefaultHeatmapSettings()
 % This function has no input. heatmapSettings assigns two parameters to the
 % heatmap axes and two parameters to the panel rows and columns.
 
-heatmapSettings.xParameter = 'minReferencePixels';
-heatmapSettings.yParameter = 'nMinPixels';
+heatmapSettings.xParameter = 'intensitySmoothingSigmaMm';
+heatmapSettings.yParameter = 'kappa';
 heatmapSettings.panelRowParameter = 'normalFacingToleranceDeg';
-heatmapSettings.panelColumnParameter = 'lambdaMissing';
+heatmapSettings.panelColumnParameter = 'weight';
 heatmapSettings.parametersToHold = struct();
 end
 

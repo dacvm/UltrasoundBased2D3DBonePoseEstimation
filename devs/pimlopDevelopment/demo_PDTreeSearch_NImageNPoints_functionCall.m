@@ -14,7 +14,7 @@ clear; clc; close all;
 %       2. the fixed CT-space PD-tree;
 %       3. one runtime configuration and one candidate pose.
 %
-%   cost_PIMLOP_v01 performs for that candidate:
+%   cost_PIMLOP performs for that candidate:
 %       1. inverse-transforming ultrasound measurements into CT;
 %       2. searching each image with its own image-to-CT orientation;
 %       3. finding one most-likely model point for every retained measurement;
@@ -48,11 +48,11 @@ measurementSubsampleFraction = 0.5;
 positionStandardDeviationImageMm = [1.0; 1.0; 1.5];
 kappa = 50;
 
-% cost_PIMLOP_v01 already uses the standard optimizer interface, so place the
+% cost_PIMLOP already uses the standard optimizer interface, so place the
 % settings under config.cost.parameters just as a future JSON run config will.
 config                 = struct();
 config.cost            = struct();
-config.cost.model      = 'PIMLOP_v1';
+config.cost.model      = 'PIMLOP';
 config.cost.parameters = struct();
 config.cost.parameters.measurementSubsampleFraction   = measurementSubsampleFraction;
 config.cost.parameters.positionXStandardDeviationImage = positionStandardDeviationImageMm(1);
@@ -94,7 +94,7 @@ poseVector = zeros(6,1);
 % normally requests only the first output and therefore avoids the optional
 % diagnostic arrays used by the report and figure below.
 evaluationTimer   = tic;
-[pimlopCost, costDetails] = cost_PIMLOP_v01(poseVector, data, config);
+[pimlopCost, costDetails] = cost_PIMLOP(poseVector, data, config);
 evaluationSeconds = toc(evaluationTimer);
 
 %% 5. READ THE FUNCTION OUTPUTS USING FRAME-EXPLICIT NAMES

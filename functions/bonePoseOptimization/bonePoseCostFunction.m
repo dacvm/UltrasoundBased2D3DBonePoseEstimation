@@ -2,15 +2,16 @@ function [cost, details] = bonePoseCostFunction(poseVector, data, config)
 %BONEPOSECOSTFUNCTION Evaluate a bone pose through the stable cost entry point.
 % This function gives scripts and optimizers one permanent function to call.
 % It reads the configured model and forwards the evaluation to the matching
-% versioned implementation. Keeping this wrapper small lets new models be
+% registered implementation. Keeping this wrapper small lets new models be
 % added without changing scripts or optimizer code.
 %
 % Inputs:
 %   poseVector - Six-value perturbation around data.T_CT_ref_initial.
 %   data       - Prepared estimation data containing the CT mesh, tracked
-%                ultrasound planes, initial transforms, and reference counts.
+%                ultrasound planes, initial transforms, and model-specific
+%                inputs under data.extra.
 %   config     - Optional scalar runtime configuration. When omitted or
-%                empty, the versioned implementation uses data.config.
+%                empty, the registered implementation uses data.config.
 %
 % Outputs:
 %   cost       - Finite scalar objective value; lower values are better.
