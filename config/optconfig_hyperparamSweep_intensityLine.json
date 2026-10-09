@@ -15,7 +15,7 @@
     "normalFacingToleranceDeg": 30
   },
   "cost": {
-    "model": "intensityLine_v1",
+    "model": "intensityLine",
     "fixedParameters": {
       "intensityMax": 255,
       "sampleSpacingMm": 0.1
@@ -39,7 +39,7 @@
     "parforWorkers": 6
   },
   "experiment": {
-    "name": "intensityLine_v01",
+    "name": "intensityLine",
     "seeds": [1001, 1002, 1003, 1004, 1005],
     "outputFolder": "output/bonePoseOptimization/experiments"
   }

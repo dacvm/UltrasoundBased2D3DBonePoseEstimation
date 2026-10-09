@@ -1,5 +1,5 @@
-function [fixedParameters, hyperparameters] = validate_cost_intensityICP_v01(fixedParameters, hyperparameters)
-%VALIDATE_COST_INTENSITYICP_V01 Validate combined settings.
+function [fixedParameters, hyperparameters] = validate_cost_intensityICP(fixedParameters, hyperparameters)
+%VALIDATE_COST_INTENSITYICP Validate combined settings.
 % This validator checks the union of the smoothed-intensity and point-cloud
 % settings plus the distance normalization and blend weight. It reuses the
 % two component validators so their established parameter rules stay in one
@@ -27,10 +27,10 @@ intensityFixed = struct( ...
     'sampleSpacingMm', fixedParameters.sampleSpacingMm);
 intensityHyper = struct( ...
     'intensitySmoothingSigmaMm', hyperparameters.intensitySmoothingSigmaMm);
-[intensityFixed, intensityHyper] = validate_cost_intensityLine_v01(intensityFixed, intensityHyper);
+[intensityFixed, intensityHyper] = validate_cost_intensityLine(intensityFixed, intensityHyper);
 
 pointCloudFixed = struct('nearestVertexCount', fixedParameters.nearestVertexCount);
-[pointCloudFixed, ~] = validate_cost_ICPLike_v01(pointCloudFixed, struct());
+[pointCloudFixed, ~] = validate_cost_ICPLike(pointCloudFixed, struct());
 
 % The reference distance removes the millimetre unit from the point-cloud RMSE.
 distanceReferenceMm = fixedParameters.distanceReferenceMm;
@@ -60,7 +60,7 @@ function validateFieldNames(sourceStruct, expectedNames, displayName)
 % accepted fields, and displayName identifies the group in error messages.
 
 if ~isstruct(sourceStruct) || ~isscalar(sourceStruct)
-    error('validate_cost_intensityICP_v01:InvalidParameterGroup', ...
+    error('validate_cost_intensityICP:InvalidParameterGroup', ...
         '%s must be a JSON object.', displayName);
 end
 
@@ -69,11 +69,11 @@ missingNames    = setdiff(expectedNames, actualNames, 'stable');
 unexpectedNames = setdiff(actualNames, expectedNames, 'stable');
 
 if ~isempty(missingNames)
-    error('validate_cost_intensityICP_v01:MissingParameter', ...
+    error('validate_cost_intensityICP:MissingParameter', ...
         '%s is missing: %s.', displayName, strjoin(missingNames, ', '));
 end
 if ~isempty(unexpectedNames)
-    error('validate_cost_intensityICP_v01:UnexpectedParameter', ...
+    error('validate_cost_intensityICP:UnexpectedParameter', ...
         '%s contains an unsupported field: %s.', ...
         displayName, strjoin(unexpectedNames, ', '));
 end
@@ -90,7 +90,7 @@ validateattributes(rawWeight, {'numeric'}, ...
     mfilename, 'cost.hyperparameters.weight');
 
 if numel(unique(rawWeight)) ~= numel(rawWeight)
-    error('validate_cost_intensityICP_v01:DuplicateWeight', ...
+    error('validate_cost_intensityICP:DuplicateWeight', ...
         'cost.hyperparameters.weight must not contain duplicate values.');
 end
 

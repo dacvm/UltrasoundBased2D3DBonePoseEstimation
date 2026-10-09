@@ -15,7 +15,7 @@
     "normalFacingToleranceDeg": 30
   },
   "cost": {
-    "model": "intensityPIMLOP_v1",
+    "model": "intensityPIMLOP",
     "fixedParameters": {
       "intensityMax": 255,
       "sampleSpacingMm": 0.1,
@@ -45,8 +45,8 @@
     "parforWorkers": 6
   },
   "experiment": {
-    "name": "oneSweep_intensityPIMLOP_v01",
+    "name": "oneSweep_intensityPIMLOP",
     "seeds": [1001],
-    "outputFolder": "output/bonePoseOptimization/oneSweeps/intensityPIMLOP_v01"
+    "outputFolder": "output/bonePoseOptimization/oneSweeps/intensityPIMLOP"
   }
 }

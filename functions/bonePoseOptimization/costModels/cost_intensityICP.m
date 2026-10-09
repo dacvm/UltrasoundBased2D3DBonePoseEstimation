@@ -1,7 +1,7 @@
-function [cost, details] = cost_intensityICP_v01(poseVector, data, config)
-%COST_INTENSITYICP_V01 Combine image and 3D surface agreement.
-% This model evaluates the smoothed-intensity cost (intensityLine_v1) and the
-% 3D point-cloud cost (ICPLike_v1) at the same candidate pose. It converts
+function [cost, details] = cost_intensityICP(poseVector, data, config)
+%COST_INTENSITYICP Combine image and 3D surface agreement.
+% This model evaluates the smoothed-intensity cost (intensityLine) and the
+% 3D point-cloud cost (ICPLike) at the same candidate pose. It converts
 % the point-cloud RMSE from millimetres to a dimensionless value, then
 % blends both costs with one configured weight. Keeping the two established
 % models unchanged makes the combined objective easy to inspect and extend.
@@ -23,8 +23,8 @@ function [cost, details] = cost_intensityICP_v01(poseVector, data, config)
 
 % Use the same pose, data, and scalar settings so both terms describe one
 % candidate bone pose under identical experiment conditions.
-[intensityCost, intensityDetails]     = cost_intensityLine_v01(poseVector, data, config);
-[pointCloudCostMm, pointCloudDetails] = cost_ICPLike_v01(poseVector, data, config);
+[intensityCost, intensityDetails]     = cost_intensityLine(poseVector, data, config);
+[pointCloudCostMm, pointCloudDetails] = cost_ICPLike(poseVector, data, config);
 
 %% NORMALIZE AND COMBINE THE COSTS
 

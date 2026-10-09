@@ -1,6 +1,6 @@
 function tests = testBonePoseCostPIMLOP
 %TESTBONEPOSECOSTPIMLOP Test the P-IMLOP model inside the optimization framework.
-% This suite checks that PIMLOP_v1 is registered, that its configuration is
+% This suite checks that PIMLOP is registered, that its configuration is
 % validated, and that the generic preparation, dispatcher, and CMA-ES
 % workflow run it like any other cost model. One P-IMLOP evaluation takes
 % several seconds, so the suite reuses one prepared dataset.
@@ -46,13 +46,13 @@ function testPIMLOPModelIsRegistered(testCase)
 %TESTPIMLOPMODELISREGISTERED Check the registry connection.
 % testCase provides MATLAB verification methods. This function has no output.
 
-definition = getBonePoseCostDefinition('PIMLOP_v1');
+definition = getBonePoseCostDefinition('PIMLOP');
 
 % Check every registry field because each one serves a different pipeline stage.
-verifyEqual(testCase, definition.modelName, 'PIMLOP_v1');
-verifyEqual(testCase, definition.evaluateFcn, @cost_PIMLOP_v01);
+verifyEqual(testCase, definition.modelName, 'PIMLOP');
+verifyEqual(testCase, definition.evaluateFcn, @cost_PIMLOP);
 verifyEqual(testCase, definition.validateExperimentConfigFcn, ...
-    @validate_cost_PIMLOP_v01);
+    @validate_cost_PIMLOP);
 verifyTrue(testCase, definition.requiresBoneSurface);
 end
 
@@ -70,7 +70,7 @@ fixedParameters = struct( ...
     'positionYStandardDeviationImage', 1);
 hyperparameters = struct('kappa', single([10; 50; 200]));
 [fixedParameters, hyperparameters] = ...
-    validate_cost_PIMLOP_v01(fixedParameters, hyperparameters);
+    validate_cost_PIMLOP(fixedParameters, hyperparameters);
 
 verifyEqual(testCase, fieldnames(fixedParameters).', ...
     {'measurementSubsampleFraction', 'positionXStandardDeviationImage', ...
@@ -93,7 +93,7 @@ edgeParameters = struct('measurementSubsampleFraction', 1, ...
     'positionXStandardDeviationImage', 0.1, ...
     'positionYStandardDeviationImage', 0.1, ...
     'positionZStandardDeviationImage', 0.1);
-validate_cost_PIMLOP_v01(edgeParameters, struct('kappa', 0));
+validate_cost_PIMLOP(edgeParameters, struct('kappa', 0));
 end
 
 
@@ -108,32 +108,32 @@ validParameters = struct('measurementSubsampleFraction', 0.5, ...
 validHyperparameters = struct('kappa', [10 50]);
 
 % Field names must match exactly in both groups.
-verifyError(testCase, @() validate_cost_PIMLOP_v01( ...
+verifyError(testCase, @() validate_cost_PIMLOP( ...
     rmfield(validParameters, 'positionZStandardDeviationImage'), validHyperparameters), ...
-    'validate_cost_PIMLOP_v01:MissingParameter');
+    'validate_cost_PIMLOP:MissingParameter');
 % The old three-value field was split per axis, so it is no longer accepted.
 oldVectorParameters = rmfield(validParameters, {'positionXStandardDeviationImage', ...
     'positionYStandardDeviationImage', 'positionZStandardDeviationImage'});
 oldVectorParameters.positionStandardDeviationImage = [1 1 1.5];
-verifyError(testCase, @() validate_cost_PIMLOP_v01(oldVectorParameters, validHyperparameters), ...
-    'validate_cost_PIMLOP_v01:MissingParameter');
-verifyError(testCase, @() validate_cost_PIMLOP_v01(validParameters, struct()), ...
-    'validate_cost_PIMLOP_v01:MissingParameter');
+verifyError(testCase, @() validate_cost_PIMLOP(oldVectorParameters, validHyperparameters), ...
+    'validate_cost_PIMLOP:MissingParameter');
+verifyError(testCase, @() validate_cost_PIMLOP(validParameters, struct()), ...
+    'validate_cost_PIMLOP:MissingParameter');
 extraParameters = validParameters;
 extraParameters.misspelledFraction = 1;
-verifyError(testCase, @() validate_cost_PIMLOP_v01(extraParameters, validHyperparameters), ...
-    'validate_cost_PIMLOP_v01:UnexpectedParameter');
+verifyError(testCase, @() validate_cost_PIMLOP(extraParameters, validHyperparameters), ...
+    'validate_cost_PIMLOP:UnexpectedParameter');
 extraHyperparameters = validHyperparameters;
 extraHyperparameters.misspelledKappa = 1;
-verifyError(testCase, @() validate_cost_PIMLOP_v01(validParameters, extraHyperparameters), ...
-    'validate_cost_PIMLOP_v01:UnexpectedParameter');
+verifyError(testCase, @() validate_cost_PIMLOP(validParameters, extraHyperparameters), ...
+    'validate_cost_PIMLOP:UnexpectedParameter');
 % Kappa now belongs to the hyperparameters, so it is refused as a fixed setting.
 fixedWithKappa = validParameters;
 fixedWithKappa.kappa = 50;
-verifyError(testCase, @() validate_cost_PIMLOP_v01(fixedWithKappa, validHyperparameters), ...
-    'validate_cost_PIMLOP_v01:UnexpectedParameter');
-verifyError(testCase, @() validate_cost_PIMLOP_v01(validParameters, []), ...
-    'validate_cost_PIMLOP_v01:InvalidParameterGroup');
+verifyError(testCase, @() validate_cost_PIMLOP(fixedWithKappa, validHyperparameters), ...
+    'validate_cost_PIMLOP:UnexpectedParameter');
+verifyError(testCase, @() validate_cost_PIMLOP(validParameters, []), ...
+    'validate_cost_PIMLOP:InvalidParameterGroup');
 
 % Each fixed value outside its documented range must be rejected.
 invalidValues = { ...
@@ -148,7 +148,7 @@ for valueIndex = 1:size(invalidValues, 1)
     invalidParameters = validParameters;
     invalidParameters.(invalidValues{valueIndex, 1}) = invalidValues{valueIndex, 2};
     verifyError(testCase, ...
-        @() validate_cost_PIMLOP_v01(invalidParameters, validHyperparameters), ...
+        @() validate_cost_PIMLOP(invalidParameters, validHyperparameters), ...
         ?MException, sprintf('%s = %s should be rejected.', ...
         invalidValues{valueIndex, 1}, mat2str(invalidValues{valueIndex, 2})));
 end
@@ -159,12 +159,12 @@ invalidKappaLists = {-1, [10 -1], NaN, [10 Inf], []};
 for listIndex = 1:numel(invalidKappaLists)
     invalidKappa = invalidKappaLists{listIndex};
     verifyError(testCase, ...
-        @() validate_cost_PIMLOP_v01(validParameters, struct('kappa', invalidKappa)), ...
+        @() validate_cost_PIMLOP(validParameters, struct('kappa', invalidKappa)), ...
         ?MException, sprintf('kappa = %s should be rejected.', mat2str(invalidKappa)));
 end
 verifyError(testCase, ...
-    @() validate_cost_PIMLOP_v01(validParameters, struct('kappa', [10 10])), ...
-    'validate_cost_PIMLOP_v01:DuplicateCandidate');
+    @() validate_cost_PIMLOP(validParameters, struct('kappa', [10 10])), ...
+    'validate_cost_PIMLOP:DuplicateCandidate');
 end
 
 
@@ -177,15 +177,15 @@ plan = testCase.TestData.experimentPlan;
 config = testCase.TestData.config;
 
 % The JSON selects P-IMLOP with the settings of the validated demonstration.
-verifyEqual(testCase, spec.cost.model, 'PIMLOP_v1');
+verifyEqual(testCase, spec.cost.model, 'PIMLOP');
 verifyTrue(testCase, isfile(spec.input.boneSurfaceMatFile));
-verifyEqual(testCase, spec.experiment.name, 'oneSweep_PIMLOP_v01');
+verifyEqual(testCase, spec.experiment.name, 'oneSweep_PIMLOP');
 verifyEqual(testCase, spec.cost.hyperparameters.kappa, 50);
 verifyEqual(testCase, plan.parameterNames, {'normalFacingToleranceDeg', 'kappa'});
 verifyEqual(testCase, plan.numberOfRuns, 1);
 
 % Every runtime value reaches config.cost.parameters, where the cost reads it.
-verifyEqual(testCase, config.cost.model, 'PIMLOP_v1');
+verifyEqual(testCase, config.cost.model, 'PIMLOP');
 verifyEqual(testCase, config.cost.parameters.measurementSubsampleFraction, 0.5);
 verifyEqual(testCase, config.cost.parameters.positionXStandardDeviationImage, 1);
 verifyEqual(testCase, config.cost.parameters.positionYStandardDeviationImage, 1);
@@ -217,7 +217,7 @@ verifyEqual(testCase, plan.numberOfRuns, ...
     numel(kappaCandidates) * numel(spec.experiment.seeds));
 
 % Each run config must carry its own scalar kappa next to the fixed
-% settings, because that is where cost_PIMLOP_v01 reads it.
+% settings, because that is where cost_PIMLOP reads it.
 for combinationIndex = 1:plan.numberOfCombinations
     combinationRow = plan.combinations(combinationIndex, :);
     runConfig = createBonePoseOptimizationRunConfig( ...
@@ -254,7 +254,7 @@ dataWithoutSurface = testCase.TestData.data;
 dataWithoutSurface.boneSurfaceMeasurements = struct([]);
 verifyError(testCase, @() bonePoseCostFunction( ...
     zeros(6, 1), dataWithoutSurface, testCase.TestData.config), ...
-    'cost_PIMLOP_v01:ImageCountMismatch');
+    'cost_PIMLOP:ImageCountMismatch');
 end
 
 
@@ -266,7 +266,7 @@ function testMissingPreparedModelIsReported(testCase)
 dataWithoutModel = rmfield(testCase.TestData.data, 'extra');
 verifyError(testCase, @() bonePoseCostFunction( ...
     zeros(6, 1), dataWithoutModel, testCase.TestData.config), ...
-    'cost_PIMLOP_v01:MissingPreparedModel');
+    'cost_PIMLOP:MissingPreparedModel');
 end
 
 
@@ -292,9 +292,9 @@ poseVector = [1; -0.5; 0.25; deg2rad(1); deg2rad(-0.5); deg2rad(0.25)];
 % The details also hold search timings, which differ between any two calls,
 % so compare only the values that define the result.
 [publicCost, publicDetails] = bonePoseCostFunction(poseVector, data, config);
-[directCost, directDetails] = cost_PIMLOP_v01(poseVector, data, config);
+[directCost, directDetails] = cost_PIMLOP(poseVector, data, config);
 verifyEqual(testCase, publicCost, directCost);
-verifyEqual(testCase, publicDetails.costModel, 'PIMLOP_v1');
+verifyEqual(testCase, publicDetails.costModel, 'PIMLOP');
 verifyEqual(testCase, publicDetails.T_CT_ref_candidate, directDetails.T_CT_ref_candidate);
 verifyEqual(testCase, publicDetails.X, directDetails.X);
 verifyEqual(testCase, publicDetails.YmatchesCT, directDetails.YmatchesCT);

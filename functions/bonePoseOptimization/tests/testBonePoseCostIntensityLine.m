@@ -1,6 +1,6 @@
 function tests = testBonePoseCostIntensityLine
 %TESTBONEPOSECOSTINTENSITYLINE Test the smoothed-intensity cost model.
-% This suite checks that intensityLine_v1 is registered and validated, that
+% This suite checks that intensityLine is registered and validated, that
 % the image blur behaves like a Gaussian in mm, that preparation stores the
 % blurred images, and that the cost reads them at the right image positions.
 % Preparation is slow, so the suite prepares the real data only once.
@@ -13,7 +13,7 @@ end
 
 
 function setupOnce(testCase)
-%SETUPONCE Prepare the intensityLine_v1 one-sweep inputs once for this suite.
+%SETUPONCE Prepare the intensityLine one-sweep inputs once for this suite.
 % testCase stores the resolved scalar configuration and prepared data for
 % all tests in this suite. This function has no output.
 
@@ -37,11 +37,11 @@ function testModelIsRegistered(testCase)
 %TESTMODELISREGISTERED Check the registry connection.
 % testCase provides MATLAB verification methods. This function has no output.
 
-definition = getBonePoseCostDefinition('intensityLine_v1');
+definition = getBonePoseCostDefinition('intensityLine');
 
-verifyEqual(testCase, definition.modelName, 'intensityLine_v1');
-verifyEqual(testCase, definition.evaluateFcn, @cost_intensityLine_v01);
-verifyEqual(testCase, definition.validateExperimentConfigFcn, @validate_cost_intensityLine_v01);
+verifyEqual(testCase, definition.modelName, 'intensityLine');
+verifyEqual(testCase, definition.evaluateFcn, @cost_intensityLine);
+verifyEqual(testCase, definition.validateExperimentConfigFcn, @validate_cost_intensityLine);
 verifyFalse(testCase, definition.requiresBoneSurface);
 end
 
@@ -55,7 +55,7 @@ function testValidatorReturnsCanonicalSettings(testCase)
 fixedParameters = struct('sampleSpacingMm', single(0.1), 'intensityMax', 255);
 hyperparameters = struct('intensitySmoothingSigmaMm', [0; 0.5; 1]);
 [fixedParameters, hyperparameters] = ...
-    validate_cost_intensityLine_v01(fixedParameters, hyperparameters);
+    validate_cost_intensityLine(fixedParameters, hyperparameters);
 
 verifyEqual(testCase, fieldnames(fixedParameters).', {'intensityMax', 'sampleSpacingMm'});
 verifyClass(testCase, fixedParameters.sampleSpacingMm, 'double');
@@ -70,28 +70,28 @@ function testValidatorRejectsInvalidSettings(testCase)
 validFixed = struct('intensityMax', 255, 'sampleSpacingMm', 0.1);
 validHyper = struct('intensitySmoothingSigmaMm', [0.5 1]);
 
-verifyError(testCase, @() validate_cost_intensityLine_v01( ...
+verifyError(testCase, @() validate_cost_intensityLine( ...
     rmfield(validFixed, 'sampleSpacingMm'), validHyper), ...
-    'validate_cost_intensityLine_v01:MissingParameter');
+    'validate_cost_intensityLine:MissingParameter');
 
 % A setting this model does not have must not be accepted silently.
 unknownHyper = validHyper;
 unknownHyper.misspelledParameter = 1;
-verifyError(testCase, @() validate_cost_intensityLine_v01(validFixed, unknownHyper), ...
-    'validate_cost_intensityLine_v01:UnexpectedParameter');
+verifyError(testCase, @() validate_cost_intensityLine(validFixed, unknownHyper), ...
+    'validate_cost_intensityLine:UnexpectedParameter');
 
 negativeSigma = struct('intensitySmoothingSigmaMm', -0.5);
-verifyError(testCase, @() validate_cost_intensityLine_v01(validFixed, negativeSigma), ...
-    'MATLAB:validate_cost_intensityLine_v01:expectedNonnegative');
+verifyError(testCase, @() validate_cost_intensityLine(validFixed, negativeSigma), ...
+    'MATLAB:validate_cost_intensityLine:expectedNonnegative');
 
 duplicateSigma = struct('intensitySmoothingSigmaMm', [1 1]);
-verifyError(testCase, @() validate_cost_intensityLine_v01(validFixed, duplicateSigma), ...
-    'validate_cost_intensityLine_v01:DuplicateCandidate');
+verifyError(testCase, @() validate_cost_intensityLine(validFixed, duplicateSigma), ...
+    'validate_cost_intensityLine:DuplicateCandidate');
 
 zeroSpacing = validFixed;
 zeroSpacing.sampleSpacingMm = 0;
-verifyError(testCase, @() validate_cost_intensityLine_v01(zeroSpacing, validHyper), ...
-    'MATLAB:validate_cost_intensityLine_v01:expectedPositive');
+verifyError(testCase, @() validate_cost_intensityLine(zeroSpacing, validHyper), ...
+    'MATLAB:validate_cost_intensityLine:expectedPositive');
 end
 
 
@@ -172,7 +172,7 @@ function testPoseWithoutVisibleBoneHasMaximumCost(testCase)
 % Moving the bone half a metre away leaves no bone in any image, so no
 % plane has evidence and the cost must be exactly 1.
 
-[cost, details] = cost_intensityLine_v01([500; 500; 500; 0; 0; 0], ...
+[cost, details] = cost_intensityLine([500; 500; 500; 0; 0; 0], ...
     testCase.TestData.data, testCase.TestData.config);
 
 verifyEqual(testCase, details.perPlaneSampleCount, zeros(size(details.perPlaneSampleCount)));
@@ -207,7 +207,7 @@ for rampAxis = ["column", "row"]
         end
     end
 
-    [~, details] = cost_intensityLine_v01(zeros(6, 1), rampData, config);
+    [~, details] = cost_intensityLine(zeros(6, 1), rampData, config);
 
     for planeIndex = find(details.perPlaneSampleCount > 0)
         plane    = data.imagePlanesRef(planeIndex);

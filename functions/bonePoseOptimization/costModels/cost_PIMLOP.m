@@ -1,9 +1,9 @@
-function [cost, details] = cost_PIMLOP_v01(poseVector, data, config)
-%COST_PIMLOP_V01 Evaluate one candidate bone pose with the P-IMLOP cost.
+function [cost, details] = cost_PIMLOP(poseVector, data, config)
+%COST_PIMLOP Evaluate one candidate bone pose with the P-IMLOP cost.
 % This cost model connects the batched PD-tree search in functions/PIMLOP/
 % to the bone-pose optimization interface. It uses the same three inputs as
 % the other cost models in this folder. Its configuration validator is
-% validate_cost_PIMLOP_v01.
+% validate_cost_PIMLOP.
 %
 % What P-IMLOP is
 % ---------------
@@ -155,12 +155,12 @@ poseVector = poseVector(:);
 % It must already exist: building the PD-tree here would repeat a slow,
 % pose-independent step in every optimizer evaluation.
 if ~isfield(data, 'extra') || ~isfield(data.extra, 'pimlop') || ~isfield(data.extra.pimlop, 'PsiCT')
-    error('cost_PIMLOP_v01:MissingPreparedModel', ...
+    error('cost_PIMLOP:MissingPreparedModel', ...
           'Prepare data.extra.pimlop.PsiCT before evaluating the P-IMLOP cost.');
 end
 PsiCT = data.extra.pimlop.PsiCT;
 if ~isfield(PsiCT, 'pdTree') || isempty(PsiCT.pdTree)
-    error('cost_PIMLOP_v01:MissingPDTree', ...
+    error('cost_PIMLOP:MissingPDTree', ...
           'data.extra.pimlop.PsiCT.pdTree must be built before cost evaluation.');
 end
 
@@ -170,7 +170,7 @@ end
 % preparation guarantees that ordering, and here we check the counts match.
 numberOfImages = numel(data.imagePlanesRef);
 if numberOfImages == 0 || numel(data.boneSurfaceMeasurements) ~= numberOfImages
-    error('cost_PIMLOP_v01:ImageCountMismatch', ...
+    error('cost_PIMLOP:ImageCountMismatch', ...
         'Image planes and bone-surface measurements must be nonempty and equally sized.');
 end
 
@@ -340,7 +340,7 @@ end
 % every pose and the optimizer would have nothing to fit, so stop instead.
 processedImageMask = [resultsByImage.status] == "processed";
 if ~any(processedImageMask)
-    error('cost_PIMLOP_v01:NoValidMeasurements', ...
+    error('cost_PIMLOP:NoValidMeasurements', ...
           'No ultrasound image contains a measurement with a valid normal.');
 end
 
@@ -422,7 +422,7 @@ requiredNames = { ...
     'positionZStandardDeviationImage', ...
     'kappa'};
 if ~all(isfield(parameters, requiredNames))
-    error('cost_PIMLOP_v01:MissingCostSetting', ...
+    error('cost_PIMLOP:MissingCostSetting', ...
           'The P-IMLOP runtime configuration is missing a required cost setting.');
 end
 

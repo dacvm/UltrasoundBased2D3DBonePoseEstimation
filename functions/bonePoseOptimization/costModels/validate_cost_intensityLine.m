@@ -1,7 +1,7 @@
-function [fixedParameters, hyperparameters] = validate_cost_intensityLine_v01(fixedParameters, hyperparameters)
-%VALIDATE_COST_INTENSITYLINE_V01 Validate smoothed-intensity cost settings.
+function [fixedParameters, hyperparameters] = validate_cost_intensityLine(fixedParameters, hyperparameters)
+%VALIDATE_COST_INTENSITYLINE Validate smoothed-intensity cost settings.
 % This function checks the fixed and sweepable parameters of the
-% intensityLine_v1 cost model, so the shared config reader does not need to
+% intensityLine cost model, so the shared config reader does not need to
 % know what each model-specific setting means. Mistakes are reported when
 % the config is read, before the slow preparation starts.
 %
@@ -32,7 +32,7 @@ validateattributes(sigmaCandidates, {'numeric'}, ...
     {'vector', 'nonempty', 'real', 'finite', 'nonnegative'}, ...
     mfilename, 'cost.hyperparameters.intensitySmoothingSigmaMm');
 if numel(unique(sigmaCandidates)) ~= numel(sigmaCandidates)
-    error('validate_cost_intensityLine_v01:DuplicateCandidate', ...
+    error('validate_cost_intensityLine:DuplicateCandidate', ...
           'cost.hyperparameters.intensitySmoothingSigmaMm must not contain duplicate values.');
 end
 
@@ -54,7 +54,7 @@ function validateFieldNames(sourceStruct, expectedNames, displayName)
 % accepted fields, and displayName identifies the group in error messages.
 
 if ~isstruct(sourceStruct) || ~isscalar(sourceStruct)
-    error('validate_cost_intensityLine_v01:InvalidParameterGroup', ...
+    error('validate_cost_intensityLine:InvalidParameterGroup', ...
           '%s must be a JSON object.', displayName);
 end
 
@@ -63,12 +63,12 @@ missingNames    = setdiff(expectedNames, actualNames, 'stable');
 unexpectedNames = setdiff(actualNames, expectedNames, 'stable');
 
 if ~isempty(missingNames)
-    error('validate_cost_intensityLine_v01:MissingParameter', ...
+    error('validate_cost_intensityLine:MissingParameter', ...
           '%s is missing: %s.', displayName, strjoin(missingNames, ', '));
 end
 
 if ~isempty(unexpectedNames)
-    error('validate_cost_intensityLine_v01:UnexpectedParameter', ...
+    error('validate_cost_intensityLine:UnexpectedParameter', ...
           '%s contains an unsupported field: %s.', displayName, strjoin(unexpectedNames, ', '));
 end
 end

@@ -6,7 +6,7 @@ addpath(genpath('functions'));
 %% SELECT THE COMPLETED EXPERIMENT
 
 % Edit only this folder name when evaluating a different sweep experiment.
-experimentFolderName = 'intensityLine_v01_20261009_134055_023';
+experimentFolderName = 'intensityLine_20261009_165543_181';
 experimentFolder = fullfile(pwd, 'output', 'bonePoseOptimization', 'experiments', experimentFolderName);
 
 % Keep the detailed seed-distribution plot readable when a sweep is large.
@@ -15,7 +15,7 @@ topCombinationCount = 20;
 % Choose how the hyperparameter heatmaps are arranged. The x- and y-parameters
 % form each heatmap. The panel parameters create rows and columns of heatmaps,
 % so every swept value remains visible without adding more plot axes.
-% These settings match the default intensityLine_v1 sweep, which varies only
+% These settings match the default intensityLine sweep, which varies only
 % these two parameters; leave a panel parameter empty ('') when unused.
 heatmapSettings.xParameter           = 'intensitySmoothingSigmaMm';
 heatmapSettings.yParameter           = 'normalFacingToleranceDeg';

@@ -106,7 +106,7 @@ verifyEqual(testCase, ...
     perCombinationTable.Properties.VariableNames(1:numel(expectedLeadingColumns)), ...
     expectedLeadingColumns);
 verifyEqual(testCase, perCombinationTable.costModel, ...
-    repmat("intensityPIMLOP_v1", 2, 1));
+    repmat("intensityPIMLOP", 2, 1));
 end
 
 
@@ -290,7 +290,7 @@ runNumber = (1:5).';
 runId = compose("run_%06d", runNumber);
 combinationNumber = [1; 1; 1; 2; 2];
 combinationId = compose("combination_%04d", combinationNumber);
-costModel = repmat("intensityPIMLOP_v1", 5, 1);
+costModel = repmat("intensityPIMLOP", 5, 1);
 seed = [1001; 1002; 1003; 1001; 1002];
 normalFacingToleranceDeg = 30 * ones(5, 1);
 intensitySmoothingSigmaMm = [0.5; 0.5; 0.5; 1; 1];
@@ -309,7 +309,7 @@ perRunTable = table(runNumber, runId, combinationNumber, combinationId, ...
     weight, status, runtimeSeconds, bestCost, evaluationStatus, ...
     translationErrorMm, rotationErrorDeg, surfaceRmseMm);
 
-% Match the canonical parameter order returned by the intensityPIMLOP_v1
+% Match the canonical parameter order returned by the intensityPIMLOP
 % validator and planner.
 parameterNames = {'normalFacingToleranceDeg', 'intensitySmoothingSigmaMm', ...
     'kappa', 'weight'};

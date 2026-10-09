@@ -1,6 +1,6 @@
 function report = test_PIMLOPCostFunction()
 %TEST_PIMLOPCOSTFUNCTION Compare the new cost function with the direct workflow.
-% This focused regression test verifies that cost_PIMLOP_v01 performs the
+% This focused regression test verifies that cost_PIMLOP performs the
 % same measurement selection, coordinate transformations, PD-tree searches,
 % correspondence ordering, and total-cost calculation as the direct workflow
 % demonstrated by demo_PDTreeSearch_NImageNPoints_batchProcessed.
@@ -74,7 +74,7 @@ for poseNumber = 1:size(poseVectors,2)
     poseVector = poseVectors(:,poseNumber);
 
     % The function path is the new implementation that CMA-ES will later use.
-    [functionCost, functionDetails] = cost_PIMLOP_v01( ...
+    [functionCost, functionDetails] = cost_PIMLOP( ...
         poseVector, data, config);
 
     % The reference path intentionally performs the transformations and
@@ -149,11 +149,11 @@ function config = createTestPIMLOPConfig( ...
 %                                      [sx;sy;sz] in millimetres.
 %   kappa - Nonnegative orientation concentration used by E_match.
 % Output:
-%   config - Minimal runtime configuration accepted by cost_PIMLOP_v01.
+%   config - Minimal runtime configuration accepted by cost_PIMLOP.
 
 config = struct();
 config.cost = struct();
-config.cost.model = 'PIMLOP_v1';
+config.cost.model = 'PIMLOP';
 config.cost.parameters = struct();
 config.cost.parameters.measurementSubsampleFraction = ...
     measurementSubsampleFraction;

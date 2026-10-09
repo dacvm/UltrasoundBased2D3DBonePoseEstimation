@@ -48,10 +48,10 @@ function [data, validationData] = prepareBonePoseOptimizationInputs(config)
 %   data           - Estimation-only data containing the CT mesh, ultrasound
 %                    measurements, and initial transforms.
 %                    data.extra.pimlop.PsiCT holds the CT-frame P-IMLOP model
-%                    with its PD-tree, used by cost_PIMLOP_v01. When the
+%                    with its PD-tree, used by cost_PIMLOP. When the
 %                    config sets intensitySmoothingSigmaMm,
 %                    data.extra.intensityLine.smoothedImages holds one
-%                    blurred image per plane, used by cost_intensityLine_v01.
+%                    blurred image per plane, used by cost_intensityLine.
 %   validationData - Saved ground-truth intersections, bone pose, and source
 %                    metadata. This output must not be passed to the optimizer.
 
@@ -329,7 +329,7 @@ data.config                  = config;
 % it clear which pre-computed pieces belong to which model.
 data.extra.pimlop.PsiCT      = PsiCT;
 
-% Intensity cost models (intensityLine_v1 and the combined models built on
+% Intensity cost models (intensityLine and the combined models built on
 % it) read the images through a Gaussian blur so they still get a hint
 % about the bone when the predicted line is slightly off the echo. Blurring
 % every image is slow, so it is done here once. Its width is a
@@ -594,7 +594,7 @@ for measurementIndex = 1:numel(measurements)
               measurementIndex);
     end
 
-    % Surface normals are optional here so historical ICPLike_v1 and
+    % Surface normals are optional here so historical ICPLike and
     % intensity artifacts remain usable. When either new field is present,
     % require the complete row-aligned contract so a future P-IMLOP model
     % cannot silently consume ambiguous orientation data.

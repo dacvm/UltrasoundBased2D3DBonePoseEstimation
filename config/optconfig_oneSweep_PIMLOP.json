@@ -15,7 +15,7 @@
     "normalFacingToleranceDeg": 30
   },
   "cost": {
-    "model": "PIMLOP_v1",
+    "model": "PIMLOP",
     "fixedParameters": {
       "measurementSubsampleFraction": 0.5,
       "positionXStandardDeviationImage": 1.0,
@@ -41,8 +41,8 @@
     "parforWorkers": 6
   },
   "experiment": {
-    "name": "oneSweep_PIMLOP_v01",
+    "name": "oneSweep_PIMLOP",
     "seeds": [1001],
-    "outputFolder": "output/bonePoseOptimization/oneSweeps/PIMLOP_v01"
+    "outputFolder": "output/bonePoseOptimization/oneSweeps/PIMLOP"
   }
 }

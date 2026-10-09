@@ -56,7 +56,7 @@ function testActiveConfigurationKeepsModelCandidatesAndSeeds(testCase)
 % Validate the experiment schema without depending on the user's current sweep values.
 spec = testCase.TestData.sweepSpec;
 verifyEqual(testCase, spec.schemaVersion, 4);
-verifyEqual(testCase, spec.cost.model, 'intensityLine_v1');
+verifyEqual(testCase, spec.cost.model, 'intensityLine');
 verifyTrue(testCase, all(spec.intersection.normalFacingToleranceDeg > 0));
 verifyTrue(testCase, all(spec.cost.hyperparameters.intensitySmoothingSigmaMm >= 0));
 verifyTrue(testCase, isscalar(spec.cost.fixedParameters.intensityMax));
@@ -85,9 +85,9 @@ runConfig = createBonePoseOptimizationRunConfig( ...
     spec, plan.combinations(1, :), plan.runs.seed(1));
 
 % The one-sweep file must select the 3D model and provide its required surface input.
-verifyEqual(testCase, spec.cost.model, 'ICPLike_v1');
+verifyEqual(testCase, spec.cost.model, 'ICPLike');
 verifyTrue(testCase, isfile(spec.input.boneSurfaceMatFile));
-verifyEqual(testCase, spec.experiment.name, 'oneSweep_ICPLike_v01');
+verifyEqual(testCase, spec.experiment.name, 'oneSweep_ICPLike');
 
 % K stays fixed, while the retained intersection tolerance creates only one plan row.
 verifyEqual(testCase, spec.cost.fixedParameters.nearestVertexCount, 20);
@@ -113,9 +113,9 @@ runConfig = createBonePoseOptimizationRunConfig( ...
     spec, plan.combinations(1, :), plan.runs.seed(1));
 
 % The model needs both ultrasound images and the aligned 3D surface artifact.
-verifyEqual(testCase, spec.cost.model, 'intensityICP_v1');
+verifyEqual(testCase, spec.cost.model, 'intensityICP');
 verifyTrue(testCase, isfile(spec.input.boneSurfaceMatFile));
-verifyEqual(testCase, spec.experiment.name, 'oneSweep_intensityICP_v01');
+verifyEqual(testCase, spec.experiment.name, 'oneSweep_intensityICP');
 
 % Fixed settings define the two component models and point-cloud normalization.
 verifyEqual(testCase, fieldnames(spec.cost.fixedParameters).', ...
@@ -187,7 +187,7 @@ for combinationNumber = 1:plan.numberOfCombinations
     selectedRows = plan.runs.combinationNumber == combinationNumber;
     verifyEqual(testCase, plan.runs.seed(selectedRows), [7; 8; 9]);
     verifyEqual(testCase, unique(plan.runs.costModel(selectedRows)), ...
-        "intensityLine_v1");
+        "intensityLine");
 end
 
 % Every plan row stores scalar values that can be copied into a runtime config.
@@ -214,7 +214,7 @@ verifyEqual(testCase, plan.numberOfRuns, 1);
 runConfig = createBonePoseOptimizationRunConfig( ...
     spec, plan.combinations(1, :), plan.runs.seed(1));
 verifyTrue(testCase, isscalar(runConfig.intersection.normalFacingToleranceDeg));
-verifyEqual(testCase, runConfig.cost.model, 'intensityLine_v1');
+verifyEqual(testCase, runConfig.cost.model, 'intensityLine');
 verifyTrue(testCase, isscalar(runConfig.cost.parameters.intensityMax));
 verifyTrue(testCase, isscalar(runConfig.cost.parameters.sampleSpacingMm));
 verifyTrue(testCase, isscalar(runConfig.cost.parameters.intensitySmoothingSigmaMm));
@@ -253,7 +253,7 @@ rawConfig.cost.hyperparameters.intensitySmoothingSigmaMm = [1 1];
 % Reject the duplicate while reporting that the candidate list is the problem.
 verifyError(testCase, ...
     @() createBonePoseOptimizationExperimentConfig(temporaryConfigPath), ...
-    'validate_cost_intensityLine_v01:DuplicateCandidate');
+    'validate_cost_intensityLine:DuplicateCandidate');
 clear temporaryConfigCleanup;
 end
 
@@ -395,7 +395,7 @@ rawConfig.cost.fixedParameters = rmfield( ...
     writeTemporaryJson(rawConfig); %#ok<ASGLU>
 verifyError(testCase, ...
     @() createBonePoseOptimizationExperimentConfig(temporaryConfigPath), ...
-    'validate_cost_intensityLine_v01:MissingParameter');
+    'validate_cost_intensityLine:MissingParameter');
 clear temporaryConfigCleanup;
 
 rawConfig = jsondecode(fileread(testCase.TestData.sweepConfigPath));
@@ -404,7 +404,7 @@ rawConfig.cost.hyperparameters.misspelledParameter = 1;
     writeTemporaryJson(rawConfig); %#ok<ASGLU>
 verifyError(testCase, ...
     @() createBonePoseOptimizationExperimentConfig(temporaryConfigPath), ...
-    'validate_cost_intensityLine_v01:UnexpectedParameter');
+    'validate_cost_intensityLine:UnexpectedParameter');
 clear temporaryConfigCleanup;
 end
 
@@ -432,7 +432,7 @@ experimentResult = runBonePoseOptimizationExperiment(spec);
 verifyEqual(testCase, experimentResult.summaryTable.status, ...
     ["failed"; "failed"]);
 verifyEqual(testCase, experimentResult.summaryTable.costModel, ...
-    repmat("intensityLine_v1", 2, 1));
+    repmat("intensityLine", 2, 1));
 verifyTrue(testCase, all(isfile(experimentResult.summaryTable.resultFilePath)));
 verifyTrue(testCase, isfile(fullfile( ...
     experimentResult.experimentFolder, 'summary.csv')));
@@ -448,7 +448,7 @@ verifyEqual(testCase, ...
 % Failed runs still record the exact scalar cost configuration that was attempted.
 savedRun = load(char(experimentResult.summaryTable.resultFilePath(1)), 'runResult');
 verifyEqual(testCase, savedRun.runResult.configuration.cost.model, ...
-    'intensityLine_v1');
+    'intensityLine');
 verifyTrue(testCase, isscalar( ...
     savedRun.runResult.configuration.cost.parameters.intensitySmoothingSigmaMm));
 

@@ -1,5 +1,5 @@
-function [cost, details] = cost_intensityLine_v01(poseVector, data, config)
-%COST_INTENSITYLINE_V01 Score how bright the image is where the bone should be.
+function [cost, details] = cost_intensityLine(poseVector, data, config)
+%COST_INTENSITYLINE Score how bright the image is where the bone should be.
 % For one candidate pose, this cost cuts the CT bone mesh with every
 % ultrasound image plane and keeps the parts of the cut that face the probe:
 % these are the bone surfaces that ultrasound should show as a bright echo.

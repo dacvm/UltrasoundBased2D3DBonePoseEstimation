@@ -1,5 +1,5 @@
-function [fixedParameters, hyperparameters] = validate_cost_intensityPIMLOP_v01(fixedParameters, hyperparameters)
-%VALIDATE_COST_INTENSITYPIMLOP_V01 Validate combined intensity and P-IMLOP settings.
+function [fixedParameters, hyperparameters] = validate_cost_intensityPIMLOP(fixedParameters, hyperparameters)
+%VALIDATE_COST_INTENSITYPIMLOP Validate combined intensity and P-IMLOP settings.
 % This validator checks the union of the smoothed-intensity and P-IMLOP
 % settings plus the blend weight. It reuses
 % the two component validators so their established parameter rules stay in
@@ -35,14 +35,14 @@ intensityFixed = struct( ...
     'sampleSpacingMm', fixedParameters.sampleSpacingMm);
 intensityHyper = struct( ...
     'intensitySmoothingSigmaMm', hyperparameters.intensitySmoothingSigmaMm);
-[intensityFixed, intensityHyper] = validate_cost_intensityLine_v01(intensityFixed, intensityHyper);
+[intensityFixed, intensityHyper] = validate_cost_intensityLine(intensityFixed, intensityHyper);
 
 pimlopFixed = struct();
 for nameIndex = 1:numel(pimlopFixedNames)
     pimlopFixed.(pimlopFixedNames{nameIndex}) = fixedParameters.(pimlopFixedNames{nameIndex});
 end
 pimlopHyper = struct('kappa', hyperparameters.kappa);
-[pimlopFixed, pimlopHyper] = validate_cost_PIMLOP_v01(pimlopFixed, pimlopHyper);
+[pimlopFixed, pimlopHyper] = validate_cost_PIMLOP(pimlopFixed, pimlopHyper);
 
 % Weight is a sweep candidate and must remain a valid convex blend coefficient.
 weight = normalizeWeightCandidates(hyperparameters.weight);
@@ -71,7 +71,7 @@ function validateFieldNames(sourceStruct, expectedNames, displayName)
 % accepted fields, and displayName identifies the group in error messages.
 
 if ~isstruct(sourceStruct) || ~isscalar(sourceStruct)
-    error('validate_cost_intensityPIMLOP_v01:InvalidParameterGroup', ...
+    error('validate_cost_intensityPIMLOP:InvalidParameterGroup', ...
         '%s must be a JSON object.', displayName);
 end
 
@@ -80,11 +80,11 @@ missingNames    = setdiff(expectedNames, actualNames, 'stable');
 unexpectedNames = setdiff(actualNames, expectedNames, 'stable');
 
 if ~isempty(missingNames)
-    error('validate_cost_intensityPIMLOP_v01:MissingParameter', ...
+    error('validate_cost_intensityPIMLOP:MissingParameter', ...
         '%s is missing: %s.', displayName, strjoin(missingNames, ', '));
 end
 if ~isempty(unexpectedNames)
-    error('validate_cost_intensityPIMLOP_v01:UnexpectedParameter', ...
+    error('validate_cost_intensityPIMLOP:UnexpectedParameter', ...
         '%s contains an unsupported field: %s.', ...
         displayName, strjoin(unexpectedNames, ', '));
 end
@@ -101,7 +101,7 @@ validateattributes(rawWeight, {'numeric'}, ...
     mfilename, 'cost.hyperparameters.weight');
 
 if numel(unique(rawWeight)) ~= numel(rawWeight)
-    error('validate_cost_intensityPIMLOP_v01:DuplicateWeight', ...
+    error('validate_cost_intensityPIMLOP:DuplicateWeight', ...
         'cost.hyperparameters.weight must not contain duplicate values.');
 end
 

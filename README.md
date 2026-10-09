@@ -16,11 +16,11 @@
   - [4.1. Optimization code organization](#41-optimization-code-organization)
   - [4.2. Optimizer parameters](#42-optimizer-parameters)
 - [5. Supported cost functions](#5-supported-cost-functions)
-  - [5.1. `intensityLine_v1`: smoothed intensity along the predicted bone](#51-intensityline_v1-smoothed-intensity-along-the-predicted-bone)
-  - [5.2. `ICPLike_v1`: one-way 3D point-to-mesh distance](#52-icplike_v1-one-way-3d-point-to-mesh-distance)
-  - [5.3. `intensityICP_v1`: combined intensity and 3D distance](#53-intensityicp_v1-combined-intensity-and-3d-distance)
-  - [5.4. `PIMLOP_v1`: most-likely oriented point match](#54-pimlop_v1-most-likely-oriented-point-match)
-  - [5.5. `intensityPIMLOP_v1`: combined intensity and P-IMLOP](#55-intensitypimlop_v1-combined-intensity-and-p-imlop)
+  - [5.1. `intensityLine`: smoothed intensity along the predicted bone](#51-intensityline-smoothed-intensity-along-the-predicted-bone)
+  - [5.2. `ICPLike`: one-way 3D point-to-mesh distance](#52-icplike-one-way-3d-point-to-mesh-distance)
+  - [5.3. `intensityICP`: combined intensity and 3D distance](#53-intensityicp-combined-intensity-and-3d-distance)
+  - [5.4. `PIMLOP`: most-likely oriented point match](#54-pimlop-most-likely-oriented-point-match)
+  - [5.5. `intensityPIMLOP`: combined intensity and P-IMLOP](#55-intensitypimlop-combined-intensity-and-p-imlop)
 - [6. Running the project](#6-running-the-project)
   - [6.1. Requirements](#61-requirements)
   - [6.2. Configure the input paths and settings](#62-configure-the-input-paths-and-settings)
@@ -134,7 +134,7 @@ The three stable workflow entry points remain directly under
 one experiment run. Supporting functions are grouped one level below:
 
 - `configuration/` reads JSON and builds experiment and scalar run settings.
-- `costModels/` contains model registration, versioned cost functions, and validators. Its `legacy/` subfolder keeps retired models for reference only; active code does not use them.
+- `costModels/` contains model registration, cost functions, and validators. Its `legacy/` subfolder keeps retired models for reference only; active code does not use them.
 - `inputPreparation/` loads and prepares reusable optimization inputs.
 - `poseEvaluation/` converts optimizer states and evaluates candidate-pose geometry.
 - `evaluationMetric/` and `evaluationPlot/` analyze saved results.
@@ -159,11 +159,11 @@ The `experiment.seeds` array controls repeated stochastic runs. A one-sweep conf
 
 ## 5. Supported cost functions
 
-This is an ongoing list. The current framework registers the following five versioned cost models; more models can be added through the extension process described in [Processing workflow](#8-processing-workflow). Every model returns one scalar objective to CMA-ES, and a lower value is always better.
+This is an ongoing list. The current framework registers the following five cost models; more models can be added through the extension process described in [Processing workflow](#8-processing-workflow). Every model returns one scalar objective to CMA-ES, and a lower value is always better.
 
 In the tables below, a **fixed parameter** has one value for the complete experiment. A **hyperparameter** is an array of candidate values; the experiment planner includes it in the Cartesian product used to create parameter combinations.
 
-### 5.1. `intensityLine_v1`: smoothed intensity along the predicted bone
+### 5.1. `intensityLine`: smoothed intensity along the predicted bone
 
 This model cuts the candidate CT mesh with every ultrasound plane and keeps the probe-facing parts of the cut, which are the surfaces ultrasound should show as a bright echo. It then reads the image along those lines:
 
@@ -193,7 +193,7 @@ A pose whose intersection is short but lies on a very bright spot can score well
 
 This model does not require `boneSurfaceMatFile`.
 
-### 5.2. `ICPLike_v1`: one-way 3D point-to-mesh distance
+### 5.2. `ICPLike`: one-way 3D point-to-mesh distance
 
 This model transforms the CT mesh to the candidate pose and measures the distance from every ultrasound-derived 3D bone-surface point to its closest location on the mesh triangles. The returned cost is the root-mean-square of all point-to-surface distances in millimetres. It is one-way: measured ultrasound points must agree with the mesh, but unobserved regions of the mesh do not require corresponding ultrasound points.
 
@@ -203,9 +203,9 @@ This model transforms the CT mesh to the candidate pose and measures the distanc
 
 This model requires aligned 3D bone-surface measurements from `boneSurfaceMatFile`.
 
-### 5.3. `intensityICP_v1`: combined intensity and 3D distance
+### 5.3. `intensityICP`: combined intensity and 3D distance
 
-This model evaluates `intensityLine_v1` and `ICPLike_v1` at the same candidate pose. It divides the point-to-mesh RMSE by a reference distance to make that term dimensionless, then returns the convex blend
+This model evaluates `intensityLine` and `ICPLike` at the same candidate pose. It divides the point-to-mesh RMSE by a reference distance to make that term dimensionless, then returns the convex blend
 
 ```text
 cost = weight * intensityCost
@@ -225,7 +225,7 @@ A `weight` of `1` selects only the smoothed-intensity term, while `0` selects on
 
 This model requires aligned 3D bone-surface measurements from `boneSurfaceMatFile`.
 
-### 5.4. `PIMLOP_v1`: most-likely oriented point match
+### 5.4. `PIMLOP`: most-likely oriented point match
 
 This model implements the match error of P-IMLOP (Billings et al. 2015; see [`literatures/P-IMLOP/notes.md`](literatures/P-IMLOP/notes.md)). Every ultrasound bone-surface measurement `x` has a 3D position and a 2D in-plane normal. For each measurement, the model finds the most likely point `y` on any CT mesh triangle and sums the resulting match errors:
 
@@ -250,9 +250,9 @@ cost = sum over all retained measurements of min_y E_match(x, y)
 
 This model requires aligned 3D bone-surface measurements with 2D normals (`surfaceNormalXY` and `surfaceNormalMask`) from `boneSurfaceMatFile`. One evaluation takes several seconds, so keep `populationSize` and `maxFunctionEvaluations` small for first runs. The reference demos and regression tests in `devs/pimlopDevelopment/` still run independently.
 
-### 5.5. `intensityPIMLOP_v1`: combined intensity and P-IMLOP
+### 5.5. `intensityPIMLOP`: combined intensity and P-IMLOP
 
-This model evaluates `intensityLine_v1` and `PIMLOP_v1` at the same candidate pose and blends them with one weight, in the same way `intensityICP_v1` blends intensity with the 3D point-to-mesh distance. The P-IMLOP total is a sum over all retained measurements, so it grows with the number of segmented points. It is therefore averaged over the measurements before it is blended:
+This model evaluates `intensityLine` and `PIMLOP` at the same candidate pose and blends them with one weight, in the same way `intensityICP` blends intensity with the 3D point-to-mesh distance. The P-IMLOP total is a sum over all retained measurements, so it grows with the number of segmented points. It is therefore averaged over the measurements before it is blended:
 
 ```text
 pimlopMeanMatchError = pimlopTotalMatchError / numberOfMeasurements
@@ -277,7 +277,7 @@ The same measurements are used for every candidate pose, so averaging divides by
 | `kappa` | Hyperparameter | Nonnegative P-IMLOP orientation concentration. `0` switches the orientation term off. |
 | `weight` | Hyperparameter | Convex blend coefficient in the inclusive range `[0, 1]`; it weights the intensity term, while `1 - weight` weights the mean P-IMLOP match error. |
 
-This model requires aligned 3D bone-surface measurements with 2D normals from `boneSurfaceMatFile`. Every evaluation runs the P-IMLOP search, so it is at least as slow as `PIMLOP_v1`.
+This model requires aligned 3D bone-surface measurements with 2D normals from `boneSurfaceMatFile`. Every evaluation runs the P-IMLOP search, so it is at least as slow as `PIMLOP`.
 
 ## 6. Running the project
 
@@ -470,7 +470,7 @@ sequenceDiagram
     participant Inputs as prepareBonePoseOptimizationInputs
     participant Optimizer as runBonePoseOptimization / CMA-ES
     participant Dispatcher as bonePoseCostFunction
-    participant Model as Versioned cost evaluator
+    participant Model as Cost evaluator
 
     User->>Runner: Run one-sweep or hyperparameter-sweep script
     Runner->>Config: createBonePoseOptimizationExperimentConfig(JSON)
@@ -489,7 +489,7 @@ sequenceDiagram
             loop Every CMA-ES candidate pose
                 Optimizer->>Dispatcher: bonePoseCostFunction(poseVector, data, config)
                 Dispatcher->>Registry: Resolve config.cost.model
-                Registry-->>Dispatcher: Versioned evaluator handle
+                Registry-->>Dispatcher: Evaluator handle
                 Dispatcher->>Model: Evaluate candidate geometry and objective
                 Model-->>Dispatcher: Scalar cost and diagnostic details
                 Dispatcher-->>Optimizer: Cost, where lower is better
@@ -511,11 +511,19 @@ At optimization time, CMA-ES changes only the six-value local pose perturbation.
 
 ### 8.1. Adding a new cost function
 
-1. **Create a versioned evaluator in `functions/bonePoseOptimization/costModels/`.** Use the interface `[cost, details] = cost_<name>_vNN(poseVector, data, config)`. Perform file loading and other reusable preparation before optimization, not inside this frequently called function. Return one finite numeric scalar, keep the convention that lower is better, and place useful intermediate values in `details` so a saved best pose can be inspected.
+**Naming a cost model.** Give each cost model a descriptive name and no version suffix. Use `intensityLine`, not `intensityLine_v2`. A version number says only that something changed. A descriptive name says what changed, so a reader can tell two models apart without opening the code.
+
+- Use one camelCase name everywhere: the registry key and `cost.model` (`<name>`), the evaluator (`cost_<name>.m`), the validator (`validate_cost_<name>.m`), the test file (`testBonePoseCost<Name>.m`), and the configs (`optconfig_oneSweep_<name>.json`, `optconfig_hyperparamSweep_<name>.json`).
+- Start with the evidence the model uses, then add what is special about it. For example, `intensityLine` scores image intensity along the predicted bone line, and `ICPLike` scores a point-to-mesh distance.
+- Name a combined model by joining its parts in a fixed order, intensity term first: `intensityICP`, `intensityPIMLOP`.
+- If you change the behaviour of an existing model and want to keep the old one for comparison, give the new model a name that describes the change, for example `intensityLineGradient` or `PIMLOPWeighted`. Do not add `_v2`. Move the retired model to `costModels/legacy/` once nothing uses it.
+- Do not change the meaning of an existing name. Results saved under that name would no longer match the code.
+
+1. **Create an evaluator in `functions/bonePoseOptimization/costModels/`.** Use the interface `[cost, details] = cost_<name>(poseVector, data, config)`. Perform file loading and other reusable preparation before optimization, not inside this frequently called function. Return one finite numeric scalar, keep the convention that lower is better, and place useful intermediate values in `details` so a saved best pose can be inspected.
 
    ```matlab
-   function [cost, details] = cost_example_v01(poseVector, data, config)
-   %COST_EXAMPLE_V01 Evaluate one candidate pose with the example model.
+   function [cost, details] = cost_example(poseVector, data, config)
+   %COST_EXAMPLE Evaluate one candidate pose with the example model.
    % This evaluator converts the candidate pose into one finite objective so
    % the shared CMA-ES framework can optimize a new source of evidence.
    %
@@ -538,15 +546,15 @@ At optimization time, CMA-ES changes only the six-value local pose perturbation.
    end
    ```
 
-2. **Create its matching validator beside the evaluator.** Use the interface `[fixedParameters, hyperparameters] = validate_cost_<name>_vNN(fixedParameters, hyperparameters)`. Require the exact supported field names, validate every value, convert fixed values to scalar doubles (a fixed value may also be a short numeric vector, such as the three P-IMLOP standard deviations), and normalize each hyperparameter candidate list to a row vector. Rebuild the output structs in the order in which their fields should appear in experiment tables. An empty struct is valid when the model has no fixed parameters or no hyperparameters.
+2. **Create its matching validator beside the evaluator.** Use the interface `[fixedParameters, hyperparameters] = validate_cost_<name>(fixedParameters, hyperparameters)`. Require the exact supported field names, validate every value, convert fixed values to scalar doubles (a fixed value may also be a short numeric vector, such as the three P-IMLOP standard deviations), and normalize each hyperparameter candidate list to a row vector. Rebuild the output structs in the order in which their fields should appear in experiment tables. An empty struct is valid when the model has no fixed parameters or no hyperparameters.
 
 3. **Register the model in `getBonePoseCostDefinition.m`.** Add one `switch` case that assigns the public model name, evaluator, validator, and input requirement:
 
    ```matlab
-   case 'example_v1'
-       definition.modelName                   = 'example_v1';
-       definition.evaluateFcn                 = @cost_example_v01;
-       definition.validateExperimentConfigFcn = @validate_cost_example_v01;
+   case 'example'
+       definition.modelName                   = 'example';
+       definition.evaluateFcn                 = @cost_example;
+       definition.validateExperimentConfigFcn = @validate_cost_example;
        definition.requiresBoneSurface         = false;
    ```
 
@@ -556,7 +564,7 @@ At optimization time, CMA-ES changes only the six-value local pose perturbation.
 
    ```json
    "cost": {
-     "model": "example_v1",
+     "model": "example",
      "fixedParameters": {
        "fixedScale": 1.0
      },

@@ -15,7 +15,7 @@
     "normalFacingToleranceDeg": 30
   },
   "cost": {
-    "model": "intensityICP_v1",
+    "model": "intensityICP",
     "fixedParameters": {
       "intensityMax": 255,
       "sampleSpacingMm": 0.1,
@@ -42,7 +42,7 @@
     "parforWorkers": 6
   },
   "experiment": {
-    "name": "oneSweep_intensityICP_v01",
+    "name": "oneSweep_intensityICP",
     "seeds": [1001],
     "outputFolder": "output/bonePoseOptimization/oneSweeps/intensity_ICP_v01"
   }

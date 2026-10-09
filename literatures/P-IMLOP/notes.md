@@ -60,11 +60,11 @@ Framework-level tests are in `functions/bonePoseOptimization/tests/testBonePoseC
 | Ellipsoid–OBB pruning test, Eq. 8 | `ellipsoidIntersectsOBB.m` |
 | PD-tree search, Algorithm 2 | `searchPDTree.m` (and `*_batchedProcess.m` versions) |
 | Exhaustive reference used to check the tree search | `searchPIMLOPBruteForce.m` |
-| Cost for the bone-pose optimizer | `cost_PIMLOP_v01.m`, `validate_cost_PIMLOP_v01.m` (costModels), registered as `PIMLOP_v1`; select it with `config/optconfig_oneSweep_PIMLOP.json` |
-| Cost combined with the intensity-line cost (not in the paper) | `cost_intensityPIMLOP_v01.m`, `validate_cost_intensityPIMLOP_v01.m` (costModels), registered as `intensityPIMLOP_v1`; blends the intensity cost with the mean match error per measurement |
+| Cost for the bone-pose optimizer | `cost_PIMLOP.m`, `validate_cost_PIMLOP.m` (costModels), registered as `PIMLOP`; select it with `config/optconfig_oneSweep_PIMLOP.json` |
+| Cost combined with the intensity-line cost (not in the paper) | `cost_intensityPIMLOP.m`, `validate_cost_intensityPIMLOP.m` (costModels), registered as `intensityPIMLOP`; blends the intensity cost with the mean match error per measurement |
 
 ## How this repo differs from the paper
-- **Registration phase:** not reimplemented. `cost_PIMLOP_v01.m` exposes the summed match error as a cost over the project's 6D pose vector. The pose optimizer does the registration step, and correspondences are searched again for every candidate pose.
+- **Registration phase:** not reimplemented. `cost_PIMLOP.m` exposes the summed match error as a cost over the project's 6D pose vector. The pose optimizer does the registration step, and correspondences are searched again for every candidate pose.
 - **Frames:** the search runs in the **CT** frame. Ultrasound queries are moved into CT, so the PD-tree is built only once: `prepareBonePoseOptimizationInputs.m` builds it (default settings) for every prepared dataset and stores it at `data.extra.pimlop.PsiCT`.
 - **Model point:** may lie anywhere on a triangle, not only at its centre (`findMostLikelyPointOnTriangle.m`). Triangle centres are used only to organize the tree.
 - **κ is a hyperparameter:** the paper assumed κ = 50 and did not tune it. Here `kappa` is listed under `cost.hyperparameters` so it can be swept (`config/optconfig_hyperparamSweep_PIMLOP.json`, values 10/50/200). The one-run config uses `[50]`. With Σ fixed, κ alone sets how much the orientation term counts against the position term, and our normals come from a different segmentation process than the paper's hand-fitted splines. Σ and `measurementSubsampleFraction` stay fixed. Σ is diagonal in the image frame and is configured as three scalars, `positionXStandardDeviationImage`, `positionYStandardDeviationImage` and `positionZStandardDeviationImage` (mm); the cost builds `Σ = diag([sx sy sz].^2)` from them.

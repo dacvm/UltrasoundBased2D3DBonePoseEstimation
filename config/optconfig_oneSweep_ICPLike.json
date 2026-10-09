@@ -15,7 +15,7 @@
     "normalFacingToleranceDeg": 30
   },
   "cost": {
-    "model": "ICPLike_v1",
+    "model": "ICPLike",
     "fixedParameters": {
       "nearestVertexCount": 20
     },
@@ -36,8 +36,8 @@
     "parforWorkers": 6
   },
   "experiment": {
-    "name": "oneSweep_ICPLike_v01",
+    "name": "oneSweep_ICPLike",
     "seeds": [1001],
-    "outputFolder": "output/bonePoseOptimization/oneSweeps/ICPLike_v01"
+    "outputFolder": "output/bonePoseOptimization/oneSweeps/ICPLike"
   }
 }
