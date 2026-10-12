@@ -672,14 +672,18 @@ end
 % ===================================================================
 
 function plotCorrespondenceScene(data, details)
-%PLOTCORRESPONDENCESCENE Figure 1: mesh, measured points and their correspondences.
+%PLOTCORRESPONDENCESCENE Figure 1: mesh, ultrasound images, measured points and their correspondences.
 % Points are coloured by their point-to-surface distance; every 5th point
 % also gets a line to its closest mesh point so the matches can be checked.
-% The ultrasound images are left out on purpose: they would share the
-% axes' colour scale with the distance colouring (demo_cost_ICPLike shows
-% them). The view is zoomed to the measured region so the lines are visible.
+% Every measured bone surface is shown together with the ultrasound image
+% it was extracted from, placed at its tracked pose in ref, so you can check
+% that the points lie on the bright bone echo. The images are transparent
+% so the points and lines behind them stay visible. The view is zoomed to
+% the measured region so the lines are visible.
 %
-% Inputs: data    - prepared data (only the bone name is used, for the title).
+% Inputs: data    - prepared data: the bone name (title), the image planes
+%                   and the surface measurements (plane k belongs to
+%                   measurement k, aligned during input preparation).
 %         details - dev_cost_ICPLike2 details at the start pose.
 
 % Set up one 3D axes in the ref frame with equal scaling, so distances on
@@ -699,6 +703,37 @@ zlabel(axesHandle, 'Z_{ref} (mm)');
 mesh = details.boneMeshRefCandidate;
 patch(axesHandle, 'Faces', mesh.ConnectivityList, 'Vertices', mesh.Points, ...
     'FaceColor', [0.92 0.83 0.74], 'EdgeColor', 'none', 'FaceAlpha', 0.45, 'DisplayName', 'Candidate bone mesh');
+
+% Draw the ultrasound image of every measurement that has surface points.
+% Each grey image is turned into an RGB (true-colour) image first. An RGB
+% texture does not use the axes colormap, so the images keep their grey
+% look while the points below are still coloured by distance.
+ultrasoundImageHandle = gobjects(0);
+for measurementIndex = 1:numel(data.boneSurfaceMeasurements)
+    if isempty(data.boneSurfaceMeasurements(measurementIndex).surfaceCoordinatesXYZRef)
+        continue
+    end
+
+    plane = data.imagePlanesRef(measurementIndex);
+    grayImage = double(plane.image) / 255;
+    rgbImage  = repmat(grayImage, 1, 1, 3);
+
+    % Same pixel spacing and axis swap as demo_cost_ICPLike uses for these images.
+    pixelSpacing = [plane.W / max(plane.nCols - 1, 1), plane.H / max(plane.nRows - 1, 1)];
+    imageHandle = display_image3D(axesHandle, rgbImage, plane.T_image_ref, ...
+        'SwapXY', true, ...
+        'PixelSpacing', pixelSpacing, ...
+        'Tag', 'demo2_ultrasound_image', ...
+        'FaceAlpha', 0.35);
+
+    % Give only the first image a legend entry; the rest would repeat it.
+    if isempty(ultrasoundImageHandle)
+        imageHandle.DisplayName = 'Ultrasound images';
+        ultrasoundImageHandle = imageHandle;
+    else
+        imageHandle.HandleVisibility = 'off';
+    end
+end
 
 % On top of the mesh come the measured points, coloured by distance so
 % badly matched areas stand out, and their closest mesh points.
