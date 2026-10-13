@@ -11,6 +11,16 @@ The recommended entry point is `build_ultrasoundBone_intersectionData_poseModes.
 
 The browser can export approved snapshots or time frames for later processing. The retired snapshot-only script and configuration remain in `legacy/` and `configs/legacy/` for reference.
 
+## Configuration files
+
+`configs/ultrasoundBone_intersectionData_poseModesConfig.json` is a tracked template. The script reads a personal `.local.json` copy instead, which git ignores, so you can change inputs and settings without touching tracked files. Before the first run, copy the template once:
+
+```matlab
+copyfile('tools/ultrasoundSpatialProcessing/configs/ultrasoundBone_intersectionData_poseModesConfig.json', 'tools/ultrasoundSpatialProcessing/configs/ultrasoundBone_intersectionData_poseModesConfig.local.json')
+```
+
+The script stops with a "Local config not found" error if the local copy is missing. Edit and commit the template only when its content should change for everyone.
+
 ## Experiment setup
 
 This workflow was developed for static and flexion knee-phantom experiments. A similar setup can be used with a cadaver leg. It requires femur and tibia bone pins with optical markers, a fixed reference rigid body, a tracked ultrasound probe, static snapshots or kinematic sequences, and a CT scan of the bones, pins, and markers.
@@ -62,7 +72,7 @@ Provide a MAT file containing `bones` and `bonepins`, produced by the sibling [K
 
 ### Pose-mode configuration
 
-Edit `configs/ultrasoundBone_intersectionData_poseModesConfig.json`:
+Edit your local copy `configs/ultrasoundBone_intersectionData_poseModesConfig.local.json`:
 
 | Setting | Meaning |
 | --- | --- |
@@ -99,7 +109,7 @@ Directory paths may be absolute or relative. Relative paths resolve from the con
 ## Running the project
 
 1. Prepare the acquisition folders, fCal XML, and CT MAT file.
-2. Edit `input`, `pinSelection`, `bonePoseMode`, and `output` in `configs/ultrasoundBone_intersectionData_poseModesConfig.json`.
+2. Edit `input`, `pinSelection`, `bonePoseMode`, and `output` in `configs/ultrasoundBone_intersectionData_poseModesConfig.local.json`.
 3. Run from the project root:
 
    ```matlab

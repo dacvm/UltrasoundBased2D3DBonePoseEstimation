@@ -46,8 +46,15 @@ addpath(display_directory);
 addpath(helper_directory);
 
 % Read this workflow's configuration from its tool-local configs folder so
-% unrelated project tools do not share one configuration directory.
-configuration_path = fullfile(tool_directory, 'configs', 'preprocess_markerstls_config.json');
+% unrelated project tools do not share one configuration directory. Read the
+% personal copy (ignored by git) so local edits never change tracked files.
+configuration_path = fullfile(tool_directory, 'configs', 'preprocess_markerstls_config.local.json');
+if ~isfile(configuration_path)
+    error('build_ct_knee_reference_model:LocalConfigNotFound', ...
+          ['Local config not found: %s\n' ...
+           'Copy configs/preprocess_markerstls_config.json to this name first.'], ...
+          configuration_path);
+end
 configuration      = readJsonConfiguration(configuration_path);
 
 % Convert the user settings into checked, absolute input and output paths.

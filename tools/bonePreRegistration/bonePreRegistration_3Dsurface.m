@@ -20,9 +20,16 @@ if ~isfolder(helperDirectory)
 end
 addpath(helperDirectory, '-begin');
 
-% Keep run-specific input files and the output location in JSON. Selecting a
-% different dataset then changes only the configuration file tracked for it.
-configurationFilePath = fullfile(scriptDirectory, 'configs', 'bonePreRegistration_3Dsurface.json');
+% Keep run-specific input files and the output location in JSON. Read the
+% personal copy (ignored by git) so selecting a different dataset never
+% changes tracked files. The tracked template sits next to it.
+configurationFilePath = fullfile(scriptDirectory, 'configs', 'bonePreRegistration_3Dsurface.local.json');
+if ~isfile(configurationFilePath)
+    error('bonePreRegistration:LocalConfigNotFound', ...
+          ['Local config not found: %s\n' ...
+           'Copy configs/bonePreRegistration_3Dsurface.json to this name first.'], ...
+          configurationFilePath);
+end
 configuration = readBonePreRegistration3DSurfaceConfiguration(configurationFilePath);
 
 % Use the established workflow variable names below while sourcing every

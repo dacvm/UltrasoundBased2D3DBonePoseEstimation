@@ -44,7 +44,15 @@ addpath(helperDirectory);
 
 % Keep reusable inputs, processing settings, and the export location in one
 % structured JSON file so a new measurement does not require script edits.
-configurationPath = fullfile(scriptDirectory, 'configs', 'ultrasoundBone_intersectionData_poseModesConfig.json');
+% Read the personal copy (ignored by git) so a new measurement never changes
+% tracked files. The tracked template sits next to it.
+configurationPath = fullfile(scriptDirectory, 'configs', 'ultrasoundBone_intersectionData_poseModesConfig.local.json');
+if ~isfile(configurationPath)
+    error('build_ultrasoundBone_intersectionData_poseModes:LocalConfigNotFound', ...
+          ['Local config not found: %s\n' ...
+           'Copy configs/ultrasoundBone_intersectionData_poseModesConfig.json to this name first.'], ...
+          configurationPath);
+end
 configuration     = readPoseModeProcessConfiguration(configurationPath);
 
 % Copy validated configuration values into short, descriptive names used by

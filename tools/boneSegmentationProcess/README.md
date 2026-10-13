@@ -10,6 +10,20 @@ The workflow has three consecutive parts:
 2. `boneSegmentation_extractSurface.m` selects a stable, probe-facing thin surface from those boundary candidates and saves confidence and quality information.
 3. `boneSegmentation_recover3Dsurface.m` converts the extracted image coordinates into physical 3D bone-surface points using each tracked ultrasound image plane.
 
+## Configuration Files
+
+The JSON files in `configs/` are tracked templates. The scripts read a personal `.local.json` copy instead, which git ignores, so you can change inputs and settings without touching tracked files. Before the first run, copy each workflow template once:
+
+```matlab
+copyfile('tools/boneSegmentationProcess/configs/boneSegmentation_semiAutomatic.json',    'tools/boneSegmentationProcess/configs/boneSegmentation_semiAutomatic.local.json')
+copyfile('tools/boneSegmentationProcess/configs/boneSegmentation_extractSurface.json',   'tools/boneSegmentationProcess/configs/boneSegmentation_extractSurface.local.json')
+copyfile('tools/boneSegmentationProcess/configs/boneSegmentation_recover3Dsurface.json', 'tools/boneSegmentationProcess/configs/boneSegmentation_recover3Dsurface.local.json')
+```
+
+A script stops with a "Local config not found" error if its local copy is missing. Edit and commit a template only when its content should change for everyone.
+
+The extraction algorithm settings in `boneSurfaceExtraction.json` are a template without a local copy. To try other values, save your own file (for example `boneSurfaceExtraction.local.json`) and point `input.configurationFileName` in your `boneSegmentation_extractSurface.local.json` to it.
+
 ## Experiment Setup
 
 Refer to [`tools/ultrasoundSpatialProcessing`](../ultrasoundSpatialProcessing/README.md) for the experiment setup, calibration, coordinate frames, tracking data, ultrasound acquisition, and preparation of the selected snapshot MAT-file used here.
@@ -28,7 +42,7 @@ validSnapshots_yyyyMMdd_HHmmss.mat
 
 The MAT-file must contain exactly one variable. The expected variable is normally `validSnapshots`, with source-directory groups containing `name`, `bone`, `path`, and `data`. Each `data` record must provide the ultrasound image and plane information used by the segmentation interface.
 
-Edit `tools/boneSegmentationProcess/configs/boneSegmentation_semiAutomatic.json`:
+Edit your local copy `tools/boneSegmentationProcess/configs/boneSegmentation_semiAutomatic.local.json`:
 
 | Setting | Meaning |
 | --- | --- |
@@ -53,7 +67,7 @@ The final segmentation mask contains pixels that pass preprocessing, thresholdin
 ## Running the Project
 
 1. Complete the snapshot selection workflow in `tools/ultrasoundSpatialProcessing`.
-2. Set the input MAT-file and output directory in `tools/boneSegmentationProcess/configs/boneSegmentation_semiAutomatic.json`.
+2. Set the input MAT-file and output directory in `tools/boneSegmentationProcess/configs/boneSegmentation_semiAutomatic.local.json`.
 3. Start MATLAB and run:
 
    ```matlab
@@ -150,7 +164,7 @@ Part 2 requires three inputs:
 - The same selected ultrasound snapshot MAT-file used for Bone Segmentation (from Part 1). It must contain exactly one variable.
 - The algorithm configuration file `tools/boneSegmentationProcess/configs/boneSurfaceExtraction.json`.
 
-Edit `tools/boneSegmentationProcess/configs/boneSegmentation_extractSurface.json` to select these inputs and the output location:
+Edit your local copy `tools/boneSegmentationProcess/configs/boneSegmentation_extractSurface.local.json` to select these inputs and the output location:
 
 | Setting | Meaning |
 | --- | --- |
@@ -181,7 +195,7 @@ The extraction implementation belongs to this tool. Its public helper is `helper
 ## Running the Project
 
 1. Export the results from Bone Segmentation (from Part 1).
-2. Set the segmentation file, matching ultrasound file, extraction settings file, and output directory in `tools/boneSegmentationProcess/configs/boneSegmentation_extractSurface.json`.
+2. Set the segmentation file, matching ultrasound file, extraction settings file, and output directory in `tools/boneSegmentationProcess/configs/boneSegmentation_extractSurface.local.json`.
 3. Review algorithm parameters in `tools/boneSegmentationProcess/configs/boneSurfaceExtraction.json`.
 4. Start MATLAB and run:
 
@@ -312,7 +326,7 @@ Part 3 requires two matching MAT-files:
 - The output from Bone Surface Extraction (from Part 2). It must contain `surfaceResults` and `extractionMetadata`, and every surface record must already include the reserved `surfaceCoordinatesXYZRef` field.
 - The same selected ultrasound snapshot MAT-file used by the earlier parts. It must contain `validSnapshots`, including the image-plane geometry and `T_image_ref` transform for every matching surface record.
 
-Edit `tools/boneSegmentationProcess/configs/boneSegmentation_recover3Dsurface.json` to select these inputs and the output location:
+Edit your local copy `tools/boneSegmentationProcess/configs/boneSegmentation_recover3Dsurface.local.json` to select these inputs and the output location:
 
 | Setting | Meaning |
 | --- | --- |
@@ -340,7 +354,7 @@ Records without an extracted 2D surface remain valid. Their `surfaceCoordinatesX
 ## Running the Project
 
 1. Complete Bone Surface Extraction (from Part 2).
-2. Set the extracted surface file, matching ultrasound snapshot file, and output directory in `tools/boneSegmentationProcess/configs/boneSegmentation_recover3Dsurface.json`.
+2. Set the extracted surface file, matching ultrasound snapshot file, and output directory in `tools/boneSegmentationProcess/configs/boneSegmentation_recover3Dsurface.local.json`.
 3. Start MATLAB and run:
 
    ```matlab
