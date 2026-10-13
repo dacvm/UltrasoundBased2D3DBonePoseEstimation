@@ -1,11 +1,12 @@
 ﻿data/*
 output/*
-configs/*
 literatures/**/*.pdf
 literatures/**/tmp/
 
-# Ignore configuration directories anywhere below tools.
-# /tools/**/configs/
+# Personal working copies of the JSON config templates. The templates stay
+# tracked; each user edits their own *.local.json copy.
+*.local.json
+
 /tools/**/outputs/
 
 functions/fcal_related/split_sequence_image_frames_demo/*
