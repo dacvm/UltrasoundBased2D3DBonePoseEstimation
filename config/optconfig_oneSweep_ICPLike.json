@@ -17,7 +17,8 @@
   "cost": {
     "model": "ICPLike",
     "fixedParameters": {
-      "nearestVertexCount": 20
+      "nearestVertexCount": 20,
+      "pointBatchSize": 200
     },
     "hyperparameters": {}
   },

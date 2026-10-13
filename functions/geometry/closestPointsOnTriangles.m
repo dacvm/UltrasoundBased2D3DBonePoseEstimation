@@ -7,10 +7,12 @@ function [closestPointsXYZ, squaredDistances] = closestPointsOnTriangles(queryPo
 %
 % Why it is needed:
 %   distancePointMesh (geom3d) answers the same question, but it handles one
-%   query point per call. cost_ICPLike calls it once for each of ~3400
-%   measured points, and almost all of the time goes into the fixed cost of
-%   each call rather than into the arithmetic. Here every step is one array
-%   operation over ALL pairs, so the fixed cost is paid only once.
+%   query point per call. The previous ICP-like cost (now
+%   devs/costFunctionDevelopment/dev_cost_ICPLike.m) called it once for each
+%   of ~3400 measured points, and almost all of the time went into the fixed
+%   cost of each call rather than into the arithmetic. Here every step is one
+%   array operation over ALL pairs, so the fixed cost is paid only once.
+%   cost_ICPLike uses this function for its point-to-mesh distances.
 %   (geom3d's own vectorized mode is not an alternative: its region-3 test
 %   reads "c <= e" where it should read "c <= -e". This function does not
 %   share that bug.)
@@ -30,7 +32,7 @@ function [closestPointsXYZ, squaredDistances] = closestPointsOnTriangles(queryPo
 % up to floating-point rounding.
 %
 % Assumes no zero-area triangles (the determinant of the 2x2 system would
-% be zero); demo_cost_ICPLike2 checks that the mesh has none.
+% be zero); devdemo_cost_ICPLike2 checks that the project mesh has none.
 %
 % Inputs:
 %   queryPointsXYZ - N-by-3 query points.
@@ -67,8 +69,8 @@ rightSideAC   = sum(pointFromA .* edgeAC, 2);
 
 % A 2-by-2 system has a closed-form answer (Cramer's rule), which works on
 % whole columns without a loop. The determinant is zero only for a zero-area
-% triangle; the project meshes have none (the demo checks this), so no
-% special case is needed.
+% triangle; the project meshes have none (devdemo_cost_ICPLike2 checks
+% this), so no special case is needed.
 determinant   = gramABAB .* gramACAC - gramABAC .^ 2;
 u = (gramACAC .* rightSideAB - gramABAC .* rightSideAC) ./ determinant;
 v = (gramABAB .* rightSideAC - gramABAC .* rightSideAB) ./ determinant;

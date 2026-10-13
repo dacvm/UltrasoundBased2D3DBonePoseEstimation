@@ -21,8 +21,9 @@ function [data, validationData] = prepareBonePoseOptimizationInputs(config)
 %     - the ultrasound image planes in the ref frame (what we compare to),
 %     - optional bone-surface points extracted from those images,
 %     - the coarse start pose (where the search begins),
-%     - pre-built structures such as the P-IMLOP PD-tree and the
-%       smoothed images used by the intensity cost.
+%     - pre-built structures such as the P-IMLOP PD-tree, the ICP-like
+%       KD-tree and vertex-to-face table, and the smoothed images used by
+%       the intensity cost.
 %
 % Why it is needed:
 %   A cost function is called a huge number of times, so it must be fast.
@@ -48,7 +49,12 @@ function [data, validationData] = prepareBonePoseOptimizationInputs(config)
 %   data           - Estimation-only data containing the CT mesh, ultrasound
 %                    measurements, and initial transforms.
 %                    data.extra.pimlop.PsiCT holds the CT-frame P-IMLOP model
-%                    with its PD-tree, used by cost_PIMLOP. When the
+%                    with its PD-tree, used by cost_PIMLOP.
+%                    data.extra.icpLike.vertexTreeCT is a KD-tree over the
+%                    CT-frame mesh vertices, and
+%                    data.extra.icpLike.faceIndicesByVertex lists the faces
+%                    attached to each vertex (padded by repeating the first
+%                    face); both are used by cost_ICPLike. When the
 %                    config sets intensitySmoothingSigmaMm,
 %                    data.extra.intensityLine.smoothedImages holds one
 %                    blurred image per plane, used by cost_intensityLine.
@@ -305,6 +311,30 @@ validateCoarseMesh(boneMeshCT, currentCoarseRegistration.boneMeshRef_est, T_CT_r
 PsiCT        = preparePIMLOPModel_batchedProcess(boneMeshCT);
 PsiCT.pdTree = buildPIMLOPPDTree_batchedProcess(PsiCT.mesh, PsiCT.validFaceMask);
 
+% Point-to-mesh costs such as ICPLike first find the mesh vertices nearest
+% to each measured point, then search the faces around those vertices. Like
+% the PD-tree above, both search structures depend only on the CT mesh, so
+% they are built once here for every cost model. They are also useful
+% starting material for any new point-to-mesh cost. The first is a KD-tree
+% over the CT-frame vertices; the cost moves the measured points into CT,
+% so this one tree serves every candidate pose.
+numberOfMeshVertices = size(boneMeshCT.Points, 1);
+vertexTreeCT         = KDTreeSearcher(boneMeshCT.Points);
+
+% The second turns a nearest vertex into the faces that touch it.
+% vertexAttachments gives one cell per vertex, and the cells have different
+% lengths. A plain matrix lets the cost look up all points at once, so each
+% row is filled to the same width by repeating the vertex's first face. The
+% cost removes repeated faces, so this filling never changes the result.
+attachedFaceCells   = vertexAttachments(boneMeshCT, (1:numberOfMeshVertices).');
+facesPerVertex      = max(cellfun(@numel, attachedFaceCells));
+faceIndicesByVertex = zeros(numberOfMeshVertices, facesPerVertex);
+for vertexIndex = 1:numberOfMeshVertices
+    attachedFaces   = attachedFaceCells{vertexIndex};
+    numberOfRepeats = facesPerVertex - numel(attachedFaces);
+    faceIndicesByVertex(vertexIndex, :) = [attachedFaces, repmat(attachedFaces(1), 1, numberOfRepeats)];
+end
+
 %% PACKAGE ESTIMATION DATA
 
 % Put everything the cost functions and optimizer need into one struct.
@@ -328,6 +358,8 @@ data.config                  = config;
 % keeps the shared top-level fields the same for all cost models, and makes
 % it clear which pre-computed pieces belong to which model.
 data.extra.pimlop.PsiCT      = PsiCT;
+data.extra.icpLike.vertexTreeCT        = vertexTreeCT;
+data.extra.icpLike.faceIndicesByVertex = faceIndicesByVertex;
 
 % Intensity cost models (intensityLine and the combined models built on
 % it) read the images through a Gaussian blur so they still get a hint

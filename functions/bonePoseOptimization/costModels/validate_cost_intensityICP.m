@@ -7,7 +7,8 @@ function [fixedParameters, hyperparameters] = validate_cost_intensityICP(fixedPa
 %
 % Inputs:
 %   fixedParameters - Struct containing intensityMax, sampleSpacingMm,
-%                     nearestVertexCount, and distanceReferenceMm.
+%                     nearestVertexCount, pointBatchSize, and
+%                     distanceReferenceMm.
 %   hyperparameters - Struct containing intensitySmoothingSigmaMm and
 %                     weight candidate arrays.
 %
@@ -18,7 +19,7 @@ function [fixedParameters, hyperparameters] = validate_cost_intensityICP(fixedPa
 
 % Require the complete combined-model schema so spelling mistakes are
 % reported before data preparation or optimization begins.
-validateFieldNames(fixedParameters, {'intensityMax', 'sampleSpacingMm', 'nearestVertexCount', 'distanceReferenceMm'}, 'cost.fixedParameters');
+validateFieldNames(fixedParameters, {'intensityMax', 'sampleSpacingMm', 'nearestVertexCount', 'pointBatchSize', 'distanceReferenceMm'}, 'cost.fixedParameters');
 validateFieldNames(hyperparameters, {'intensitySmoothingSigmaMm', 'weight'}, 'cost.hyperparameters');
 
 % Reuse each component validator on the settings that belong to that model.
@@ -29,7 +30,9 @@ intensityHyper = struct( ...
     'intensitySmoothingSigmaMm', hyperparameters.intensitySmoothingSigmaMm);
 [intensityFixed, intensityHyper] = validate_cost_intensityLine(intensityFixed, intensityHyper);
 
-pointCloudFixed = struct('nearestVertexCount', fixedParameters.nearestVertexCount);
+pointCloudFixed = struct( ...
+    'nearestVertexCount', fixedParameters.nearestVertexCount, ...
+    'pointBatchSize',     fixedParameters.pointBatchSize);
 [pointCloudFixed, ~] = validate_cost_ICPLike(pointCloudFixed, struct());
 
 % The reference distance removes the millimetre unit from the point-cloud RMSE.
@@ -44,6 +47,7 @@ fixedParameters = struct();
 fixedParameters.intensityMax        = intensityFixed.intensityMax;
 fixedParameters.sampleSpacingMm     = intensityFixed.sampleSpacingMm;
 fixedParameters.nearestVertexCount  = pointCloudFixed.nearestVertexCount;
+fixedParameters.pointBatchSize      = pointCloudFixed.pointBatchSize;
 fixedParameters.distanceReferenceMm = double(distanceReferenceMm);
 
 hyperparameters = struct();
