@@ -1,6 +1,18 @@
-% DEMO_COST_ICPLIKE2 Minimal example of how to use dev_cost_ICPLike2.
+% DEMO_COST_ICPLIKE2 Minimal example of how to use cost_ICPLike.
 %
-% dev_cost_ICPLike2 tells an optimizer how well a candidate bone pose fits
+% A NOTE ON THE NAMES
+%   This demo was written for dev_cost_ICPLike2, the development version of
+%   the faster ICP-like cost. That function is now the pipeline cost model
+%   cost_ICPLike, in functions/bonePoseOptimization/costModels/, and the
+%   "2" in this script's name refers to its old name. The previous version
+%   is kept next to this script as dev_cost_ICPLike for study only.
+%
+%   In the pipeline, prepareBonePoseOptimizationInputs builds the search
+%   data of STEP 2 by itself. This demo builds it by hand because the saved
+%   setup file was made before that step existed, and because seeing the
+%   build shows what the cost function needs.
+%
+% cost_ICPLike tells an optimizer how well a candidate bone pose fits
 % the ultrasound data. It returns the RMSE of the distances between the
 % bone-surface points seen in the ultrasound images and the CT bone mesh
 % placed at that pose. A lower cost means a better fit.
@@ -14,19 +26,19 @@
 %
 % The script tells this story in four steps: load the data, build the search
 % data, evaluate the cost at one pose, and look at the result.
-% devdemo_cost_ICPLike2.m checks this function against cost_ICPLike and
-% times both of them.
+% devdemo_cost_ICPLike2.m checks this function against the old
+% dev_cost_ICPLike and times both of them.
 
 % Clear the workspace and close all figures, so nothing left over from an
 % earlier run can affect this one.
 clear; clc; close all;
 
-% The script needs two folders on the path: the project's functions folder,
-% and this folder, which holds the cost function and the saved setup file.
+% The cost function lives in the project's functions folder, which goes on
+% the path. The saved setup file sits next to this script, so this folder
+% is remembered to load it.
 developmentFolder = fileparts(mfilename('fullpath'));
 projectRoot       = fileparts(fileparts(developmentFolder));
 addpath(genpath(fullfile(projectRoot, 'functions')));
-addpath(developmentFolder);
 
 %% STEP 1. LOAD THE PREPARED DATA AND SET THE ICPLIKE CONFIG
 % The setup file already holds data that is ready for optimization: the CT
@@ -76,7 +88,7 @@ for vertexIndex = 1:numberOfVertices
 end
 
 % With both structures ready, store them in data.extra.icpLike. That is
-% where dev_cost_ICPLike2 looks for them, so data is now ready for any
+% where cost_ICPLike looks for them, so data is now ready for any
 % number of cost calls.
 data.extra.icpLike.vertexTreeCT        = vertexTreeCT;
 data.extra.icpLike.faceIndicesByVertex = faceIndicesByVertex;
@@ -87,19 +99,19 @@ data.extra.icpLike.faceIndicesByVertex = faceIndicesByVertex;
 % itself, which is a natural first pose to check. An optimizer calls this
 % same line many times, each time with a different pose vector.
 poseVector      = zeros(6, 1);
-[cost, details] = dev_cost_ICPLike2(poseVector, data, config);
+[cost, details] = cost_ICPLike(poseVector, data, config);
 
 % A one-line summary gives the result as a number before the figure shows
 % it in 3D. The run time shows how cheap one call is now that the search
 % data is reused.
-fprintf('dev_cost_ICPLike2 at the initial pose: RMSE = %.3f mm over %d points (%.1f ms)\n', ...
+fprintf('cost_ICPLike at the initial pose: RMSE = %.3f mm over %d points (%.1f ms)\n', ...
     cost, numel(details.pointToSurfaceDistancesMm), 1e3 * details.correspondenceRuntimeSeconds);
 
 %% STEP 4. SHOW THE RESULT: MESH, ULTRASOUND IMAGES AND CORRESPONDENCES
 % The cost is a single number, so a 3D view shows where the fit is good and
 % where it is poor. The points and the mesh are in the ref frame, and all
 % axes use the same scale so distances on screen are not distorted.
-figureHandle = figure('Name', 'dev_cost_ICPLike2: correspondences at the initial pose');
+figureHandle = figure('Name', 'cost_ICPLike: correspondences at the initial pose');
 axesHandle = axes(figureHandle);
 hold(axesHandle, 'on');
 grid(axesHandle, 'on');

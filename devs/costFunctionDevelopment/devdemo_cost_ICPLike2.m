@@ -1,6 +1,15 @@
-% DEMO_COST_ICPLIKE2 Validate and time dev_cost_ICPLike2 against cost_ICPLike.
+% DEVDEMO_COST_ICPLIKE2 Validate and time cost_ICPLike against dev_cost_ICPLike.
 %
-% dev_cost_ICPLike2 is a faster version of cost_ICPLike. Instead of moving
+% A NOTE ON THE NAMES
+%   This script was written while the faster ICP-like cost was still a
+%   development function called dev_cost_ICPLike2. That function has since
+%   become the pipeline cost model cost_ICPLike, in
+%   functions/bonePoseOptimization/costModels/. The previous pipeline
+%   version moved here as dev_cost_ICPLike, a study case kept only for this
+%   comparison. The "2" in this script's name refers to the old name of the
+%   faster version.
+%
+% cost_ICPLike is a faster version of dev_cost_ICPLike. Instead of moving
 % the mesh and rebuilding a KD-tree and a vertex-to-face list on every call,
 % it builds both ONCE in the CT frame, moves the measured points into CT,
 % and finds all closest points on triangles in a few large batched array
@@ -22,7 +31,7 @@
 %         it in data.extra.icpLike
 %   3     TEST A: batched triangle function vs geom3d on    testTriangleCases          5
 %         hand-made points
-%   4     TEST B: new cost vs cost_ICPLike at several       compareWithOriginalCost    1, 2, 3
+%   4     TEST B: new cost vs dev_cost_ICPLike at several   compareWithOriginalCost    1, 2, 3
 %         poses (same costs, distances, KNN?)
 %   5     TEST C: speed over many evaluations, and the     timeRepeatedEvaluations    4 (line)
 %         work the old version repeats on every call
@@ -34,8 +43,8 @@
 % in the table above match the figures this run creates.
 clear; clc; close all;
 
-% The cost functions live in the project's functions folder, while
-% dev_cost_ICPLike2 and the setup file live next to this script, so both
+% The new cost function lives in the project's functions folder, while the
+% old dev_cost_ICPLike and the setup file live next to this script, so both
 % folders must be on the path before anything else runs.
 developmentFolder = fileparts(mfilename('fullpath'));
 projectRoot = fileparts(fileparts(developmentFolder));
@@ -59,7 +68,7 @@ addpath(developmentFolder);
 % a triangle) is checked on simple cases where the right answer is clear.
 triangleTest = testTriangleCases();
 
-%% STEP 4. TEST B -- COMPARE WITH cost_ICPLike AT SEVERAL POSES
+%% STEP 4. TEST B -- COMPARE WITH dev_cost_ICPLike AT SEVERAL POSES
 % With the building block trusted, the full new cost is compared with the
 % original at several poses. The results at the start pose (pose 1) are
 % kept for the figures and the batch-size test.
@@ -99,7 +108,7 @@ function [data, config] = loadIcpLikeSetup(developmentFolder)
 % The fixture holds data, config and initialCost. Its config was made for
 % the P-IMLOP model, so the cost block is replaced with ICPLike settings.
 % Both cost functions read nearestVertexCount; pointBatchSize is only read
-% by dev_cost_ICPLike2.
+% by cost_ICPLike.
 %
 % Input:   developmentFolder - folder that contains optimization_setup.mat.
 % Outputs: data, config      - prepared data and the ICPLike runtime config
@@ -122,7 +131,7 @@ data.config = config;
 numberOfVertices     = size(data.boneMeshCT.Points, 1);
 numberOfFaces        = size(data.boneMeshCT.ConnectivityList, 1);
 numberOfPoints       = size(vertcat(data.boneSurfaceMeasurements.surfaceCoordinatesXYZRef), 1);
-fprintf('=== dev_cost_ICPLike2 demonstration ===\n');
+fprintf('=== cost_ICPLike demonstration ===\n');
 fprintf('Bone %s: %d vertices, %d faces, %d measured points in %d images, K = %d\n\n', ...
     data.boneName, numberOfVertices, numberOfFaces, numberOfPoints, ...
     numel(data.boneSurfaceMeasurements), config.cost.parameters.nearestVertexCount);
@@ -137,7 +146,7 @@ function [data, searchData] = buildIcpLikeSearchData(data)
 %BUILDICPLIKESEARCHDATA Build the CT KD-tree and vertex-to-face table once.
 % The CT mesh never changes during the optimization, so both structures are
 % valid for every candidate pose. They are stored in data.extra.icpLike,
-% which is where dev_cost_ICPLike2 reads them.
+% which is where cost_ICPLike reads them.
 %
 % Input:   data       - prepared data with data.boneMeshCT.
 % Outputs: data       - the same data with data.extra.icpLike filled in.
@@ -184,7 +193,7 @@ end
 tableBuildSeconds = toc(tableTimer);
 
 % Hand both structures to the cost function through data.extra, which is
-% where dev_cost_ICPLike2 looks for them.
+% where cost_ICPLike looks for them.
 data.extra.icpLike.vertexTreeCT        = vertexTreeCT;
 data.extra.icpLike.faceIndicesByVertex = faceIndicesByVertex;
 
@@ -332,7 +341,7 @@ end
 
 
 %% ===================================================================
-% STEP 4 -- TEST B: NEW COST VS cost_ICPLike
+% STEP 4 -- TEST B: NEW COST VS dev_cost_ICPLike
 % ===================================================================
 
 function poseComparison = compareWithOriginalCost(data, config, searchData)
@@ -372,7 +381,7 @@ newSeconds      = zeros(numberOfPoses, 1);
 
 % The table header is printed first so each pose can add its row as soon
 % as it is done.
-fprintf('--- cost_ICPLike vs dev_cost_ICPLike2 ---\n');
+fprintf('--- dev_cost_ICPLike vs cost_ICPLike ---\n');
 fprintf('%4s %12s %12s %10s %10s %8s %8s %9s %9s %7s\n', 'pose', 'old cost', 'new cost', ...
     'max|dd|', 'max|dp|', 'd>1e-9', 'KNN diff', 'old [ms]', 'new [ms]', 'speedup');
 
@@ -383,16 +392,16 @@ for poseIndex = 1:numberOfPoses
 
     % Evaluate both versions at the same pose and time each one.
     timer = tic;
-    [originalCosts(poseIndex), originalDetails] = cost_ICPLike(poseVector, data, config);
+    [originalCosts(poseIndex), originalDetails] = dev_cost_ICPLike(poseVector, data, config);
     originalSeconds(poseIndex) = toc(timer);
 
     timer = tic;
-    [newCosts(poseIndex), newDetails] = dev_cost_ICPLike2(poseVector, data, config);
+    [newCosts(poseIndex), newDetails] = cost_ICPLike(poseVector, data, config);
     newSeconds(poseIndex) = toc(timer);
 
     % The first thing that could differ is the KNN search, because the new
     % version searches in CT instead of ref. The reference search is
-    % exactly what cost_ICPLike does, knnsearch over the moved mesh in ref.
+    % exactly what dev_cost_ICPLike does, knnsearch over the moved mesh in ref.
     % Count points whose K nearest vertices differ from the CT-tree result.
     referenceNearestVertices = knnsearch(originalDetails.boneMeshRefCandidate.Points, originalDetails.boneSurfacePointsRef, 'K', nearestVertexCount);
     knnDifferentRows = nnz(any(referenceNearestVertices ~= newDetails.nearestVertexIndicesByPoint, 2));
@@ -480,11 +489,11 @@ newDistanceTimes = zeros(numberOfTimedPoses, 1);
 % see the same conditions. The new version reports its stage times itself.
 for poseIndex = 1:numberOfTimedPoses
     timer = tic;
-    cost_ICPLike(timedPoses(:, poseIndex), data, config);
+    dev_cost_ICPLike(timedPoses(:, poseIndex), data, config);
     originalTimes(poseIndex) = toc(timer);
 
     timer = tic;
-    [~, timedDetails] = dev_cost_ICPLike2(timedPoses(:, poseIndex), data, config);
+    [~, timedDetails] = cost_ICPLike(timedPoses(:, poseIndex), data, config);
     newTimes(poseIndex)         = toc(timer);
     newKnnTimes(poseIndex)      = timedDetails.knnRuntimeSeconds;
     newDistanceTimes(poseIndex) = timedDetails.distanceRuntimeSeconds;
@@ -505,8 +514,8 @@ attachmentsSeconds = toc(timer);
 % Report medians, which ignore the slow first (warm-up) calls, and put the
 % repeated work next to the one-time build cost from step 2.
 fprintf('--- Timing over %d random poses (median) ---\n', numberOfTimedPoses);
-fprintf('cost_ICPLike        : %7.1f ms per evaluation\n', 1e3 * median(originalTimes));
-fprintf('dev_cost_ICPLike2   : %7.1f ms per evaluation  (%.1fx faster)\n', 1e3 * median(newTimes), median(originalTimes) / median(newTimes));
+fprintf('dev_cost_ICPLike (old) : %7.1f ms per evaluation\n', 1e3 * median(originalTimes));
+fprintf('cost_ICPLike     (new) : %7.1f ms per evaluation  (%.1fx faster)\n', 1e3 * median(newTimes), median(originalTimes) / median(newTimes));
 fprintf('  of which KNN (CT tree query incl. moving points) : %6.1f ms\n', 1e3 * median(newKnnTimes));
 fprintf('  of which batched closest-point stage             : %6.1f ms\n', 1e3 * median(newDistanceTimes));
 fprintf('Work the old version repeats on every call:\n');
@@ -525,7 +534,7 @@ end
 % ===================================================================
 
 function batchSizeTest = testBatchSizes(data, config, poseComparison)
-%TESTBATCHSIZES Time dev_cost_ICPLike2 for several batch sizes at the start pose.
+%TESTBATCHSIZES Time cost_ICPLike for several batch sizes at the start pose.
 % The batch size only decides how many points share one array computation.
 % Small batches bring back the per-call overhead; one huge batch needs the
 % most memory. The cost must be the same for every batch size. The memory
@@ -565,7 +574,7 @@ for batchIndex = 1:numel(batchSizes)
     runSeconds = zeros(3, 1);
     for runIndex = 1:3
         timer = tic;
-        batchCost = dev_cost_ICPLike2(zeros(6, 1), data, batchConfig);
+        batchCost = cost_ICPLike(zeros(6, 1), data, batchConfig);
         runSeconds(runIndex) = toc(timer);
     end
     medianSeconds(batchIndex) = median(runSeconds);
@@ -598,11 +607,11 @@ function compareCandidateLayouts(details, faceIndicesByVertex, faces)
 % Each point's K seed vertices touch K*M entries in the padded table, but
 % many are the same face. Two ways to feed them to closestPointsOnTriangles:
 %   - padded: every entry is a pair, repeats included (simplest);
-%   - repeats removed: what dev_cost_ICPLike2 does.
+%   - repeats removed: what cost_ICPLike does.
 % Both must give the same minimum distance per point; this prints that
 % check, then the pair counts and times of both layouts.
 %
-% Inputs: details             - dev_cost_ICPLike2 details at one pose.
+% Inputs: details             - cost_ICPLike details at one pose.
 %         faceIndicesByVertex - padded vertex-to-face table from step 2.
 %         faces               - mesh connectivity (F-by-3).
 % Output: none; the results are printed.
@@ -616,7 +625,7 @@ seeds    = details.nearestVertexIndicesByPoint;
 facesPerVertex = size(faceIndicesByVertex, 2);
 
 % One row of candidate faces per point, sorted so repeats sit side by side
-% (the same layout dev_cost_ICPLike2 builds).
+% (the same layout cost_ICPLike builds).
 candidateFaceMatrix = reshape(faceIndicesByVertex(seeds.', :).', K * facesPerVertex, numberOfPoints).';
 candidateFaceMatrix = sort(candidateFaceMatrix, 2);
 candidatesPerPoint  = size(candidateFaceMatrix, 2);
@@ -633,7 +642,7 @@ paddedFaceIndex  = reshape(candidateFaceMatrix.', [], 1);
 paddedMinimum = min(reshape(paddedSquared, candidatesPerPoint, numberOfPoints), [], 1).';
 paddedSeconds = toc(timer);
 
-% Layout 2 -- repeats removed, as in dev_cost_ICPLike2. Since the rows are
+% Layout 2 -- repeats removed, as in cost_ICPLike. Since the rows are
 % sorted, a face is a repeat when it equals its left neighbour. Removed
 % entries are filled with inf afterwards, so they never win the minimum.
 timer = tic;
@@ -658,7 +667,7 @@ fprintf('\nLayout check: max |padded - unique| minimum distance = %.2e mm\n', ..
     max(abs(sqrt(paddedMinimum) - sqrt(uniqueMinimum))));
 fprintf('\n--- Candidate layout (pose 0, closest-point computation only) ---\n');
 fprintf('padded, with repeats : %7d pairs, %6.1f ms\n', paddedPairs, 1e3 * paddedSeconds);
-fprintf('repeats removed      : %7d pairs, %6.1f ms  (used by dev_cost_ICPLike2)\n', uniquePairs, 1e3 * uniqueSeconds);
+fprintf('repeats removed      : %7d pairs, %6.1f ms  (used by cost_ICPLike)\n', uniquePairs, 1e3 * uniqueSeconds);
 fprintf('Candidate faces per point: mean %.1f, min %d, max %d\n\n', ...
     mean(uniquePairsPerPoint), min(uniquePairsPerPoint), max(uniquePairsPerPoint));
 end
@@ -681,11 +690,11 @@ function plotCorrespondenceScene(data, details)
 % Inputs: data    - prepared data: the bone name (title), the image planes
 %                   and the surface measurements (plane k belongs to
 %                   measurement k, aligned during input preparation).
-%         details - dev_cost_ICPLike2 details at the start pose.
+%         details - cost_ICPLike details at the start pose.
 
 % Set up one 3D axes in the ref frame with equal scaling, so distances on
 % screen are not distorted.
-figureHandle = figure('Name', 'dev_cost_ICPLike2: correspondences at the start pose');
+figureHandle = figure('Name', 'cost_ICPLike: correspondences at the start pose');
 axesHandle = axes(figureHandle);
 hold(axesHandle, 'on');
 grid(axesHandle, 'on');
@@ -779,7 +788,7 @@ function plotOldVersusNew(originalDetails, newDetails, originalCosts, newCosts)
 %         originalCosts, newCosts     - cost of both versions at each compared pose.
 
 % Four views of the same comparison share one figure in a 2-by-2 grid.
-figureHandle = figure('Name', 'cost_ICPLike vs dev_cost_ICPLike2');
+figureHandle = figure('Name', 'dev_cost_ICPLike vs cost_ICPLike');
 tiledlayout(figureHandle, 2, 2, 'TileSpacing', 'compact');
 
 % Tile 1: every point on the diagonal means identical distances.
@@ -892,10 +901,10 @@ function plotBatchSizeEffect(batchSizes, medianSeconds, inputMegabytes, original
 % Inputs: batchSizes      - tested points per batch.
 %         medianSeconds   - median time per evaluation for each batch size.
 %         inputMegabytes  - input memory of the largest batch for each size.
-%         originalSeconds - median time of cost_ICPLike (reference line).
+%         originalSeconds - median time of dev_cost_ICPLike (reference line).
 
 % Time and memory get one tile each, next to each other.
-figureHandle = figure('Name', 'dev_cost_ICPLike2: batch size');
+figureHandle = figure('Name', 'cost_ICPLike: batch size');
 tiledlayout(figureHandle, 1, 2, 'TileSpacing', 'compact');
 
 % Left: time per evaluation, with the old version as a reference line.

@@ -197,9 +197,12 @@ This model does not require `boneSurfaceMatFile`.
 
 This model transforms the CT mesh to the candidate pose and measures the distance from every ultrasound-derived 3D bone-surface point to its closest location on the mesh triangles. The returned cost is the root-mean-square of all point-to-surface distances in millimetres. It is one-way: measured ultrasound points must agree with the mesh, but unobserved regions of the mesh do not require corresponding ultrasound points.
 
+**CT-frame KD-tree strategy.** For each measured point, the cost only searches the triangles attached to its `nearestVertexCount` nearest mesh vertices. `prepareBonePoseOptimizationInputs` builds a KD-tree over the CT-frame vertices and a vertex-to-face table once, and stores them in `data.extra.icpLike`. For each candidate pose, the cost moves the measured points from ref into CT instead of moving the mesh, so the same tree is reused by every CMA-ES candidate. The exact closest location on the candidate triangles is then computed for many points at once with `closestPointsOnTriangles`. The original implementation, which rebuilt the search on every call and handled one point at a time, is kept for study as `devs/costFunctionDevelopment/dev_cost_ICPLike.m`. It gives the same result.
+
 | Parameter | Type | Meaning |
 | --- | --- | --- |
 | `nearestVertexCount` | Fixed | Positive integer number of nearby mesh vertices used to seed the local candidate-triangle search for each measured 3D point. A larger value searches a wider mesh neighborhood but increases evaluation time. |
+| `pointBatchSize` | Fixed | Positive integer number of measured points whose candidate triangles are processed together. It only changes speed and memory use, never the result. `200` was the fastest setting on the project data. |
 
 This model requires aligned 3D bone-surface measurements from `boneSurfaceMatFile`.
 
@@ -219,6 +222,7 @@ A `weight` of `1` selects only the smoothed-intensity term, while `0` selects on
 | `intensityMax` | Fixed | Positive intensity that counts as full evidence, normally `255` for 8-bit images. |
 | `sampleSpacingMm` | Fixed | Positive largest distance in millimetres between neighbouring sample points along an intersection segment. |
 | `nearestVertexCount` | Fixed | Positive integer number of nearby mesh vertices used to seed the local candidate-triangle search for each measured 3D point. A larger value searches a wider mesh neighborhood but increases evaluation time. |
+| `pointBatchSize` | Fixed | Positive integer number of measured points whose candidate triangles are processed together by the `ICPLike` term. It only changes speed and memory use, never the result. |
 | `distanceReferenceMm` | Fixed | Positive distance in millimetres used to normalize the point-to-mesh RMSE before it is combined with the dimensionless intensity term. |
 | `intensitySmoothingSigmaMm` | Hyperparameter | Nonnegative Gaussian standard deviation in millimetres used to blur the images. `0` reads the raw images. |
 | `weight` | Hyperparameter | Convex blend coefficient in the inclusive range `[0, 1]`; it weights the intensity term, while `1 - weight` weights the normalized 3D-distance term. |
