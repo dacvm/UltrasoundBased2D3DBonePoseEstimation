@@ -53,5 +53,5 @@ MATLAB project: estimate 3D bone pose by registering CT bone meshes to tracked 2
 - `functions/display/`: visualization only; must not compute costs or change optimizer state.
 - `functions/bonePoseOptimization/configuration/`, `evaluationMetric/`, `evaluationPlot/`, `tests/`: config flow, metrics, result plots, tests.
 - `functions/` top level: only helpers shared across several areas.
-- `config/`: JSON run configs. `examples/`: small demo scripts. `devs/<feature>/`: in-progress feature work. `tools/`: data-preparation tools.
+- `config/` and `tools/*/configs/`: tracked JSON config templates. Scripts read a git-ignored `<name>.local.json` copy next to the template and error if it is missing; tests read the templates. Change a template only when its content should change for everyone. `examples/`: small demo scripts. `devs/<feature>/`: in-progress feature work. `tools/`: data-preparation tools.
 - `literatures/<paper>/`: one reference paper per folder. `notes.md` is committed (citation, key equations, code mapping); the PDF is local only (gitignored, copyright). Read `notes.md` first and open the PDF only for details. Keep `notes.md` in sync when the related code changes.
