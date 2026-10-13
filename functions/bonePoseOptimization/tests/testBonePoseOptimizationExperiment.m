@@ -89,14 +89,17 @@ verifyEqual(testCase, spec.cost.model, 'ICPLike');
 verifyTrue(testCase, isfile(spec.input.boneSurfaceMatFile));
 verifyEqual(testCase, spec.experiment.name, 'oneSweep_ICPLike');
 
-% K stays fixed, while the retained intersection tolerance creates only one plan row.
+% K and the batch size stay fixed, while the retained intersection
+% tolerance creates only one plan row.
 verifyEqual(testCase, spec.cost.fixedParameters.nearestVertexCount, 20);
+verifyEqual(testCase, spec.cost.fixedParameters.pointBatchSize, 200);
 verifyEmpty(testCase, fieldnames(spec.cost.hyperparameters));
 verifyEqual(testCase, plan.parameterNames, {'normalFacingToleranceDeg'});
 verifyEqual(testCase, plan.numberOfCombinations, 1);
 verifyEqual(testCase, plan.numberOfSeeds, 1);
 verifyEqual(testCase, plan.numberOfRuns, 1);
 verifyEqual(testCase, runConfig.cost.parameters.nearestVertexCount, 20);
+verifyEqual(testCase, runConfig.cost.parameters.pointBatchSize, 200);
 verifyEqual(testCase, runConfig.optimizer.seed, 1001);
 end
 
@@ -119,10 +122,11 @@ verifyEqual(testCase, spec.experiment.name, 'oneSweep_intensityICP');
 
 % Fixed settings define the two component models and point-cloud normalization.
 verifyEqual(testCase, fieldnames(spec.cost.fixedParameters).', ...
-    {'intensityMax', 'sampleSpacingMm', 'nearestVertexCount', 'distanceReferenceMm'});
+    {'intensityMax', 'sampleSpacingMm', 'nearestVertexCount', 'pointBatchSize', 'distanceReferenceMm'});
 verifyEqual(testCase, spec.cost.fixedParameters.intensityMax, 255);
 verifyEqual(testCase, spec.cost.fixedParameters.sampleSpacingMm, 0.1);
 verifyEqual(testCase, spec.cost.fixedParameters.nearestVertexCount, 20);
+verifyEqual(testCase, spec.cost.fixedParameters.pointBatchSize, 200);
 verifyEqual(testCase, spec.cost.fixedParameters.distanceReferenceMm, 5);
 
 % The generic planner must retain the component parameters followed by weight.

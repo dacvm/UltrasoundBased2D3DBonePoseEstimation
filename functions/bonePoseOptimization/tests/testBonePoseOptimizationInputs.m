@@ -312,6 +312,35 @@ verifyEqual(testCase, PsiCT.pdTree.numberOfDatums, nnz(PsiCT.validFaceMask));
 end
 
 
+function testICPLikeSearchDataIsPreparedInCT(testCase)
+%TESTICPLIKESEARCHDATAISPREPAREDINCT Check the KD-tree and face table.
+% testCase supplies the prepared estimation data. This function has no output.
+
+% The search data is built for every cost model, so it must also be there
+% when the configured model is the intensity cost.
+data = testCase.TestData.data;
+verifyTrue(testCase, isfield(data.extra, 'icpLike'));
+vertexTreeCT        = data.extra.icpLike.vertexTreeCT;
+faceIndicesByVertex = data.extra.icpLike.faceIndicesByVertex;
+
+% The tree must hold the CT-frame vertices of the same mesh the costs use.
+verifyClass(testCase, vertexTreeCT, 'KDTreeSearcher');
+verifyEqual(testCase, vertexTreeCT.X, data.boneMeshCT.Points);
+
+% Every row must list exactly the faces attached to that vertex; the
+% padding only repeats faces that are already in the row.
+attachedFaceCells = vertexAttachments(data.boneMeshCT, (1:size(data.boneMeshCT.Points, 1)).');
+verifyEqual(testCase, size(faceIndicesByVertex, 1), numel(attachedFaceCells));
+verifyEqual(testCase, size(faceIndicesByVertex, 2), max(cellfun(@numel, attachedFaceCells)));
+isRowCorrect = false(numel(attachedFaceCells), 1);
+for vertexIndex = 1:numel(attachedFaceCells)
+    isRowCorrect(vertexIndex) = isequal(unique(faceIndicesByVertex(vertexIndex, :)), ...
+        unique(attachedFaceCells{vertexIndex}));
+end
+verifyTrue(testCase, all(isRowCorrect), 'Some face-table rows do not match vertexAttachments.');
+end
+
+
 function testExistingCostIgnoresPIMLOPModel(testCase)
 %TESTEXISTINGCOSTIGNORESPIMLOPMODEL Check that adding the PD-tree is harmless.
 % testCase supplies the prepared data and its initial cost. This function has

@@ -1,33 +1,39 @@
+% DEMO_COST_ICPLIKE Show the original ICP-like cost at the initial pose.
+%
+% A NOTE ON THE NAMES
+%   This demo shows dev_cost_ICPLike, the original ICP-like cost. It used to
+%   be the pipeline function cost_ICPLike, but that name now belongs to a
+%   faster version that gives the same result (see demo_cost_ICPLike2.m for
+%   how to use it). The original is kept next to this script as a study
+%   case.
+
 clear; clc; close all;
 
 % Locate the development fixture and production project functions without
-% requiring the user to start MATLAB in one particular folder.
+% requiring the user to start MATLAB in one particular folder. This folder
+% goes on the path too, because it holds dev_cost_ICPLike.
 developmentFolder = fileparts(mfilename('fullpath'));
 projectRoot = fileparts(fileparts(developmentFolder));
 addpath(genpath(fullfile(projectRoot, 'functions')));
+addpath(developmentFolder);
 
 %% LOAD THE PREPARED OPTIMIZATION SETUP
 
 setupFilePath = fullfile(developmentFolder, 'optimization_setup.mat');
-setup = load(setupFilePath, 'data', 'config', 'initialPoseVector');
+setup = load(setupFilePath, 'data', 'config');
 
-% The saved fixture represents the same three inputs that an optimizer will
-% later pass to the public cost function.
-requiredSetupFields = {'data', 'config', 'initialPoseVector'};
-if ~all(isfield(setup, requiredSetupFields))
-    error('demo_cost_ICPLike:InvalidSetup', ...
-          'optimization_setup.mat must contain data, config, and initialPoseVector.');
-end
-
+% The saved fixture holds the data and config that an optimizer will later
+% pass to the cost function. The optimizer's pose is a change from the
+% initial pose, so a zero vector is the initial pose itself.
 data = setup.data;
 config = setup.config;
-initialPoseVector = setup.initialPoseVector;
+initialPoseVector = zeros(6, 1);
 
 %% EVALUATE THE INITIAL POSE
 
 % Request details so this demonstration can display exactly the candidate
 % geometry and measurements used to calculate the scalar cost.
-[cost, details] = cost_ICPLike(initialPoseVector, data, config);
+[cost, details] = dev_cost_ICPLike(initialPoseVector, data, config);
 
 %% DISPLAY THE SETUP IN THE REFERENCE FRAME
 

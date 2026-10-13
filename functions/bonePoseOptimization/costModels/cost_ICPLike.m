@@ -1,354 +1,286 @@
 function [cost, details] = cost_ICPLike(poseVector, data, config)
 %COST_ICPLIKE Measure how well one candidate bone pose matches 3D ultrasound points.
 % The optimizer calls this function with one possible six-parameter pose. The
-% function moves the CT bone mesh to that pose, finds the closest location on
+% function places the CT bone mesh at that pose, finds the closest location on
 % the mesh surface for every measured ultrasound point, and combines those
-% distances into one scalar cost. A smaller cost means that the candidate mesh
-% lies closer to the measured bone surface.
-%
-% The correspondence search has two stages. First, KNNSEARCH finds nearby
-% mesh vertices as a fast way to locate the relevant region of the mesh.
-% Second, DISTANCEPOINTMESH searches the real triangles attached to those
-% vertices. Therefore, the final correspondence may lie inside a triangle or
-% on an edge; it is not restricted to one of the mesh vertices.
+% distances into one scalar cost: their root-mean-square (RMSE). A smaller
+% cost means that the candidate mesh lies closer to the measured bone surface.
 %
 % This is a one-way measured-point-to-mesh cost. It answers, "How far is each
 % ultrasound point from the candidate mesh?" It does not require every part
 % of the CT mesh to have a matching ultrasound measurement.
 %
+% How the closest location is found:
+%   1. The K mesh vertices nearest to each point are found with a KD-tree.
+%      The tree is built once by prepareBonePoseOptimizationInputs over the
+%      CT-frame vertices, so it is reused for every candidate pose. A rigid
+%      transform keeps all distances unchanged, so moving the measured points
+%      from ref into CT and searching the CT tree finds the same K vertices
+%      as searching the moved mesh in ref.
+%   2. The faces attached to those K vertices are the candidate faces. The
+%      vertex-to-face table is also built once during input preparation,
+%      because mesh connectivity does not depend on the pose.
+%   3. The exact closest location on every candidate face is computed for a
+%      batch of points at once with closestPointsOnTriangles. The final
+%      correspondence may therefore lie inside a triangle or on an edge; it
+%      is not restricted to the mesh vertices.
+%
+% The previous implementation, which built a new KD-tree and called
+% distancePointMesh once per point on every call, is kept for study as
+% devs/costFunctionDevelopment/dev_cost_ICPLike.m. Both give the same result.
+%
 % Inputs:
-%   poseVector - Six-value candidate-pose perturbation written as
-%                  \(\mathbf{x}=[t_x,t_y,t_z,r_x,r_y,r_z]^T\).
-%                The first three values describe translation. The last three
-%                form the rotation vector expected by STATEVECTORTOTMATRIX.
-%                The perturbation is applied around data.T_CT_ref_initial.
-%   data       - Prepared optimization data. This function uses the CT-frame
-%                mesh, the initial CT-to-reference transform, the bone-to-CT
-%                transform, and the measured surface points already expressed
-%                in the reference frame. File loading must happen before this
-%                function is called because a cost function is called often.
-%   config     - Optional runtime configuration structure. The field
-%                config.cost.parameters.nearestVertexCount sets the number
-%                \(K\) of nearby vertices used to build each local face patch.
-%                If the field is absent, the function uses \(K=20\).
+%   poseVector - Six-value candidate-pose perturbation [tx; ty; tz; rx; ry; rz]
+%                (mm, rad) applied around data.T_CT_ref_initial. The last
+%                three values form the rotation vector expected by
+%                STATEVECTORTOTMATRIX.
+%   data       - Prepared optimization data from
+%                prepareBonePoseOptimizationInputs. This function uses the
+%                CT-frame mesh, the initial CT-to-ref transform, the
+%                bone-to-CT transform, the measured surface points in the ref
+%                frame, and the pose-independent search data:
+%                  data.extra.icpLike.vertexTreeCT        - KDTreeSearcher over
+%                      data.boneMeshCT.Points (CT frame).
+%                  data.extra.icpLike.faceIndicesByVertex - V-by-M indices of
+%                      the faces attached to each vertex, padded by repeating
+%                      the vertex's first face (M = most faces at one vertex).
+%   config     - Optional runtime configuration; data.config when omitted.
+%                config.cost.parameters.nearestVertexCount - number K of
+%                    nearby vertices whose faces are searched for each point.
+%                config.cost.parameters.pointBatchSize     - number of
+%                    measured points processed together. It only bounds
+%                    memory and run time and never changes the result.
 %
 % Outputs:
-%   cost       - Root-mean-square (RMSE) point-to-surface distance in mm:
-%                  \(J=\sqrt{\frac{1}{N}\sum_{i=1}^{N}d_i^2}\).
-%                Here, \(d_i\) is the distance from measured point \(i\) to
-%                its closest location on the candidate mesh. Lower is better.
-%   details    - Structure containing the candidate transforms and mesh, all
-%                point correspondences, global and per-measurement statistics,
-%                the resolved search settings, runtime, and completion status.
+%   cost       - RMSE point-to-surface distance in mm:
+%                  J = sqrt(mean(d_i^2)),
+%                where d_i is the distance from measured point i to its
+%                closest location on the candidate mesh. Lower is better.
+%   details    - Struct with the candidate transforms and mesh, all point
+%                correspondences, global and per-measurement statistics, the
+%                search results (nearest vertices, closest face per point),
+%                runtimes, the settings used, and a status string.
 
-%% READ AND CHECK THE INPUTS
+%% READ THE SETTINGS
 
-% A caller may omit CONFIG during interactive development. In that case, use
-% the configuration saved with DATA so the evaluation is still reproducible.
+% The optimizer usually passes only the pose and the data, so the config
+% saved with the data is used when none is given. The pose is forced into
+% a column so the transform helpers always get the same shape.
 if nargin < 3 || isempty(config)
     config = data.config;
 end
-
-% Reject an invalid optimizer state early. Reshape a valid row or column input
-% into the column-vector convention used by the pose-conversion function.
-validateattributes(poseVector, {'numeric'}, {'vector', 'numel', 6, 'real', 'finite'}, mfilename, 'poseVector');
 poseVector = poseVector(:);
 
-% List the prepared-data fields used below. Checking them here gives a clear
-% setup error instead of a less helpful missing-field error later in the code.
-requiredDataFields = {'boneMeshCT', 'T_CT_ref_initial', 'T_bone_CT', 'hasBoneSurface', 'boneSurfaceMeasurements'};
-if ~isstruct(data) || ~all(isfield(data, requiredDataFields))
-    error('cost_ICPLike:MissingPreparedData', ...
-          'The prepared data is missing fields required by the 3D point-cloud cost.');
-end
+% Both settings are required fixed parameters, already checked by
+% validate_cost_ICPLike when the experiment config was read.
+nearestVertexCount = config.cost.parameters.nearestVertexCount;
+pointBatchSize     = config.cost.parameters.pointBatchSize;
 
-% The mesh must retain both its vertices and triangle connectivity, which is
-% why this function requires a triangulation rather than a plain point cloud.
-if ~isa(data.boneMeshCT, 'triangulation')
-    error('cost_ICPLike:InvalidBoneMesh', ...
-          'data.boneMeshCT must be a triangulation.');
-end
+% The slow, pose-independent search data was prepared once before the
+% optimization, so here it is only picked up. K cannot exceed the number of
+% mesh vertices, otherwise the nearest-vertex search would have nothing left
+% to return.
+vertexTreeCT        = data.extra.icpLike.vertexTreeCT;
+faceIndicesByVertex = data.extra.icpLike.faceIndicesByVertex;
+numberOfVertices    = size(data.boneMeshCT.Points, 1);
+nearestVertexCount  = min(double(nearestVertexCount), numberOfVertices);
 
-% Stop when no measured surface is available: without measured points there
-% is no geometric evidence from which this cost can be calculated.
-if ~data.hasBoneSurface || isempty(data.boneSurfaceMeasurements)
-    error('cost_ICPLike:MissingBoneSurface', ...
-          'The prepared data does not contain aligned 3D bone-surface measurements.');
-end
+%% BUILD THE CANDIDATE TRANSFORMS AND MESH
 
-% Report missing dependencies before doing any costly geometry work.
-% KNNSEARCH performs the coarse local search; DISTANCEPOINTMESH performs the
-% final point-to-triangle calculation inside that local mesh region.
-if exist('knnsearch', 'file') ~= 2
-    error('cost_ICPLike:MissingKnnsearch', ...
-          'knnsearch is required for the KNN candidate-face search.');
-end
-if exist('distancePointMesh', 'file') ~= 2
-    error('cost_ICPLike:MissingDistancePointMesh', ...
-          'distancePointMesh from GEOM3D is required for point-to-mesh distances.');
-end
-
-% Start with a conservative default neighborhood. A larger K searches more
-% faces and is safer for irregular triangles, but it also takes more time.
-nearestVertexCount = 20;
-if isstruct(config) && isfield(config, 'cost') && ...
-        isstruct(config.cost) && isfield(config.cost, 'parameters') && ...
-        isfield(config.cost.parameters, 'nearestVertexCount')
-    nearestVertexCount = config.cost.parameters.nearestVertexCount;
-end
-
-% K must be a positive whole number because it counts mesh vertices.
-validateattributes(nearestVertexCount, {'numeric'}, ...
-    {'scalar', 'real', 'finite', 'positive', 'integer'}, ...
-    mfilename, 'config.cost.parameters.nearestVertexCount');
-
-%% BUILD THE CANDIDATE BONE MESH IN THE REFERENCE FRAME
-
-% Convert the six optimizer values into the candidate CT-to-reference rigid
-% transform. With the project's column-vector convention, a CT point moves as
-% \(\tilde{\mathbf{p}}_{ref}=\mathbf{T}_{CT\rightarrow ref}\tilde{\mathbf{p}}_{CT}\).
+% The candidate pose moves CT into ref. Its inverse (ref -> CT) is needed to
+% move the measured points into the frame of the KD-tree. The inverse of a
+% rigid [R t] is [R' -R'*t]; deriving it like this keeps it exactly rigid.
 T_CT_ref_candidate   = stateVectorToTMatrix(poseVector, data.T_CT_ref_initial);
-
-% Compose the bone-to-CT and CT-to-reference transforms from right to left:
-% \(\mathbf{T}_{bone\rightarrow ref}=\mathbf{T}_{CT\rightarrow ref} \mathbf{T}_{bone\rightarrow CT}\). 
-% This transform is stored for diagnostics.
 T_bone_ref_candidate = T_CT_ref_candidate * data.T_bone_CT;
 
-% Always transform the original CT vertices. Starting from the original mesh
-% on every call prevents candidate transforms from accumulating across the
-% many evaluations performed by an optimizer.
+R_CT_ref = T_CT_ref_candidate(1:3, 1:3);
+t_CT_ref = T_CT_ref_candidate(1:3, 4);
+T_ref_CT_candidate = [R_CT_ref.', -R_CT_ref.' * t_CT_ref; 0 0 0 1];
+
+% The distances themselves are computed in ref, so the returned closest
+% points and the candidate mesh can be plotted directly with the ultrasound
+% data. The original CT vertices are moved on every call, so candidate
+% transforms never accumulate across evaluations.
 bonePointsRefCandidate = applyRigidTransform(data.boneMeshCT.Points, T_CT_ref_candidate);
-
-% Rebuild the triangulation with the transformed vertices and unchanged face
-% connectivity. A rigid transform moves the mesh but does not change which
-% three vertices form each triangle.
-boneMeshRefCandidate = triangulation(data.boneMeshCT.ConnectivityList, bonePointsRefCandidate);
-
-% Give the vertex coordinates and triangle indices short, frame-explicit
-% names because the correspondence functions consume these arrays directly.
-boneMeshVerticesRef = boneMeshRefCandidate.Points;
-boneMeshFaces       = boneMeshRefCandidate.ConnectivityList;
-
-% A request larger than the mesh cannot be passed to KNNSEARCH. Clamp K to
-% the available number of vertices while preserving the validated integer.
-nearestVertexCount  = min(double(nearestVertexCount), size(boneMeshVerticesRef, 1));
+boneMeshRefCandidate   = triangulation(data.boneMeshCT.ConnectivityList, bonePointsRefCandidate);
+boneMeshFaces          = data.boneMeshCT.ConnectivityList;
 
 %% COLLECT THE MEASURED 3D SURFACE POINTS
 
-% DATA keeps the extracted surface points grouped by ultrasound measurement.
-% Retain that grouping so an unusually large distance can later be traced to
-% its source image, while also preparing one pooled point cloud for the cost.
+% Keep the per-measurement point counts so results can be split again by
+% ultrasound image at the end, then stack all points into one point cloud.
 numberOfMeasurements = numel(data.boneSurfaceMeasurements);
-surfacePointCells    = cell(numberOfMeasurements, 1);
 numberOfSurfacePointsByMeasurement = zeros(numberOfMeasurements, 1);
-
-% Read and validate each measurement separately before joining the points.
 for measurementIndex = 1:numberOfMeasurements
-
-    % These points were transformed into REF during input preparation. Both
-    % the measurements and candidate mesh must share REF before comparison.
-    currentSurfacePointsRef = data.boneSurfaceMeasurements(measurementIndex).surfaceCoordinatesXYZRef;
-
-    % Accept an empty N-by-3 array, but reject a wrong shape, nonnumeric data,
-    % NaN, or Inf because any of those would invalidate the distance result.
-    if ~isnumeric(currentSurfacePointsRef) || size(currentSurfacePointsRef, 2) ~= 3 || ~all(isfinite(currentSurfacePointsRef), 'all')
-        error('cost_ICPLike:InvalidBoneSurface', ...
-              'Measurement %d must contain finite N-by-3 points in ref.', measurementIndex);
-    end
-
-    % Convert the points to double for the geometry functions and remember
-    % how many belong to this measurement so they can be separated again.
-    surfacePointCells{measurementIndex} = double(currentSurfacePointsRef);
-    numberOfSurfacePointsByMeasurement(measurementIndex) = size(currentSurfacePointsRef, 1);
+    numberOfSurfacePointsByMeasurement(measurementIndex) = ...
+        size(data.boneSurfaceMeasurements(measurementIndex).surfaceCoordinatesXYZRef, 1);
 end
+boneSurfacePointsRef  = double(vertcat(data.boneSurfaceMeasurements.surfaceCoordinatesXYZRef));
+numberOfSurfacePoints = size(boneSurfacePointsRef, 1);
 
-% Vertically concatenate the cells without changing their order. Thus, all
-% points from measurement 1 come first, followed by measurement 2, and so on.
-boneSurfacePointsRef = vertcat(surfacePointCells{:});
+%% STEP 1 -- K NEAREST VERTICES WITH THE PRECOMPUTED CT KD-TREE
 
-% Individual measurements may be empty, but the pooled dataset must contain
-% at least one point or the cost would be undefined.
-if isempty(boneSurfacePointsRef)
-    error('cost_ICPLike:EmptyBoneSurface', ...
-          'The aligned measurements contain no 3D bone-surface points.');
-end
-
-%% FIND KNN CANDIDATE FACES AND CLOSEST SURFACE POINTS
-
-% Time only the correspondence stage. This helps us assess the acceleration
-% method without mixing in input validation or result packaging time.
+% The correspondence search is timed as a whole, so its cost per evaluation
+% can be reported next to the result.
 correspondenceTimer = tic;
 
-% STEP 1 -- Locate a small mesh neighborhood around every measured point.
-% For measured point \(\mathbf{p}_i\), KNNSEARCH returns the indices of its K
-% nearest mesh vertices. These vertices are search seeds only: the K vertices
-% need not belong to one triangle, and they are not the final correspondences.
-nearestVertexIndicesByPoint = knnsearch(boneMeshVerticesRef, boneSurfacePointsRef, 'K', nearestVertexCount);
+% Move the measured points into CT, the frame the tree was built in. Only
+% the query points move; the tree is reused unchanged. Because the move is
+% rigid, the K vertices found are the same as when searching the moved mesh
+% in ref. The KNN time is recorded on its own for the timing split.
+boneSurfacePointsCT         = applyRigidTransform(boneSurfacePointsRef, T_ref_CT_candidate);
+nearestVertexIndicesByPoint = knnsearch(vertexTreeCT, boneSurfacePointsCT, 'K', nearestVertexCount);
+knnRuntimeSeconds           = toc(correspondenceTimer);
 
-% STEP 2 -- Build a lookup from every vertex to its attached triangles.
-% Mesh connectivity does not change under a rigid transformation. Therefore,
-% each candidate vertex has the same neighboring face indices throughout this
-% evaluation, and the lookup needs to be built only once.
-meshVertexIndices           = (1:size(boneMeshVerticesRef, 1)).';
-faceIndicesAttachedToVertex = vertexAttachments(boneMeshRefCandidate, meshVertexIndices);
+%% STEP 2 -- CANDIDATE FACES OF EVERY POINT, AS ONE MATRIX
 
-% Allocate one output row for every measured point before entering the loop.
-% Preallocation also makes the intended point-to-result alignment explicit.
-numberOfSurfacePoints       = size(boneSurfacePointsRef, 1);
-closestBonePointsRef        = zeros(numberOfSurfacePoints, 3);
-pointToSurfaceDistancesMm   = zeros(numberOfSurfacePoints, 1);
-candidateFaceCountByPoint   = zeros(numberOfSurfacePoints, 1);
+% Look up the faces of all K seed vertices for all points at once. Row i of
+% candidateFaceMatrix lists every face touching one of point i's seeds:
+% faceIndicesByVertex(seeds, :) gives a K-by-M block per point, and the
+% transposes/reshape lay those blocks out as one row of K*M per point.
+facesPerVertex      = size(faceIndicesByVertex, 2);
+seedFaceBlocks      = faceIndicesByVertex(nearestVertexIndicesByPoint.', :);
+candidateFaceMatrix = reshape(seedFaceBlocks.', nearestVertexCount * facesPerVertex, numberOfSurfacePoints).';
 
-% STEP 3 -- Find an accurate correspondence within each local face patch.
-for pointIndex = 1:numberOfSurfacePoints
-    
-    % Read the K seed vertices associated with the current measured point.
-    currentNearestVertexIndices = nearestVertexIndicesByPoint(pointIndex, :);
+% Neighbouring seeds share faces, and padding repeats faces too. Sorting each
+% row puts repeats side by side, so a face is "new" when it differs from its
+% left neighbour. Sorting also puts the faces in ascending order, so a tie
+% between two faces is always resolved the same way: the lowest index wins.
+candidateFaceMatrix = sort(candidateFaceMatrix, 2);
+isUniqueCandidate   = [true(numberOfSurfacePoints, 1), diff(candidateFaceMatrix, 1, 2) ~= 0];
+candidateFaceCountByPoint = sum(isUniqueCandidate, 2);
 
-    % Join the faces attached to all seed vertices. Neighboring vertices often
-    % share triangles, so UNIQUE removes repeated face indices from the patch:
-    % \(\mathcal{F}_i=\bigcup_{v\in\mathrm{KNN}(\mathbf{p}_i)}
-    % \mathrm{faces}(v)\).
-    currentAttachmentCells      = faceIndicesAttachedToVertex(currentNearestVertexIndices);
-    currentCandidateFaceIndices = unique([currentAttachmentCells{:}]);
+%% STEP 3 -- BATCHED CLOSEST POINTS ON THE CANDIDATE FACES
 
-    % Every valid triangulation vertex should have an attached face. Treat an
-    % empty patch as a mesh/setup error instead of returning a misleading cost.
-    if isempty(currentCandidateFaceIndices)
-        error('cost_ICPLike:EmptyCandidateFaces', ...
-              'Measured point %d has no candidate mesh faces.', pointIndex);
-    end
+% Now that every point has its list of candidate faces, the exact closest
+% point is found on them. This stage is timed separately, and the outputs
+% are allocated at full size because each batch fills its own rows.
+distanceTimer = tic;
+closestBonePointsRef      = zeros(numberOfSurfacePoints, 3);
+squaredDistancesByPoint   = zeros(numberOfSurfacePoints, 1);
+closestFaceIndexByPoint   = zeros(numberOfSurfacePoints, 1);
 
-    % Extract only the original mesh triangles belonging to this local patch
-    % and retain the patch size as a useful performance diagnostic.
-    currentCandidateFaces                 = boneMeshFaces(currentCandidateFaceIndices, :);
-    candidateFaceCountByPoint(pointIndex) = numel(currentCandidateFaceIndices);
+% Points are handled a batch at a time, so the (point, face) pair arrays
+% stay small enough to fit in memory. Each batch takes its slice of the
+% sorted face matrix and of the "keep" mask built above.
+for firstPoint = 1:pointBatchSize:numberOfSurfacePoints
+    batchPoints     = (firstPoint:min(firstPoint + pointBatchSize - 1, numberOfSurfacePoints)).';
+    batchFaces      = candidateFaceMatrix(batchPoints, :);
+    batchUniqueMask = isUniqueCandidate(batchPoints, :);
 
-    % Find the closest point \(\mathbf{q}_i^*\) on the candidate triangles:
-    % \(\mathbf{q}_i^*=\arg\min_{\mathbf{q}\in\mathcal{F}_i}
-    % \|\mathbf{p}_i-\mathbf{q}\|_2\), and store
-    % \(d_i=\|\mathbf{p}_i-\mathbf{q}_i^*\|_2\). The returned point may lie
-    % inside a triangle, on an edge, or at a vertex.
-    [pointToSurfaceDistancesMm(pointIndex), ...
-     closestBonePointsRef(pointIndex, :)] = distancePointMesh( ...
-        boneSurfacePointsRef(pointIndex, :), ...
-        boneMeshVerticesRef, ...
-        currentCandidateFaces, ...
-        'algorithm', 'vectorized');
+    % Turn the kept matrix entries into a flat list of (point, face) pairs.
+    % FIND walks the mask column by column, and returns for each pair its
+    % row (= which point of the batch) and column (= where to put the result).
+    [pairRowInBatch, pairColumn] = find(batchUniqueMask);
+    pairPointIndex = batchPoints(pairRowInBatch);
+    pairFaceIndex  = batchFaces(sub2ind(size(batchFaces), pairRowInBatch, pairColumn));
+
+    % One array call computes every pair of the batch at once, instead of
+    % one call per point. Corners come from the ref-frame mesh, so the
+    % closest points and distances are in ref.
+    [pairClosestPointsRef, pairSquaredDistances] = closestPointsOnTriangles( ...
+        boneSurfacePointsRef(pairPointIndex, :), ...
+        bonePointsRefCandidate(boneMeshFaces(pairFaceIndex, 1), :), ...
+        bonePointsRefCandidate(boneMeshFaces(pairFaceIndex, 2), :), ...
+        bonePointsRefCandidate(boneMeshFaces(pairFaceIndex, 3), :));
+
+    % Put the pair distances back into the batch's matrix layout. Removed
+    % repeats stay at Inf so they can never be chosen. MIN along each row
+    % then gives every point's closest face; on an exact tie it returns the
+    % first column, i.e. the lowest face index.
+    batchSquaredDistances = inf(size(batchFaces));
+    batchSquaredDistances(batchUniqueMask) = pairSquaredDistances;
+    [batchMinimumSquaredDistance, bestColumn] = min(batchSquaredDistances, [], 2);
+
+    % Remember which pair produced each minimum, to fetch its closest point.
+    pairNumberMatrix = zeros(size(batchFaces));
+    pairNumberMatrix(batchUniqueMask) = 1:numel(pairSquaredDistances);
+    bestPairNumber = pairNumberMatrix(sub2ind(size(batchFaces), (1:numel(batchPoints)).', bestColumn));
+
+    % Store the winning distance, closest point and face in the batch's rows.
+    squaredDistancesByPoint(batchPoints)  = batchMinimumSquaredDistance;
+    closestBonePointsRef(batchPoints, :)  = pairClosestPointsRef(bestPairNumber, :);
+    closestFaceIndexByPoint(batchPoints)  = pairFaceIndex(bestPairNumber);
 end
 
-% Stop the timer after every measured point has received a correspondence.
+% With all batches done, squared distances become real distances in mm,
+% and both timers are stopped.
+pointToSurfaceDistancesMm    = sqrt(squaredDistancesByPoint);
+distanceRuntimeSeconds       = toc(distanceTimer);
 correspondenceRuntimeSeconds = toc(correspondenceTimer);
-
-% Reject NaN, Inf, and negative distances. Such output indicates a geometry
-% or dependency failure and must not silently enter the optimizer objective.
-if any(~isfinite(pointToSurfaceDistancesMm)) || ...
-        any(pointToSurfaceDistancesMm < 0) || ...
-        any(~isfinite(closestBonePointsRef), 'all')
-    error('cost_ICPLike:InvalidCorrespondence', ...
-          'The KNN candidate-face search produced an invalid correspondence.');
-end
-
-% Independently reconstruct each Euclidean distance from the returned point
-% pair. This confirms that DISTANCEPOINTMESH's two outputs still correspond:
-% \(d_i\stackrel{?}{=}\|\mathbf{p}_i-\mathbf{q}_i^*\|_2\).
-reconstructedDistancesMm = vecnorm(boneSurfacePointsRef - closestBonePointsRef, 2, 2);
-
-% Allow only a tiny numerical rounding difference in millimetres.
-distanceAgreementToleranceMm = 1e-9;
-if any(abs(reconstructedDistancesMm - pointToSurfaceDistancesMm) > distanceAgreementToleranceMm)
-    error('cost_ICPLike:DistanceMismatch', ...
-          'A reported distance does not match its point correspondence.');
-end
 
 %% CALCULATE THE COST AND PER-MEASUREMENT STATISTICS
 
-% Convert all correspondence distances into the one scalar required by the
-% optimizer. Every measured point has equal weight in this first version:
-% \(J=\sqrt{\frac{1}{N}\sum_{i=1}^{N}d_i^2}\).
-% Squaring makes large mismatches influence the result more strongly, while
-% the square root keeps COST in the original unit of millimetres.
+% The cost is the RMSE over all points, so a few large misfits weigh more
+% than many small ones.
 cost = sqrt(mean(pointToSurfaceDistancesMm .^ 2));
 
-% Prepare containers that restore the original ultrasound-measurement groups.
-% Empty measurements keep NaN statistics because no distance was observed.
+% For diagnostics the results are also split per ultrasound image. The
+% outputs are allocated first; NaN marks images that had no points.
 closestBonePointsRefCells      = cell(numberOfMeasurements, 1);
 pointToSurfaceDistanceMmCells  = cell(numberOfMeasurements, 1);
 meanDistanceMmByMeasurement    = nan(numberOfMeasurements, 1);
 rmseDistanceMmByMeasurement    = nan(numberOfMeasurements, 1);
 maximumDistanceMmByMeasurement = nan(numberOfMeasurements, 1);
 
-% The pooled vector follows measurement order. FIRSTPOINTINDEX marks where
-% the current measurement begins within that vector.
+% The points were stacked image by image, so walking the saved counts in
+% order cuts each image's points back out. Statistics are skipped for an
+% image with no points, leaving its NaN in place.
 firstPointIndex = 1;
 for measurementIndex = 1:numberOfMeasurements
-    % Recreate the row range belonging to this measurement from its saved
-    % point count. For a zero count, MATLAB produces an empty index range.
-    currentPointCount   = numberOfSurfacePointsByMeasurement(measurementIndex);
-    currentPointIndices = firstPointIndex:(firstPointIndex + currentPointCount - 1);
+    currentPointIndices = firstPointIndex:(firstPointIndex + numberOfSurfacePointsByMeasurement(measurementIndex) - 1);
+    currentDistancesMm  = pointToSurfaceDistancesMm(currentPointIndices);
 
-    % Store the current measurement's correspondences and distances together
-    % so downstream inspection can relate them back to one ultrasound image.
-    currentDistancesMm                              = pointToSurfaceDistancesMm(currentPointIndices);
     closestBonePointsRefCells{measurementIndex}     = closestBonePointsRef(currentPointIndices, :);
     pointToSurfaceDistanceMmCells{measurementIndex} = currentDistancesMm;
-
-    % Summarize only nonempty measurements. Mean describes typical separation,
-    % RMSE emphasizes larger errors, and maximum highlights the worst point.
     if ~isempty(currentDistancesMm)
         meanDistanceMmByMeasurement(measurementIndex)    = mean(currentDistancesMm);
         rmseDistanceMmByMeasurement(measurementIndex)    = sqrt(mean(currentDistancesMm .^ 2));
         maximumDistanceMmByMeasurement(measurementIndex) = max(currentDistancesMm);
     end
-
-    % Move the start marker past the points assigned to this measurement.
-    firstPointIndex = firstPointIndex + currentPointCount;
+    firstPointIndex = firstPointIndex + numel(currentPointIndices);
 end
 
-%% PACKAGE DETAILS FOR THE DEMO AND FUTURE OPTIMIZER RESULTS
+%% PACKAGE DETAILS
 
-% Begin DETAILS with the candidate pose and geometry. Frame-explicit names
-% prevent CT, bone-anatomical, and reference coordinates from being confused.
+% Finally, everything is returned for diagnostics and plotting: first the
+% candidate pose and mesh, then the point-level results, then the summary
+% statistics.
 details.T_CT_ref_candidate   = T_CT_ref_candidate;
 details.T_bone_ref_candidate = T_bone_ref_candidate;
 details.boneMeshRefCandidate = boneMeshRefCandidate;
 
-% Store the pooled measured points, their closest mesh points, and distances.
-% Row i in each pooled array refers to the same correspondence pair.
-details.boneSurfacePointsRef                     = boneSurfacePointsRef;
-details.closestBonePointsRef                     = closestBonePointsRef;
-details.pointToSurfaceDistancesMm                = pointToSurfaceDistancesMm;
+details.boneSurfacePointsRef               = boneSurfacePointsRef;
+details.closestBonePointsRef               = closestBonePointsRef;
+details.pointToSurfaceDistancesMm          = pointToSurfaceDistancesMm;
+details.closestBonePointsRefCells          = closestBonePointsRefCells;
+details.pointToSurfaceDistanceMmCells      = pointToSurfaceDistanceMmCells;
+details.numberOfSurfacePointsByMeasurement = numberOfSurfacePointsByMeasurement;
 
-% Also store the same results split by measurement. These cells allow a poor
-% cost contribution to be traced back to the responsible ultrasound image.
-details.closestBonePointsRefCells                = closestBonePointsRefCells;
-details.pointToSurfaceDistanceMmCells            = pointToSurfaceDistanceMmCells;
-details.numberOfSurfacePointsByMeasurement       = numberOfSurfacePointsByMeasurement;
+details.meanDistanceMmByMeasurement    = meanDistanceMmByMeasurement;
+details.rmseDistanceMmByMeasurement    = rmseDistanceMmByMeasurement;
+details.maximumDistanceMmByMeasurement = maximumDistanceMmByMeasurement;
 
-% Store per-measurement summaries for compact tables and diagnostic plots.
-details.meanDistanceMmByMeasurement              = meanDistanceMmByMeasurement;
-details.rmseDistanceMmByMeasurement              = rmseDistanceMmByMeasurement;
-details.maximumDistanceMmByMeasurement           = maximumDistanceMmByMeasurement;
+details.meanPointToSurfaceDistanceMm    = mean(pointToSurfaceDistancesMm);
+details.rmsePointToSurfaceDistanceMm    = cost;
+details.medianPointToSurfaceDistanceMm  = median(pointToSurfaceDistancesMm);
+details.maximumPointToSurfaceDistanceMm = max(pointToSurfaceDistancesMm);
 
-% Store global summaries so callers do not need to recalculate them. The
-% global RMSE is exactly the scalar COST returned to the optimizer.
-details.meanPointToSurfaceDistanceMm             = mean(pointToSurfaceDistancesMm);
-details.rmsePointToSurfaceDistanceMm             = cost;
-details.medianPointToSurfaceDistanceMm           = median(pointToSurfaceDistancesMm);
-details.maximumPointToSurfaceDistanceMm          = max(pointToSurfaceDistancesMm);
+details.candidateFaceCountByPoint    = candidateFaceCountByPoint;
+details.correspondenceRuntimeSeconds = correspondenceRuntimeSeconds;
 
-% Record how much geometry each local search examined and how long all
-% correspondence calculations took. These values help tune K later.
-details.candidateFaceCountByPoint                = candidateFaceCountByPoint;
-details.correspondenceRuntimeSeconds             = correspondenceRuntimeSeconds;
+% The search results themselves and a timing split of the correspondence
+% stage help to check where the time goes and which face each point used.
+details.T_ref_CT_candidate          = T_ref_CT_candidate;
+details.nearestVertexIndicesByPoint = nearestVertexIndicesByPoint;
+details.closestFaceIndexByPoint     = closestFaceIndexByPoint;
+details.knnRuntimeSeconds           = knnRuntimeSeconds;
+details.distanceRuntimeSeconds      = distanceRuntimeSeconds;
 
-% Record the resolved method and K value with the result. This keeps an
-% optimization result understandable even when configuration defaults change.
-details.costSettings.correspondenceMethod        = 'knn_candidate_faces';
-details.costSettings.requestedNearestVertexCount = double(nearestVertexCount);
-details.costSettings.nearestVertexCount          = nearestVertexCount;
-
-% A clear status value lets development scripts confirm that this cost path
-% completed normally before they inspect the other fields.
+% The settings actually used are recorded so a result can be traced back
+% to how it was computed.
+details.costSettings.correspondenceMethod = 'ct_kdtree_batched_candidate_faces';
+details.costSettings.nearestVertexCount   = nearestVertexCount;
+details.costSettings.pointBatchSize       = pointBatchSize;
 details.status = '3d_point_cloud_rmse_computed';
 end
