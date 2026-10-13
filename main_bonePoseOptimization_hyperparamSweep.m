@@ -44,10 +44,20 @@ addpath(genpath('functions'));
 
 %% STEP 1: LOAD THE EXPERIMENT SPECIFICATION
 
-% Choose the JSON file that describes the sweep. Such a file lists the input
+% Read the JSON file that describes the sweep. Such a file lists the input
 % data, the cost model, the candidate values to try for each setting, the
 % seeds to repeat each combination with, and where to save results.
-configFilePath = fullfile(pwd, 'config', 'optconfig_hyperparamSweep_intensityLine.json');
+% This is your personal copy (ignored by git), so trying new settings never
+% changes tracked files. To switch cost model, copy another
+% config/optconfig_hyperparamSweep_<model>.json template over it.
+configFilePath = fullfile(pwd, 'config', 'hyperparamSweep.local.json');
+if ~isfile(configFilePath)
+    error('main_bonePoseOptimization_hyperparamSweep:LocalConfigNotFound', ...
+        ['Local config not found: %s\n' ...
+         'Copy a template to this name first, e.g. ' ...
+         'config/optconfig_hyperparamSweep_intensityLine.json -> config/hyperparamSweep.local.json'], ...
+        configFilePath);
+end
 
 % createBonePoseOptimizationExperimentConfig reads that JSON file, checks
 % every setting (paths exist, values are valid, no duplicate candidates or

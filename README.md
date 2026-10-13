@@ -295,21 +295,39 @@ The external CMA-ES implementation used by this project is already stored under 
 
 ### 6.2. Configure the input paths and settings
 
-Edit one of the following files:
+The files in `config/` are **templates**. They are tracked by git and hold a complete, working set of settings for each cost model. The main scripts do not read them directly. Each script reads a **local copy** whose name ends in `.local.json`. Git ignores local copies, so you can edit them freely without changing tracked files.
 
-- `config/optconfig_oneSweep_intensityLine.json` for a smoothed-intensity interactive run after selecting it in the one-sweep script.
-- `config/optconfig_oneSweep_ICPLike.json` for an ICP-like point-cloud interactive run after selecting it in the one-sweep script.
-- `config/optconfig_oneSweep_intensityICP.json` for a combined intensity and 3D-distance interactive run after selecting it in the one-sweep script.
-- `config/optconfig_oneSweep_PIMLOP.json` for a P-IMLOP interactive run; this is the one-sweep script's default.
-- `config/optconfig_oneSweep_intensityPIMLOP.json` for a combined intensity and P-IMLOP interactive run after selecting it in the one-sweep script.
-- `config/optconfig_hyperparamSweep_intensityLine.json` for an unattended smoothed-intensity sweep over `intensitySmoothingSigmaMm`; this is the hyperparameter-sweep script's default.
-- `config/optconfig_hyperparamSweep_intensityICP.json` for an unattended combined sweep over `intensitySmoothingSigmaMm` and `weight` after selecting it in the hyperparameter-sweep script.
-- `config/optconfig_hyperparamSweep_PIMLOP.json` for an unattended P-IMLOP sweep over `kappa` after selecting it in the hyperparameter-sweep script.
-- `config/optconfig_hyperparamSweep_intensityPIMLOP.json` for an unattended combined sweep over `kappa` and `weight` after selecting it in the hyperparameter-sweep script.
+**First-time setup.** Copy one template to each script's local file. A script stops with a "Local config not found" error until you do this.
+
+```matlab
+copyfile('config/optconfig_oneSweep_PIMLOP.json',               'config/oneSweep.local.json')
+copyfile('config/optconfig_hyperparamSweep_intensityLine.json', 'config/hyperparamSweep.local.json')
+```
+
+| Script | Reads |
+|---|---|
+| `main_bonePoseOptimization_oneSweep.m` | `config/oneSweep.local.json` |
+| `main_bonePoseOptimization_hyperparamSweep.m` | `config/hyperparamSweep.local.json` |
+
+**Switching cost model.** Copy a different template over the local file. You never need to edit the script. Available templates:
+
+- `config/optconfig_oneSweep_intensityLine.json`: smoothed-intensity interactive run.
+- `config/optconfig_oneSweep_ICPLike.json`: ICP-like point-cloud interactive run.
+- `config/optconfig_oneSweep_intensityICP.json`: combined intensity and 3D-distance interactive run.
+- `config/optconfig_oneSweep_PIMLOP.json`: P-IMLOP interactive run.
+- `config/optconfig_oneSweep_intensityPIMLOP.json`: combined intensity and P-IMLOP interactive run.
+- `config/optconfig_hyperparamSweep_intensityLine.json`: unattended smoothed-intensity sweep over `intensitySmoothingSigmaMm`.
+- `config/optconfig_hyperparamSweep_intensityICP.json`: unattended combined sweep over `intensitySmoothingSigmaMm` and `weight`.
+- `config/optconfig_hyperparamSweep_PIMLOP.json`: unattended P-IMLOP sweep over `kappa`.
+- `config/optconfig_hyperparamSweep_intensityPIMLOP.json`: unattended combined sweep over `kappa` and `weight`.
+
+**When to change a template.** Edit and commit a template only when its content should change for everyone, for example when a cost model gains a new parameter or when better default values are found. Day-to-day changes such as other input files or a quick parameter try belong in your local copy. Every experiment saves the configuration it used as `experiment_config_snapshot.json` (see section 7), so git does not need to record each run's settings.
+
+The tests read the templates, not your local copies, so local edits never change test results.
 
 Files under `config/legacy/` are retired configurations kept for reference only. The current code does not support them.
 
-Set `project.root` relative to the configuration directory or provide an absolute path. The supplied configuration files use `".."`, which resolves to this repository root. Input paths are then resolved relative to that project root.
+Set `project.root` relative to the configuration directory or provide an absolute path. Local copies sit next to the templates, so relative paths work the same in both. The supplied configuration files use `".."`, which resolves to this repository root. Input paths are then resolved relative to that project root.
 
 ### 6.3. Start MATLAB in the repository root
 
@@ -517,7 +535,7 @@ At optimization time, CMA-ES changes only the six-value local pose perturbation.
 
 **Naming a cost model.** Give each cost model a descriptive name and no version suffix. Use `intensityLine`, not `intensityLine_v2`. A version number says only that something changed. A descriptive name says what changed, so a reader can tell two models apart without opening the code.
 
-- Use one camelCase name everywhere: the registry key and `cost.model` (`<name>`), the evaluator (`cost_<name>.m`), the validator (`validate_cost_<name>.m`), the test file (`testBonePoseCost<Name>.m`), and the configs (`optconfig_oneSweep_<name>.json`, `optconfig_hyperparamSweep_<name>.json`).
+- Use one camelCase name everywhere: the registry key and `cost.model` (`<name>`), the evaluator (`cost_<name>.m`), the validator (`validate_cost_<name>.m`), the test file (`testBonePoseCost<Name>.m`), and the config templates (`optconfig_oneSweep_<name>.json`, `optconfig_hyperparamSweep_<name>.json`).
 - Start with the evidence the model uses, then add what is special about it. For example, `intensityLine` scores image intensity along the predicted bone line, and `ICPLike` scores a point-to-mesh distance.
 - Name a combined model by joining its parts in a fixed order, intensity term first: `intensityICP`, `intensityPIMLOP`.
 - If you change the behaviour of an existing model and want to keep the old one for comparison, give the new model a name that describes the change, for example `intensityLineGradient` or `PIMLOPWeighted`. Do not add `_v2`. Move the retired model to `costModels/legacy/` once nothing uses it.

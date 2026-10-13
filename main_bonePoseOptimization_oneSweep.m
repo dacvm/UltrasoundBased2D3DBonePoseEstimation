@@ -41,12 +41,21 @@ addpath(genpath('functions'));
 
 %% STEP 1: CREATE THE CONFIGURATION
 
-% Choose the JSON file that describes this run. It names the input data, the
+% Read the JSON file that describes this run. It names the input data, the
 % bone, the cost model and its settings, the seed, and the output folder.
-% Select another cost model by choosing its file, e.g. optconfig_oneSweep_intensityLine.json,
-% optconfig_oneSweep_ICPLike.json, optconfig_oneSweep_intensityICP.json,
-% optconfig_oneSweep_PIMLOP.json, or optconfig_oneSweep_intensityPIMLOP.json.
-configFilePath = fullfile(pwd, 'config', 'optconfig_oneSweep_PIMLOP.json');
+% This is your personal copy (ignored by git), so trying new settings never
+% changes tracked files. To switch cost model, copy another template over it,
+% e.g. optconfig_oneSweep_intensityLine.json, optconfig_oneSweep_ICPLike.json,
+% optconfig_oneSweep_intensityICP.json, optconfig_oneSweep_PIMLOP.json, or
+% optconfig_oneSweep_intensityPIMLOP.json.
+configFilePath = fullfile(pwd, 'config', 'oneSweep.local.json');
+if ~isfile(configFilePath)
+    error('main_bonePoseOptimization_oneSweep:LocalConfigNotFound', ...
+        ['Local config not found: %s\n' ...
+         'Copy a template to this name first, e.g. ' ...
+         'config/optconfig_oneSweep_PIMLOP.json -> config/oneSweep.local.json'], ...
+        configFilePath);
+end
 
 % createBonePoseOptimizationExperimentConfig reads the JSON file and checks
 % every setting, so mistakes are reported now instead of in the middle of
