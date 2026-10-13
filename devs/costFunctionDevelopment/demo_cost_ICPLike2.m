@@ -84,13 +84,10 @@ compareCandidateLayouts(poseComparison.newDetailsAtStart, searchData.faceIndices
 % All figures are drawn at the end from the stored results, so the tests
 % above stay free of plotting code.
 plotCorrespondenceScene(data, poseComparison.newDetailsAtStart);
-plotOldVersusNew(poseComparison.originalDetailsAtStart, poseComparison.newDetailsAtStart, ...
-    poseComparison.originalCosts, poseComparison.newCosts);
+plotOldVersusNew(poseComparison.originalDetailsAtStart, poseComparison.newDetailsAtStart, poseComparison.originalCosts, poseComparison.newCosts);
 plotSinglePointSearch(poseComparison.newDetailsAtStart, poseComparison.originalDetailsAtStart, searchData.faceIndicesByVertex);
-plotBatchSizeEffect(batchSizeTest.batchSizes, batchSizeTest.medianSeconds, batchSizeTest.inputMegabytes, ...
-    repeatedTiming.originalMedianSeconds);
-plotTriangleTestCases(triangleTest.cornerA, triangleTest.cornerB, triangleTest.cornerC, ...
-    triangleTest.testPoints, triangleTest.newClosestPoints, triangleTest.geom3dVectorizedPoints);
+plotBatchSizeEffect(batchSizeTest.batchSizes, batchSizeTest.medianSeconds, batchSizeTest.inputMegabytes, repeatedTiming.originalMedianSeconds);
+plotTriangleTestCases(triangleTest.cornerA, triangleTest.cornerB, triangleTest.cornerC, triangleTest.testPoints, triangleTest.newClosestPoints, triangleTest.geom3dVectorizedPoints);
 
 
 %% ===================================================================
@@ -397,8 +394,7 @@ for poseIndex = 1:numberOfPoses
     % version searches in CT instead of ref. The reference search is
     % exactly what cost_ICPLike does, knnsearch over the moved mesh in ref.
     % Count points whose K nearest vertices differ from the CT-tree result.
-    referenceNearestVertices = knnsearch(originalDetails.boneMeshRefCandidate.Points, ...
-        originalDetails.boneSurfacePointsRef, 'K', nearestVertexCount);
+    referenceNearestVertices = knnsearch(originalDetails.boneMeshRefCandidate.Points, originalDetails.boneSurfacePointsRef, 'K', nearestVertexCount);
     knnDifferentRows = nnz(any(referenceNearestVertices ~= newDetails.nearestVertexIndicesByPoint, 2));
 
     % Even with the same seeds, the closest points could differ, so the
@@ -421,7 +417,8 @@ for poseIndex = 1:numberOfPoses
     for pointIndex = differingPoints(:).'
         candidateFaces = unique([searchData.attachedFaceCells{referenceNearestVertices(pointIndex, :)}]);
         sequentialDistance = distancePointMesh(originalDetails.boneSurfacePointsRef(pointIndex, :), ...
-            originalDetails.boneMeshRefCandidate.Points, data.boneMeshCT.ConnectivityList(candidateFaces, :), ...
+            originalDetails.boneMeshRefCandidate.Points, ...
+            data.boneMeshCT.ConnectivityList(candidateFaces, :), ...
             'algorithm', 'sequential');
         fprintf('      point %d: old %.6f, new %.6f, geom3d sequential %.6f mm\n', pointIndex, ...
             originalDetails.pointToSurfaceDistancesMm(pointIndex), newDetails.pointToSurfaceDistancesMm(pointIndex), sequentialDistance);
