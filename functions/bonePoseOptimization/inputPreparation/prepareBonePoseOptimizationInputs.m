@@ -392,7 +392,8 @@ if config.logging.printPreparationProgress
     fprintf('Prepared %d image planes for bone %s.\n', ...
         numel(imagePlanesRef), targetBone);
     fprintf('Prepared P-IMLOP PD-tree: %d valid faces, %d nodes, %d leaves.\n', ...
-        PsiCT.pdTree.numberOfDatums, PsiCT.pdTree.numberOfNodes, ...
+        PsiCT.pdTree.numberOfDatums, ...
+        PsiCT.pdTree.numberOfNodes, ...
         PsiCT.pdTree.numberOfLeaves);
 end
 end
@@ -430,13 +431,13 @@ function boneIndex = findUniqueBoneIndex(records, targetBone, sourceName)
 
 % Bone codes are the stable identity shared by the standardized tool outputs.
 recordBoneCodes = upper(string({records.bone}));
-boneIndex = find(recordBoneCodes == string(targetBone));
+boneIndex       = find(recordBoneCodes == string(targetBone));
 
 % Array order is not an identity, so continue only with one code match.
 if numel(boneIndex) ~= 1
     error('prepareBonePoseOptimizationInputs:NonuniqueBoneMatch', ...
-        'Expected one %s for bone %s, but found %d.', ...
-        sourceName, targetBone, numel(boneIndex));
+          'Expected one %s for bone %s, but found %d.', ...
+          sourceName, targetBone, numel(boneIndex));
 end
 end
 
@@ -449,7 +450,7 @@ function [imagePlanesRef, groundTruthIntersections, snapshotSources] = ...
 % arrays that preserve group order followed by record order.
 
 % Select every source group belonging to the requested bone.
-groupBoneCodes = upper(string({validSnapshots.bone}));
+groupBoneCodes     = upper(string({validSnapshots.bone}));
 targetGroupIndices = find(groupBoneCodes == string(targetBone));
 
 % Count selected records first so the output arrays can be allocated once.
@@ -461,7 +462,7 @@ end
 % Optimization needs at least one fixed ultrasound observation.
 if nRecords == 0
     error('prepareBonePoseOptimizationInputs:NoSelectedSnapshots', ...
-        'No selected ultrasound snapshots were found for bone %s.', targetBone);
+          'No selected ultrasound snapshots were found for bone %s.', targetBone);
 end
 
 % Find the first selected record to preserve the exact saved struct layouts.
@@ -471,11 +472,10 @@ firstGroupIndex = targetGroupIndices( ...
 firstRecord = validSnapshots(firstGroupIndex).data(1);
 
 % Preallocate aligned estimation and validation arrays from their saved templates.
-imagePlanesRef = repmat(firstRecord.plane, 1, nRecords);
+imagePlanesRef           = repmat(firstRecord.plane, 1, nRecords);
 groundTruthIntersections = repmat(firstRecord.intersection, 1, nRecords);
-sourceTemplate = struct('groupName', '', 'groupPath', '', ...
-    'groupIndex', 0, 'recordIndex', 0, 'sourceIndex', 0);
-snapshotSources = repmat(sourceTemplate, 1, nRecords);
+sourceTemplate           = struct('groupName', '', 'groupPath', '', 'groupIndex', 0, 'recordIndex', 0, 'sourceIndex', 0);
+snapshotSources          = repmat(sourceTemplate, 1, nRecords);
 
 % Flatten groups without sorting again so review order remains reproducible.
 outputIndex = 1;
@@ -502,8 +502,7 @@ function validateImagePlanes(imagePlanesRef)
 % stops when a plane cannot be used consistently in the reference frame.
 
 % These fields are the complete interface consumed by the optimization pipeline.
-requiredFields = {'T_image_ref', 'p0', 'ex', 'ey', 'n', 'W', 'H', ...
-    'nRows', 'nCols', 'image', 'timestamp'};
+requiredFields = {'T_image_ref', 'p0', 'ex', 'ey', 'n', 'W', 'H', 'nRows', 'nCols', 'image', 'timestamp'};
 
 for planeIndex = 1:numel(imagePlanesRef)
     plane = imagePlanesRef(planeIndex);
@@ -511,31 +510,28 @@ for planeIndex = 1:numel(imagePlanesRef)
     % Report a schema problem before individual geometry expressions become unclear.
     if ~all(isfield(plane, requiredFields))
         error('prepareBonePoseOptimizationInputs:InvalidPlaneSchema', ...
-            'Image plane %d is missing a required field.', planeIndex);
+              'Image plane %d is missing a required field.', planeIndex);
     end
 
     % The basis vectors and origin must form the same image pose saved by the tool.
     if ~isequal(size(plane.p0), [3 1]) || ~isequal(size(plane.ex), [3 1]) || ...
             ~isequal(size(plane.ey), [3 1]) || ~isequal(size(plane.n), [3 1])
         error('prepareBonePoseOptimizationInputs:InvalidPlaneGeometry', ...
-            'Image plane %d must store p0, ex, ey, and n as 3-by-1 vectors.', ...
-            planeIndex);
+              'Image plane %d must store p0, ex, ey, and n as 3-by-1 vectors.', planeIndex);
     end
 
-    validateRigidTransform(plane.T_image_ref, ...
-        sprintf('imagePlanesRef(%d).T_image_ref', planeIndex));
+    validateRigidTransform(plane.T_image_ref, sprintf('imagePlanesRef(%d).T_image_ref', planeIndex));
     T_image_ref_from_fields = [plane.ex, plane.ey, plane.n, plane.p0; 0 0 0 1];
     if norm(T_image_ref_from_fields - plane.T_image_ref, 'fro') > 1e-8
         error('prepareBonePoseOptimizationInputs:InconsistentPlaneTransform', ...
-            'Image plane %d geometry does not match T_image_ref.', planeIndex);
+              'Image plane %d geometry does not match T_image_ref.', planeIndex);
     end
 
     % Images are stored as [column, row] in the standardized snapshot output.
     if ~ismatrix(plane.image) || size(plane.image, 1) ~= plane.nCols || ...
             size(plane.image, 2) ~= plane.nRows || plane.W <= 0 || plane.H <= 0
         error('prepareBonePoseOptimizationInputs:InvalidPlaneImage', ...
-            'Image plane %d has inconsistent dimensions or physical size.', ...
-            planeIndex);
+              'Image plane %d has inconsistent dimensions or physical size.', planeIndex);
     end
 end
 end
@@ -634,8 +630,7 @@ for measurementIndex = 1:numel(measurements)
     hasNormalMask = isfield(measurement, 'surfaceNormalMask');
     if hasNormalValues ~= hasNormalMask
         error('prepareBonePoseOptimizationInputs:IncompleteSurfaceNormals', ...
-            ['Surface measurement %d must provide surfaceNormalXY and ' ...
-             'surfaceNormalMask together.'], measurementIndex);
+              'Surface measurement %d must provide surfaceNormalXY and surfaceNormalMask together.', measurementIndex);
     end
     if hasNormalValues
         validateOptionalSurfaceNormals( ...
