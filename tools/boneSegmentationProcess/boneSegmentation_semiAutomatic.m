@@ -58,22 +58,6 @@ end
 ultrasoundSequence = ultrasoundFileData.validSnapshots;
 clear ultrasoundFileData;
 
-%% PREPARE THE TOOL PATHS
-
-% Resolve the shared functions folder from this tool so the script works
-% when MATLAB starts in another current folder.
-projectDirectory   = fileparts(fileparts(segmentationToolDirectory));
-functionsDirectory = fullfile(projectDirectory, 'functions');
-if ~isfolder(functionsDirectory)
-    error('boneSegmentation_semiAutomatic:FunctionsDirectoryNotFound', ...
-          'Required functions directory was not found: %s', ...
-          functionsDirectory);
-end
-
-% Add only the direct functions directory because launchBoneSegmentationTools
-% is a project function stored at that level.
-addpath(functionsDirectory);
-
 %% LAUNCH THE SEMI-AUTOMATIC SEGMENTATION TOOL
 
 % Open the non-blocking browser. Its callbacks keep the processing state

@@ -16,7 +16,7 @@ end
 
 
 function setupOnce(testCase)
-%SETUPONCE Add the project function directory for all grouped browser tests.
+%SETUPONCE Add the segmentation tool helpers for all grouped browser tests.
 % Resolving paths from this test file keeps the suite independent of MATLAB's
 % current working directory.
 %
@@ -24,13 +24,13 @@ function setupOnce(testCase)
 %   testCase - matlab.unittest.FunctionTestCase receiving shared test data.
 %
 % Outputs:
-%   None. The project path and output directory are stored in TestData.
+%   None. The helper and output directories are stored in TestData.
 
 testDirectory = fileparts(mfilename('fullpath'));
-projectDirectory = fileparts(fileparts(fileparts(testDirectory)));
-functionsDirectory = fullfile(projectDirectory, 'functions');
+toolHelperDirectory = fullfile(fileparts(testDirectory), 'helpers', ...
+    'boneSegmentation_semiAutomatic');
 helpersDirectory = fullfile(testDirectory, 'helpers');
-addpath(functionsDirectory);
+addpath(toolHelperDirectory);
 
 % Put deterministic dialog replacements first on the path so confirmed GUI
 % branches can run unattended in MATLAB batch mode.
