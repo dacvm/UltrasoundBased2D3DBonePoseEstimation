@@ -130,9 +130,9 @@ verifyTrue(testCase, ismember( ...
     'BlobQuality', groupATable.Data.Properties.VariableNames));
 verifyTrue(testCase, isordinal(groupATable.Data.BlobQuality));
 verifyEqual(testCase, categories(groupATable.Data.BlobQuality), { ...
-    'Not checked'; 'No blobs'; 'Urgent'; 'Check'; 'Good'});
+    'None'; 'No blobs'; 'Bad'; 'Fair'; 'Good'});
 verifyEqual(testCase, string(groupATable.Data.BlobQuality), ...
-    repmat("Not checked", 2, 1));
+    repmat("None", 2, 1));
 verifyEqual(testCase, height(emptyTable.StyleConfigurations), 0);
 
 % The initial gray badge must target the quality cells, and the tooltip must
@@ -257,8 +257,8 @@ verifyEqual(testCase, groupATable.Data.Status, ...
     repmat("Processed", 2, 1));
 verifyEqual(testCase, groupBTable.Data.Status, "Unprocessed");
 verifyFalse(testCase, any(string( ...
-    groupATable.Data.BlobQuality) == "Not checked"));
-verifyEqual(testCase, string(groupBTable.Data.BlobQuality), "Not checked");
+    groupATable.Data.BlobQuality) == "None"));
+verifyEqual(testCase, string(groupBTable.Data.BlobQuality), "None");
 
 % The global callback must then process the remaining group B image as well.
 applyAllButton = findall(segmentationFigure, ...
@@ -269,7 +269,7 @@ verifyEqual(testCase, groupATable.Data.Status, ...
     repmat("Processed", 2, 1));
 verifyEqual(testCase, groupBTable.Data.Status, "Processed");
 verifyFalse(testCase, any(string( ...
-    groupBTable.Data.BlobQuality) == "Not checked"));
+    groupBTable.Data.BlobQuality) == "None"));
 
 % Direct the real export callback to a unique disposable MAT file.
 exportPath = [tempname(testCase.TestData.outputDirectory), '.mat'];
@@ -364,14 +364,14 @@ drawnow;
 sequenceTable = findall(segmentationFigure, ...
     'Tag', 'bone_segmentation_sequence_table_1');
 expectedQuality = [ ...
-    "No blobs"; "Good"; "Check"; "Check"; "Urgent"];
+    "No blobs"; "Good"; "Fair"; "Fair"; "Bad"];
 verifyEqual(testCase, string(sequenceTable.Data.BlobQuality), expectedQuality);
 
 % Ordered categories must place the most actionable populated states first
 % when users sort the quality column in ascending order.
 sortedTableData = sortrows(sequenceTable.Data, 'BlobQuality');
 verifyEqual(testCase, string(sortedTableData.BlobQuality), [ ...
-    "No blobs"; "Urgent"; "Check"; "Check"; "Good"]);
+    "No blobs"; "Bad"; "Fair"; "Fair"; "Good"]);
 
 % Confirm every row has a style attached to the quality cell and that each
 % category uses the agreed soft background color.
@@ -420,13 +420,13 @@ sequenceTable = findall(segmentationFigure, ...
     'Tag', 'bone_segmentation_sequence_table_1');
 
 % Changing an automatically opened preview does not mean the user accepted or
-% batch-processed it, so the initial row must remain Not checked.
+% batch-processed it, so the initial row must remain None.
 thresholdField = findall(segmentationFigure, ...
     'Tag', 'bone_segmentation_threshold_field');
 thresholdField.Value = 128;
 thresholdField.ValueChangedFcn(thresholdField, []);
 verifyEqual(testCase, string( ...
-    sequenceTable.Data.BlobQuality(1)), "Not checked");
+    sequenceTable.Data.BlobQuality(1)), "None");
 
 % Bulk processing commits both one-blob masks and establishes the live-update
 % rule for later edits to the selected processed row.
