@@ -28,7 +28,15 @@ addpath(sharedHelperDirectory, scriptHelperDirectory, '-begin');
 
 % Read dataset and output locations from a separate workflow configuration.
 % The algorithm settings remain in their own JSON file selected by this one.
-workflowConfigurationFilePath = fullfile(extractionToolDirectory, 'configs', 'boneSegmentation_extractSurface.json');
+% Read the personal copy (ignored by git) so selecting other input files
+% never changes tracked files. The tracked template sits next to it.
+workflowConfigurationFilePath = fullfile(extractionToolDirectory, 'configs', 'boneSegmentation_extractSurface.local.json');
+if ~isfile(workflowConfigurationFilePath)
+    error('boneSegmentation_extractSurface:LocalConfigNotFound', ...
+          ['Local config not found: %s\n' ...
+           'Copy configs/boneSegmentation_extractSurface.json to this name first.'], ...
+          workflowConfigurationFilePath);
+end
 workflowConfiguration         = readSurfaceExtractionWorkflowConfiguration(workflowConfigurationFilePath);
 
 % Build complete input filenames from the separately configured directories

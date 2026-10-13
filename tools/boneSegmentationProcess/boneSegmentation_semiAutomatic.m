@@ -22,9 +22,16 @@ if ~isfolder(sharedHelperDirectory) || ~isfolder(scriptHelperDirectory)
 end
 addpath(sharedHelperDirectory, scriptHelperDirectory, '-begin');
 
-% Keep dataset-specific settings in the tool-local JSON file. Changing the
-% input dataset therefore does not require editing this processing script.
-configurationFilePath = fullfile(segmentationToolDirectory, 'configs', 'boneSegmentation_semiAutomatic.json');
+% Keep dataset-specific settings in the tool-local JSON file. Read the
+% personal copy (ignored by git) so changing the input dataset never changes
+% tracked files. The tracked template sits next to it.
+configurationFilePath = fullfile(segmentationToolDirectory, 'configs', 'boneSegmentation_semiAutomatic.local.json');
+if ~isfile(configurationFilePath)
+    error('boneSegmentation_semiAutomatic:LocalConfigNotFound', ...
+          ['Local config not found: %s\n' ...
+           'Copy configs/boneSegmentation_semiAutomatic.json to this name first.'], ...
+          configurationFilePath);
+end
 configuration = readBoneSegmentationConfiguration(configurationFilePath);
 
 % Use short names in the workflow below while preserving the names used in

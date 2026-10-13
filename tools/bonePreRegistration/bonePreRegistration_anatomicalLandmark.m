@@ -21,8 +21,15 @@ end
 addpath(helperDirectory, '-begin');
 
 % Read dataset choices and adjustable landmark values from one JSON file.
-% Changing an input dataset now changes configuration rather than MATLAB code.
-configurationFilePath = fullfile(scriptDirectory, 'configs', 'bonePreRegistration_anatomicalLandmark.json');
+% Read the personal copy (ignored by git) so changing an input dataset never
+% changes tracked files. The tracked template sits next to it.
+configurationFilePath = fullfile(scriptDirectory, 'configs', 'bonePreRegistration_anatomicalLandmark.local.json');
+if ~isfile(configurationFilePath)
+    error('bonePreRegistration:LocalConfigNotFound', ...
+          ['Local config not found: %s\n' ...
+           'Copy configs/bonePreRegistration_anatomicalLandmark.json to this name first.'], ...
+          configurationFilePath);
+end
 configuration = readBonePreRegistrationConfiguration(configurationFilePath);
 
 % Give the checked JSON fields short names used by the geometry workflow.

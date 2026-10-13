@@ -23,9 +23,16 @@ if ~isfolder(sharedHelperDirectory) || ~isfolder(scriptHelperDirectory)
 end
 addpath(sharedHelperDirectory, scriptHelperDirectory, '-begin');
 
-% Keep dataset-specific paths and filenames in JSON. A new processing run
-% can then be selected without changing this MATLAB script.
-configurationFilePath = fullfile(scriptDirectory, 'configs', 'boneSegmentation_recover3Dsurface.json');
+% Keep dataset-specific paths and filenames in JSON. Read the personal copy
+% (ignored by git) so a new processing run never changes tracked files. The
+% tracked template sits next to it.
+configurationFilePath = fullfile(scriptDirectory, 'configs', 'boneSegmentation_recover3Dsurface.local.json');
+if ~isfile(configurationFilePath)
+    error('boneSegmentation_recover3Dsurface:LocalConfigNotFound', ...
+          ['Local config not found: %s\n' ...
+           'Copy configs/boneSegmentation_recover3Dsurface.json to this name first.'], ...
+          configurationFilePath);
+end
 configuration = readBoneSurfaceRecoveryConfiguration(configurationFilePath);
 
 % Use short workflow names below while keeping the requested JSON field names

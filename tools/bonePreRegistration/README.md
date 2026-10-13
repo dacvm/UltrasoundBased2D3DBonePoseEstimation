@@ -11,6 +11,17 @@ The workflow has two consecutive parts:
 
 Run Part 1 first. Part 2 requires the landmark MAT-file created by Part 1 and the 3D bone-surface MAT-file created by [`tools/boneSegmentationProcess`](../boneSegmentationProcess/README.md), Part 3.
 
+## Configuration Files
+
+The JSON files in `configs/` are tracked templates. The scripts read a personal `.local.json` copy instead, which git ignores, so you can change inputs and settings without touching tracked files. Before the first run, copy each template once:
+
+```matlab
+copyfile('tools/bonePreRegistration/configs/bonePreRegistration_anatomicalLandmark.json', 'tools/bonePreRegistration/configs/bonePreRegistration_anatomicalLandmark.local.json')
+copyfile('tools/bonePreRegistration/configs/bonePreRegistration_3Dsurface.json',          'tools/bonePreRegistration/configs/bonePreRegistration_3Dsurface.local.json')
+```
+
+A script stops with a "Local config not found" error if its local copy is missing. Edit and commit a template only when its content should change for everyone.
+
 ## Coordinate-Frame Convention
 
 All rigid transforms are numeric 4-by-4 matrices and act on column vectors:
@@ -39,7 +50,7 @@ Each bone record must provide the CT-frame geometry used by the measurement:
 - `mesh` is a valid `triangulation` whose vertices are expressed in CT coordinates.
 - `T_bone_CT` is the finite, proper 4-by-4 rigid transform from the anatomical bone frame to the CT frame.
 
-Edit `tools/bonePreRegistration/configs/bonePreRegistration_anatomicalLandmark.json`:
+Edit your local copy `tools/bonePreRegistration/configs/bonePreRegistration_anatomicalLandmark.local.json`:
 
 | Setting | Meaning |
 | --- | --- |
@@ -74,7 +85,7 @@ The landmark row order is always `[medial; lateral; shaft]` for each bone.
 ## Running the Project
 
 1. Complete the CT knee post-processing workflow so the selected MAT-file contains the femur and tibia meshes with `T_bone_CT`.
-2. Set the CT input, output directory, knee side, and measurement parameters in `tools/bonePreRegistration/configs/bonePreRegistration_anatomicalLandmark.json`.
+2. Set the CT input, output directory, knee side, and measurement parameters in `tools/bonePreRegistration/configs/bonePreRegistration_anatomicalLandmark.local.json`.
 3. Start MATLAB and run:
 
    ```matlab
@@ -175,7 +186,7 @@ Part 2 requires three matching MAT-files:
 
 The ultrasound snapshot file also records the post-processed CT MAT-file in `validBonePoses.ctPostProcessedMatFile`. Part 2 loads `bones` from that recorded source so the CT meshes used for registration match the saved ground-truth poses.
 
-Edit `tools/bonePreRegistration/configs/bonePreRegistration_3Dsurface.json`:
+Edit your local copy `tools/bonePreRegistration/configs/bonePreRegistration_3Dsurface.local.json`:
 
 | Setting | Meaning |
 | --- | --- |
@@ -208,7 +219,7 @@ Each bone needs at least three unique, non-collinear points in both corresponden
 
 1. Run Part 1 and visually approve its CT landmarks.
 2. Complete Bone Segmentation Process Part 3 so `surfaceCoordinatesXYZRef` contains recovered points in the common reference frame.
-3. Select matching snapshot, surface, and landmark files in `tools/bonePreRegistration/configs/bonePreRegistration_3Dsurface.json`.
+3. Select matching snapshot, surface, and landmark files in `tools/bonePreRegistration/configs/bonePreRegistration_3Dsurface.local.json`.
 4. Start MATLAB and run:
 
    ```matlab
@@ -293,7 +304,7 @@ The metadata fields identify every input used by the coarse-registration workflo
 | `sourceCtVariable` | Loaded CT variable, currently `bones`. |
 | `sourceBoneLandmarksFile` | Full path of the bone-landmark MAT-file. |
 | `sourceBoneLandmarksVariables` | Loaded landmark variables: `landmarks` and `intersectionDiagnostics`. |
-| `configurationFile` | Full path of `bonePreRegistration_3Dsurface.json`. Its contents are not copied into the metadata. |
+| `configurationFile` | Full path of `bonePreRegistration_3Dsurface.local.json`. Its contents are not copied into the metadata. |
 | `icpMetric`, `icpInitialTransform`, `icpInlierRatio`, `icpUsesDownsampling` | Record that this workflow uses point-to-point ICP, an identity ICP starting transform, the closest 10% of correspondences, and the complete mesh vertex set. |
 | `matlabRelease` | MATLAB release used for the run, retained because unspecified `pcregistericp` defaults can vary between releases. |
 
