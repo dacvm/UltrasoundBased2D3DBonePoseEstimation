@@ -83,7 +83,7 @@ The final segmentation mask contains pixels that pass preprocessing, thresholdin
    boneSegmentation_yyyyMMdd_HHmmss.mat
    ```
 
-The script locates the project `functions` directory from its own path, so it does not depend on MATLAB's current folder. Because the script requests the exported result as an output, MATLAB waits until the first successful export or until the interface is closed.
+The script locates its `helpers` directory, which holds the segmentation browser `launchBoneSegmentationTools.m`, from its own path, so it does not depend on MATLAB's current folder. Because the script requests the exported result as an output, MATLAB waits until the first successful export or until the interface is closed.
 
 ## Output Structure
 
