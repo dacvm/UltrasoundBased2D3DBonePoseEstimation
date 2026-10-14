@@ -287,9 +287,21 @@ This model requires aligned 3D bone-surface measurements with 2D normals from `b
 
 ### 6.1. Requirements
 
-- MATLAB with support for `triangulation`, tables, JSON decoding, and the functions used by the preparation tools.
-- Parallel Computing Toolbox is optional. When it is unavailable, a configuration requesting `useParfor` falls back to serial CMA-ES with a warning.
+- MATLAB R2024b with support for `triangulation`, tables, JSON decoding, and the functions used by the preparation tools.
 - Prepared input MAT files from the workflows under `tools/`.
+
+Select these MATLAB toolboxes when installing MATLAB:
+
+| Toolbox | Needed for | Used by |
+|---|---|---|
+| Statistics and Machine Learning Toolbox | Required. `knnsearch` in the ICP-like cost function. | `main_bonePoseOptimization_*.m`, `cost_ICPLike.m` |
+| Parallel Computing Toolbox | Optional but recommended. Parallel CMA-ES candidate evaluation (`parfor`). Without it, a configuration requesting `useParfor` falls back to serial CMA-ES with a warning, which is much slower. | `runBonePoseOptimization.m`, `functions/external/CMAES/cmaes_parfor.m` |
+| Image Processing Toolbox | Bone segmentation and surface extraction (`strel`, `imfill`, `imgaussfilt`, `bwperim`, `bwconncomp`, ...). | `tools/boneSegmentationProcess/`, `createBoneSurfaceReviewGUI.m` |
+| Optimization Toolbox | `quadprog` and `optimoptions` for regularizing bone surface segments. | `tools/boneSegmentationProcess/` |
+| Computer Vision Toolbox | `pointCloud`, `pcregistericp`, `rigidtform3d`, `pcfitsphere`. | `tools/bonePreRegistration/`, `tools/ctkneePostProcess/` |
+| Robotics System Toolbox | `quat2rotm`, `quaternion`, `meanrot` for Qualisys tracking data and pose averaging. Navigation, UAV or Aerospace Toolbox also provide these functions, so one of them is enough. | `functions/qualisys_related/`, `tools/ultrasoundSpatialProcessing/` |
+
+Running only the `main_bonePoseOptimization_*.m` scripts needs just the first two toolboxes. The remaining four are for the preprocessing tools under `tools/`. No other toolboxes are needed.
 
 The external CMA-ES implementation used by this project is already stored under `functions/external/`. Do not modify files in that directory when changing project-specific optimization behavior.
 
