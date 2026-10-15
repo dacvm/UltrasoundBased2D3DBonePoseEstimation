@@ -125,8 +125,7 @@ end
 try
     summaryTable = runAllCombinations(experimentSpec, experimentPlan, experimentFolder, summaryTable);
 catch sweepError
-    fprintf('\nThe sweep stopped with an error:\n%s\n', ...
-            getReport(sweepError, 'extended', 'hyperlinks', 'off'));
+    fprintf('\nThe sweep stopped with an error:\n%s\n', getReport(sweepError, 'extended', 'hyperlinks', 'off'));
     diary('off');
     rethrow(sweepError);
 end
@@ -139,8 +138,7 @@ end
 numberCompleted  = sum(summaryTable.status == "completed");
 numberFailed     = sum(summaryTable.status == "failed");
 numberSaveFailed = sum(summaryTable.status == "save_failed");
-fprintf('\nExperiment finished: %d completed, %d failed, %d save_failed.\n', ...
-        numberCompleted, numberFailed, numberSaveFailed);
+fprintf('\nExperiment finished: %d completed, %d failed, %d save_failed.\n', numberCompleted, numberFailed, numberSaveFailed);
 
 % The closing line is the last thing worth logging, so stop the log here.
 diary('off');
