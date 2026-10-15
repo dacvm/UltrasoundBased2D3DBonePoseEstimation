@@ -41,6 +41,7 @@
   "experiment": {
     "name": "intensityLine",
     "seeds": [1001, 1002, 1003, 1004, 1005],
-    "outputFolder": "output/bonePoseOptimization/experiments"
+    "outputFolder": "output/bonePoseOptimization/experiments",
+    "resumeFolder": ""
   }
 }

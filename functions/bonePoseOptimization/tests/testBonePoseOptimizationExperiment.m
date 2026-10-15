@@ -419,17 +419,9 @@ function testPreparationFailuresAreSavedAndDoNotStopSeeds(testCase)
 % This function has no output.
 
 % Use a missing input so this test exercises output handling without running CMA-ES.
-spec = testCase.TestData.sweepSpec;
 temporaryOutputRoot = tempname;
 temporaryOutputCleanup = onCleanup(@() removeTemporaryFolder(temporaryOutputRoot));
-spec.experiment.name = 'schemaVersion04_failure_test';
-spec.experiment.outputFolder = temporaryOutputRoot;
-spec.experiment.seeds = [31 32];
-spec.intersection.normalFacingToleranceDeg = ...
-    spec.intersection.normalFacingToleranceDeg(1);
-spec.cost.hyperparameters.intensitySmoothingSigmaMm = ...
-    spec.cost.hyperparameters.intensitySmoothingSigmaMm(1);
-spec.input.validSnapshotsMatFile = fullfile(temporaryOutputRoot, 'missing.mat');
+spec = createPreparationFailureSpec(testCase.TestData.sweepSpec, temporaryOutputRoot);
 
 % One preparation failure should create one failed result for each planned seed.
 experimentResult = runBonePoseOptimizationExperiment(spec);
@@ -442,6 +434,11 @@ verifyTrue(testCase, isfile(fullfile( ...
     experimentResult.experimentFolder, 'summary.csv')));
 verifyFalse(testCase, isfile(fullfile( ...
     experimentResult.experimentFolder, 'validation_context.mat')));
+
+% The log file must hold the printed progress, including the closing line.
+logText = fileread(fullfile(experimentResult.experimentFolder, 'experiment_log.txt'));
+verifySubstring(testCase, logText, 'Created experiment');
+verifySubstring(testCase, logText, 'Experiment finished: 0 completed, 2 failed');
 
 % Summary rows must preserve every planned identity and parameter column unchanged.
 plannedColumnNames = experimentResult.experimentPlan.runs.Properties.VariableNames;
@@ -461,6 +458,210 @@ secondResult = runBonePoseOptimizationExperiment(spec);
 verifyNotEqual(testCase, secondResult.experimentFolder, ...
     experimentResult.experimentFolder);
 clear temporaryOutputCleanup;
+end
+
+
+function testResumeRerunsOnlyMissingAndCorruptResults(testCase)
+%TESTRESUMERERUNSONLYMISSINGANDCORRUPTRESULTS Check which runs a resume redoes.
+% testCase supplies a valid active spec that is redirected to temporary output.
+% This function has no output.
+%
+% The spec fails during preparation, so every run ends "failed" within
+% milliseconds and no CMA-ES is needed. That is enough to test the resume
+% bookkeeping: which runs are skipped and which are run again.
+
+temporaryOutputRoot = tempname;
+temporaryOutputCleanup = onCleanup(@() removeTemporaryFolder(temporaryOutputRoot));
+spec = createPreparationFailureSpec(testCase.TestData.sweepSpec, temporaryOutputRoot);
+
+% Run the experiment once; it creates one result file per seed.
+firstResult      = runBonePoseOptimizationExperiment(spec);
+experimentFolder = firstResult.experimentFolder;
+seed31FilePath   = char(firstResult.summaryTable.resultFilePath(1));
+seed32FilePath   = char(firstResult.summaryTable.resultFilePath(2));
+seed31StartTime  = loadRunStartTime(seed31FilePath);
+
+% Simulate a crash before seed 32 was saved: its result file is missing.
+delete(seed32FilePath);
+spec.experiment.resumeFolder = experimentFolder;
+resumedResult = runBonePoseOptimizationExperiment(spec);
+
+% The same folder is reused, and no second experiment folder appears.
+verifyEqual(testCase, resumedResult.experimentFolder, experimentFolder);
+verifyEqual(testCase, numel(listSubfolders(temporaryOutputRoot)), 1);
+% Seed 32 was run again; seed 31 ("failed") was kept as it was, not rerun.
+verifyEqual(testCase, resumedResult.summaryTable.status, ["failed"; "failed"]);
+verifyTrue(testCase, isfile(seed32FilePath));
+verifyEqual(testCase, loadRunStartTime(seed31FilePath), seed31StartTime);
+
+% Simulate a file that was half-written when MATLAB stopped: junk bytes.
+fileId = fopen(seed31FilePath, 'w');
+fwrite(fileId, 'not a MAT file', 'char');
+fclose(fileId);
+resumedAgainResult = runBonePoseOptimizationExperiment(spec);
+
+% The corrupt file was replaced by a new, loadable result.
+verifyEqual(testCase, resumedAgainResult.summaryTable.status, ["failed"; "failed"]);
+verifyNotEqual(testCase, loadRunStartTime(seed31FilePath), seed31StartTime);
+
+% Both resumes are recorded in the same log file as the first session.
+logText = fileread(fullfile(experimentFolder, 'experiment_log.txt'));
+verifySubstring(testCase, logText, 'Created experiment');
+verifySubstring(testCase, logText, '1 of 2 runs already finished, 1 runs still to do.');
+clear temporaryOutputCleanup;
+end
+
+
+function testSaveFailureIsMarkedAndRerunOnResume(testCase)
+%TESTSAVEFAILUREISMARKEDANDRERUNONRESUME Check save_failed inside the sweep.
+% testCase supplies a valid active spec that is redirected to temporary output.
+% This function has no output.
+%
+% A real Windows lock cannot be created on demand. A FOLDER named like the
+% temporary save file ("runResult_partial.mat") blocks every save attempt
+% instead. The experiment folder name contains a timestamp, so the folder
+% is created by a first run, and the blocked save happens during a resume.
+% Note: this test waits for the runner's real save retries (about 10 s).
+
+temporaryOutputRoot = tempname;
+temporaryOutputCleanup = onCleanup(@() removeTemporaryFolder(temporaryOutputRoot));
+spec = createPreparationFailureSpec(testCase.TestData.sweepSpec, temporaryOutputRoot);
+
+firstResult    = runBonePoseOptimizationExperiment(spec);
+seed32FilePath = char(firstResult.summaryTable.resultFilePath(2));
+
+% Remove seed 32's result so the resume runs it again, and block its save.
+delete(seed32FilePath);
+blockingFolder = fullfile(fileparts(seed32FilePath), 'runResult_partial.mat');
+mkdir(blockingFolder);
+spec.experiment.resumeFolder = firstResult.experimentFolder;
+blockedResult = runBonePoseOptimizationExperiment(spec);
+
+% The sweep did not stop: seed 32 is marked save_failed and the summary
+% files were still written.
+verifyEqual(testCase, blockedResult.summaryTable.status, ["failed"; "save_failed"]);
+verifyEqual(testCase, blockedResult.summaryTable.errorStage(2), "save");
+verifyFalse(testCase, isfile(seed32FilePath));
+verifyTrue(testCase, isfile(fullfile(firstResult.experimentFolder, 'summary.csv')));
+
+% Once the lock is gone, the next resume reruns the save_failed run.
+rmdir(blockingFolder);
+unblockedResult = runBonePoseOptimizationExperiment(spec);
+verifyEqual(testCase, unblockedResult.summaryTable.status, ["failed"; "failed"]);
+verifyTrue(testCase, isfile(seed32FilePath));
+clear temporaryOutputCleanup;
+end
+
+
+function testResumeFolderIsEmptyByDefault(testCase)
+%TESTRESUMEFOLDERISEMPTYBYDEFAULT A template starts a new experiment.
+% testCase supplies the parsed template spec. This function has no output.
+
+verifyEqual(testCase, testCase.TestData.sweepSpec.experiment.resumeFolder, '');
+end
+
+
+function testResumeAcceptsUnchangedSettings(testCase)
+%TESTRESUMEACCEPTSUNCHANGEDSETTINGS Resuming with the original JSON is allowed.
+% testCase supplies the checked-in sweep JSON path. This function has no output.
+
+% A fake experiment folder whose snapshot is the template JSON itself.
+experimentFolder = tempname;
+mkdir(experimentFolder);
+folderCleanup = onCleanup(@() removeTemporaryFolder(experimentFolder));
+copyfile(testCase.TestData.sweepConfigPath, fullfile(experimentFolder, 'experiment_config_snapshot.json'));
+
+% The same JSON, now pointing at that folder.
+rawConfig = jsondecode(fileread(testCase.TestData.sweepConfigPath));
+rawConfig.experiment.resumeFolder = experimentFolder;
+[temporaryConfigPath, temporaryConfigCleanup] = writeTemporaryJson(rawConfig); %#ok<ASGLU>
+
+spec = createBonePoseOptimizationExperimentConfig(temporaryConfigPath);
+verifyTrue(testCase, isfile(fullfile(spec.experiment.resumeFolder, 'experiment_config_snapshot.json')));
+clear temporaryConfigCleanup folderCleanup;
+end
+
+
+function testResumeRejectsChangedSettings(testCase)
+%TESTRESUMEREJECTSCHANGEDSETTINGS Edited settings must not be silently ignored.
+% testCase supplies the checked-in sweep JSON path. This function has no output.
+
+experimentFolder = tempname;
+mkdir(experimentFolder);
+folderCleanup = onCleanup(@() removeTemporaryFolder(experimentFolder));
+copyfile(testCase.TestData.sweepConfigPath, fullfile(experimentFolder, 'experiment_config_snapshot.json'));
+
+% Change one setting compared to the snapshot.
+rawConfig = jsondecode(fileread(testCase.TestData.sweepConfigPath));
+rawConfig.experiment.resumeFolder = experimentFolder;
+rawConfig.experiment.seeds = [7 8];
+[temporaryConfigPath, temporaryConfigCleanup] = writeTemporaryJson(rawConfig); %#ok<ASGLU>
+
+% The error must name the changed field, so the user knows what to restore.
+resumeError = [];
+try
+    createBonePoseOptimizationExperimentConfig(temporaryConfigPath);
+catch resumeError
+end
+verifyNotEmpty(testCase, resumeError);
+verifyEqual(testCase, resumeError.identifier, ...
+    'createBonePoseOptimizationExperimentConfig:ResumeSettingsChanged');
+verifySubstring(testCase, resumeError.message, 'experiment.seeds');
+clear temporaryConfigCleanup folderCleanup;
+end
+
+
+function testResumeRejectsMissingFolder(testCase)
+%TESTRESUMEREJECTSMISSINGFOLDER A wrong resume path stops with a clear error.
+% testCase supplies the checked-in sweep JSON path. This function has no output.
+
+rawConfig = jsondecode(fileread(testCase.TestData.sweepConfigPath));
+rawConfig.experiment.resumeFolder = tempname;
+[temporaryConfigPath, temporaryConfigCleanup] = writeTemporaryJson(rawConfig); %#ok<ASGLU>
+
+verifyError(testCase, ...
+    @() createBonePoseOptimizationExperimentConfig(temporaryConfigPath), ...
+    'createBonePoseOptimizationExperimentConfig:ResumeFolderNotFound');
+clear temporaryConfigCleanup;
+end
+
+
+function spec = createPreparationFailureSpec(sweepSpec, outputRoot)
+%CREATEPREPARATIONFAILURESPEC Build a tiny spec whose preparation always fails.
+% sweepSpec is the parsed template spec and outputRoot the temporary output
+% folder. spec has one combination and two seeds (31, 32), and points at a
+% missing input file, so every run fails at once without running CMA-ES.
+
+spec = sweepSpec;
+spec.experiment.name = 'schemaVersion04_failure_test';
+spec.experiment.outputFolder = outputRoot;
+spec.experiment.seeds = [31 32];
+spec.intersection.normalFacingToleranceDeg = ...
+    spec.intersection.normalFacingToleranceDeg(1);
+spec.cost.hyperparameters.intensitySmoothingSigmaMm = ...
+    spec.cost.hyperparameters.intensitySmoothingSigmaMm(1);
+spec.input.validSnapshotsMatFile = fullfile(outputRoot, 'missing.mat');
+end
+
+
+function startTime = loadRunStartTime(resultFilePath)
+%LOADRUNSTARTTIME Read the start time stored in one runResult.mat.
+% resultFilePath is the run file and startTime its run.startTime text. A
+% changed start time shows that the run was executed again.
+
+savedFile = load(resultFilePath, 'runResult');
+startTime = savedFile.runResult.run.startTime;
+end
+
+
+function folderNames = listSubfolders(parentFolder)
+%LISTSUBFOLDERS Return the names of the folders directly inside a folder.
+% parentFolder is the folder to list and folderNames a cell array of names,
+% without "." and "..".
+
+folderEntries = dir(parentFolder);
+folderEntries = folderEntries([folderEntries.isdir]);
+folderNames   = setdiff({folderEntries.name}, {'.', '..'});
 end
 
 

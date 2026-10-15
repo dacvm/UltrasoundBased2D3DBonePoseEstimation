@@ -32,6 +32,18 @@
 %      one) to choose the bone, input files, cost model, candidate values,
 %      seeds, and output folder.
 %   3. Run the script and follow the progress messages in the Command Window.
+%      Everything printed is also kept in experiment_log.txt in the
+%      experiment folder.
+%
+% How to resume a sweep that stopped (crash, restart, Ctrl+C):
+%   1. Leave every setting in the JSON exactly as it was when the sweep
+%      started.
+%   2. Set "experiment.resumeFolder" to the experiment folder, for example
+%      "output/bonePoseOptimization/experiments/<name>_<timestamp>".
+%   3. Run this script again. Finished runs are skipped; missing, corrupt,
+%      and "save_failed" runs are run again. If the JSON no longer matches
+%      the experiment, the script stops and names the changed settings.
+%   4. Set "resumeFolder" back to "" before starting a new experiment.
 
 % Start from a clean state so variables or figures from an earlier session
 % cannot influence this run.

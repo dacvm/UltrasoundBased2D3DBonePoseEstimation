@@ -2,7 +2,9 @@ function experimentSpec = createBonePoseOptimizationExperimentConfig(configFileP
 %CREATEBONEPOSEOPTIMIZATIONEXPERIMENTCONFIG Read an active experiment JSON file.
 % This function loads the shared schemaVersion04 settings, validates the
 % intersection candidates and repeat seeds, and resolves the experiment
-% output folder. Cost-model parameters are checked by their model validator.
+% output folder. When experiment.resumeFolder is set, it also checks that
+% the JSON still matches the experiment being resumed. Cost-model
+% parameters are checked by their model validator.
 %
 % Where it fits in the framework:
 %   A bone-pose experiment runs in three configuration steps, always in
@@ -83,6 +85,26 @@ experimentSpec.experiment.seeds = normalizeSeeds(getRequiredField(experimentConf
 configuredOutputFolder = ensureScalarText(getRequiredField(experimentConfig, 'outputFolder', 'experiment.outputFolder'), 'experiment.outputFolder');
 experimentSpec.experiment.outputFolder = makeAbsolutePath(configuredOutputFolder, experimentSpec.project.root);
 
+% resumeFolder is optional. Empty (or missing) means "start a new
+% experiment". A folder path means "continue the experiment in that folder":
+% the runner then skips every run that already has a valid result file.
+% It lives in the git-ignored local JSON, so resuming never changes a
+% tracked file.
+configuredResumeFolder = '';
+if isfield(experimentConfig, 'resumeFolder') && ~isempty(experimentConfig.resumeFolder)
+    configuredResumeFolder = ensureScalarText(experimentConfig.resumeFolder, 'experiment.resumeFolder');
+end
+
+if isempty(configuredResumeFolder)
+    experimentSpec.experiment.resumeFolder = '';
+else
+    % Resolve it like outputFolder, so a path relative to the project root
+    % (e.g. "output/bonePoseOptimization/experiments/<name>") works.
+    resumeFolder = makeAbsolutePath(configuredResumeFolder, experimentSpec.project.root);
+    checkResumeFolderMatchesConfig(resumeFolder, rawConfig);
+    experimentSpec.experiment.resumeFolder = resumeFolder;
+end
+
 %% CHECK FIXED OPTIMIZER SETTINGS
 
 % This experiment sweeps cost and intersection settings, not optimizer
@@ -132,6 +154,96 @@ end
 
 % Store every candidate list in the same row-vector shape for plan generation.
 candidates = double(rawCandidates(:).');
+end
+
+
+function checkResumeFolderMatchesConfig(resumeFolder, rawConfig)
+%CHECKRESUMEFOLDERMATCHESCONFIG Stop if the JSON differs from the resumed experiment.
+% resumeFolder is the absolute experiment folder to continue and rawConfig
+% is the decoded local JSON. This helper has no output and throws when the
+% folder is not an experiment folder or its settings differ from the JSON.
+%
+% Why this check exists:
+%   When resuming, the runner takes all settings from the experiment folder
+%   itself, not from the JSON. If the JSON had been edited since the sweep
+%   started, those edits would be silently ignored, and the user would
+%   believe they were used. The same happens when resumeFolder is
+%   forgotten in the JSON while preparing a NEW experiment. Requiring the
+%   JSON to equal the snapshot saved at the start catches both mistakes.
+
+if ~isfolder(resumeFolder)
+    error('createBonePoseOptimizationExperimentConfig:ResumeFolderNotFound', ...
+          'experiment.resumeFolder does not exist: %s', resumeFolder);
+end
+
+% Every experiment saves a copy of the JSON it was started with.
+snapshotFilePath = fullfile(resumeFolder, 'experiment_config_snapshot.json');
+if ~isfile(snapshotFilePath)
+    error('createBonePoseOptimizationExperimentConfig:ResumeSnapshotNotFound', ...
+          ['experiment.resumeFolder is not an experiment folder ' ...
+           '(no experiment_config_snapshot.json): %s'], resumeFolder);
+end
+snapshotConfig = jsondecode(fileread(snapshotFilePath));
+
+% resumeFolder itself must be ignored: it is empty in the snapshot (or
+% absent in older experiments) and set in the JSON used for resuming.
+currentSettings  = removeResumeFolderField(rawConfig);
+snapshotSettings = removeResumeFolderField(snapshotConfig);
+
+differentFields = listDifferentFields(currentSettings, snapshotSettings, '');
+if ~isempty(differentFields)
+    error('createBonePoseOptimizationExperimentConfig:ResumeSettingsChanged', ...
+          ['The experiment in experiment.resumeFolder was started with different settings.\n' ...
+           'Differences in: %s\n' ...
+           'Either restore those settings, or clear experiment.resumeFolder to start a new experiment.'], ...
+          strjoin(differentFields, ', '));
+end
+end
+
+
+function config = removeResumeFolderField(config)
+%REMOVERESUMEFOLDERFIELD Drop experiment.resumeFolder before comparing configs.
+% config is a decoded JSON struct and the output is the same struct
+% without experiment.resumeFolder.
+
+if isfield(config, 'experiment') && isfield(config.experiment, 'resumeFolder')
+    config.experiment = rmfield(config.experiment, 'resumeFolder');
+end
+end
+
+
+function differentFields = listDifferentFields(firstStruct, secondStruct, parentPath)
+%LISTDIFFERENTFIELDS Name every field whose value differs between two structs.
+% firstStruct and secondStruct are decoded JSON structs, parentPath is the
+% dotted path of these structs ('' at the top), and differentFields is a
+% string array of dotted paths such as "optimizer.populationSize".
+%
+% Nested scalar structs are compared field by field, so the error message
+% can point at the exact setting instead of a whole JSON section.
+
+differentFields = strings(1, 0);
+allFieldNames   = union(fieldnames(firstStruct), fieldnames(secondStruct));
+
+for fieldIndex = 1:numel(allFieldNames)
+    fieldName = allFieldNames{fieldIndex};
+    if isempty(parentPath)
+        fieldPath = fieldName;
+    else
+        fieldPath = [parentPath '.' fieldName];
+    end
+
+    if ~isfield(firstStruct, fieldName) || ~isfield(secondStruct, fieldName)
+        % A field added or removed is a difference too.
+        differentFields(end + 1) = fieldPath; %#ok<AGROW>
+    elseif isstruct(firstStruct.(fieldName)) && isscalar(firstStruct.(fieldName)) && ...
+           isstruct(secondStruct.(fieldName)) && isscalar(secondStruct.(fieldName))
+        % Go one level deeper to find the exact differing setting.
+        differentFields = [differentFields, ...
+            listDifferentFields(firstStruct.(fieldName), secondStruct.(fieldName), fieldPath)]; %#ok<AGROW>
+    elseif ~isequal(firstStruct.(fieldName), secondStruct.(fieldName))
+        differentFields(end + 1) = fieldPath; %#ok<AGROW>
+    end
+end
 end
 
 
