@@ -371,7 +371,17 @@ Use this workflow to confirm that:
 main_bonePoseOptimization_hyperparamSweep
 ```
 
-The sweep creates a new timestamped experiment on every invocation. It does not resume an older experiment. Before starting, MATLAB prints the number of combinations, seeds, planned runs, and maximum planned CMA-ES function evaluations. During execution, each completed or failed run is written to disk and the summary files are refreshed.
+The sweep creates a new timestamped experiment on every invocation, unless `experiment.resumeFolder` is set (see below). Before starting, MATLAB prints the number of combinations, seeds, planned runs, and maximum planned CMA-ES function evaluations. During execution, each completed or failed run is written to disk and the summary files are refreshed.
+
+#### Resuming a stopped sweep
+
+If a sweep stops before it finishes (crash, Windows restart, Ctrl+C), it can be continued in the same experiment folder instead of starting over:
+
+1. Leave every setting in the local JSON exactly as it was when the sweep started.
+2. Set `experiment.resumeFolder` to the experiment folder, for example `"output/bonePoseOptimization/experiments/<name>_<timestamp>"`. Relative paths are resolved from the project root.
+3. Run `main_bonePoseOptimization_hyperparamSweep` again.
+
+The runner then takes the experiment specification and plan from `experiment_plan.mat` in that folder, not from the JSON. Runs with a `runResult.mat` that loads are skipped; runs whose file is missing or corrupt, and runs marked `save_failed`, are run again. Runs marked `failed` are kept, because their errors usually come from the settings. If the JSON differs from the folder's `experiment_config_snapshot.json` (ignoring `resumeFolder` itself), the script stops and names the changed fields, so edited settings are never silently ignored. Set `resumeFolder` back to `""` before starting a new experiment.
 
 ## 7. Output structure
 

@@ -45,6 +45,7 @@
   "experiment": {
     "name": "intensityICP",
     "seeds": [1001, 1002, 1003],
-    "outputFolder": "output/bonePoseOptimization/experiments"
+    "outputFolder": "output/bonePoseOptimization/experiments",
+    "resumeFolder": ""
   }
 }

@@ -1,9 +1,9 @@
 function experimentResult = runBonePoseOptimizationExperiment(experimentSpec)
 %RUNBONEPOSEOPTIMIZATIONEXPERIMENT Run all combinations and repeat seeds.
-% This function creates a new timestamped experiment, prepares each scalar
-% hyperparameter combination once, runs CMA-ES for every configured seed,
-% and saves each result immediately. It intentionally does not resume old
-% experiments or cache prepared inputs across different combinations.
+% This function creates a new timestamped experiment (or resumes a stopped
+% one), prepares each scalar hyperparameter combination once, runs CMA-ES
+% for every configured seed, and saves each result immediately. It does
+% not cache prepared inputs across different combinations.
 %
 % Where it fits in the framework:
 %   A hyperparameter sweep asks "which cost settings let the optimizer find
@@ -25,7 +25,7 @@ function experimentResult = runBonePoseOptimizationExperiment(experimentSpec)
 %     4. every result is saved and added to one summary table.
 %
 % Why it is built this way:
-%   A sweep can run unattended for hours. Three ideas shape the code:
+%   A sweep can run unattended for hours. Four ideas shape the code:
 %     - Prepare once per combination. Input preparation is slow and the
 %       same for every seed, so it is done once and reused by all seeds.
 %     - Never lose finished work. Each run is saved the moment it ends, and
@@ -36,64 +36,56 @@ function experimentResult = runBonePoseOptimizationExperiment(experimentSpec)
 %       on, so one bad setting does not waste the rest of the night. The
 %       same holds when a result file cannot be written: the save is
 %       retried, and if it still fails the run is marked "save_failed".
-%   Every call starts a NEW experiment folder; there is no resume, which
-%   keeps the code simple and guarantees one folder = one complete,
-%   self-consistent experiment.
+%     - A stopped sweep can be resumed. When experimentSpec.experiment.
+%       resumeFolder is set, no new folder is created. The spec and plan
+%       are read back from that folder, every run with a valid
+%       runResult.mat is skipped, and only the remaining runs (missing,
+%       corrupt, or "save_failed") are run. Runs that "failed" are kept as
+%       they are. One folder therefore always holds one self-consistent
+%       experiment, even when it took several MATLAB sessions to finish.
 %
 % Input:
 %   experimentSpec - Validated configuration returned by
-%                    createBonePoseOptimizationExperimentConfig.
+%                    createBonePoseOptimizationExperimentConfig. Its
+%                    experiment.resumeFolder is '' for a new experiment,
+%                    or the folder of the experiment to resume.
 %
 % Output:
 %   experimentResult - Struct containing the new experiment folder, the
 %                      complete plan, and the final summary table.
 
-%% CREATE AND SAVE THE EXPERIMENT PLAN
+%% CREATE A NEW EXPERIMENT, OR OPEN THE ONE TO RESUME
 
-% Before running anything, turn the candidate lists into the concrete list
-% of combinations and runs. Knowing the full workload up front lets us tell
-% the user how big the sweep is, and gives every run a fixed ID that the
-% folders, the summary table, and the progress messages all share.
-experimentPlan   = createBonePoseOptimizationExperimentPlan(experimentSpec);
-% Every sweep gets its own new, timestamped folder. Results of different
-% sweeps (or of a rerun of the same JSON) can then never overwrite or mix
-% with each other.
-experimentFolder = createExperimentFolder(experimentSpec.experiment.outputFolder, experimentSpec.experiment.name);
+isResuming = ~isempty(experimentSpec.experiment.resumeFolder);
 
-% The JSON file on disk may be edited later for the next sweep. A copy of
-% it inside the experiment folder records exactly which settings produced
-% these results, so the experiment can be understood or repeated months
-% from now. If the copy fails we stop, because results without their
-% settings would be hard to interpret.
-configSnapshotPath          = fullfile(experimentFolder, 'experiment_config_snapshot.json');
-[configCopied, copyMessage] = copyfile(experimentSpec.source.configFilePath, configSnapshotPath);
-if ~configCopied
-    error('runBonePoseOptimizationExperiment:ConfigCopyFailed', ...
-          'Could not copy the experiment configuration: %s', copyMessage);
+if ~isResuming
+    % A new experiment: plan the runs, create the timestamped folder, and
+    % save the plan and the JSON snapshot that describe it.
+    [experimentFolder, experimentPlan] = createNewExperiment(experimentSpec);
+
+    % Create the summary table: one row per planned run, all "pending".
+    % It is rewritten after every run, so at any moment the file on disk
+    % shows which runs are done, which failed, and which are still waiting.
+    summaryTable = createSummaryTable(experimentPlan.runs);
+else
+    % Resuming: the folder already holds the plan of an earlier sweep that
+    % stopped. Take the spec and the plan from that folder, not from the
+    % caller. The folder is the one true description of the experiment;
+    % using it guarantees the remaining runs use exactly the same settings
+    % as the runs that already finished. (The config reader has already
+    % checked that the JSON still matches this experiment.)
+    experimentFolder = experimentSpec.experiment.resumeFolder;
+    savedPlanFile    = load(fullfile(experimentFolder, 'experiment_plan.mat'), 'experimentSpec', 'experimentPlan');
+    experimentSpec   = savedPlanFile.experimentSpec;
+    experimentPlan   = savedPlanFile.experimentPlan;
+
+    % Rebuild the summary from the run files instead of reading the old
+    % summary.mat. MATLAB may have died after saving a run but before
+    % updating the summary; the run files are always the most up to date.
+    % Runs without a valid file stay "pending" and will be run below.
+    summaryTable = createSummaryTable(experimentPlan.runs);
+    summaryTable = fillSummaryFromSavedRuns(summaryTable, experimentFolder);
 end
-
-% Results can depend on more than the JSON: the MATLAB version and whether
-% CMA-ES evaluates candidates in parallel. With parfor, the order in which
-% workers finish can vary, so the same seed may not give bit-identical
-% results. We note this context so a later reader knows how far results
-% are expected to be reproducible.
-environment.matlabVersion       = version;
-environment.parallelToolbox     = ver('parallel');
-environment.useParfor           = experimentSpec.optimizer.useParfor;
-environment.parforWorkers       = experimentSpec.optimizer.parforWorkers;
-environment.seedReproducibility = 'best_effort_when_internal_parfor_is_enabled';
-
-% Save the spec, the plan and the environment before the first run starts.
-% This file is the reference description of the experiment: analysis code
-% reads it to know what was planned, even if the sweep is stopped halfway.
-planFilePath = fullfile(experimentFolder, 'experiment_plan.mat');
-save(planFilePath, 'experimentSpec', 'experimentPlan', 'environment');
-
-% Create the summary table: one row per planned run, all marked "pending".
-% It is saved now and then rewritten after every run, so at any moment the
-% file on disk shows which runs are done, which failed, and which are still
-% waiting. It is the first thing to open when looking at the results.
-summaryTable = createSummaryTable(experimentPlan.runs);
 saveExperimentSummary(experimentFolder, summaryTable);
 
 %% START THE EXPERIMENT LOG
@@ -103,17 +95,26 @@ saveExperimentSummary(experimentFolder, summaryTable);
 % diary copies everything MATLAB prints from here on (progress, CMA-ES
 % tables, warnings, errors) into a text file inside the experiment folder,
 % so the history of the sweep can always be read back afterwards.
+% diary appends, so a resumed sweep continues the log of the first one.
 logFilePath = fullfile(experimentFolder, 'experiment_log.txt');
 diary(logFilePath);
 
 % Tell the user where the results will go and how much work is ahead
 % (number of runs and the maximum number of cost evaluations), so they can
 % judge the run time and stop early if the sweep is larger than intended.
-maximumEvaluations = experimentPlan.numberOfRuns * experimentSpec.optimizer.maxFunctionEvaluations;
-fprintf('Created experiment: %s\n', experimentFolder);
-fprintf('%d combinations x %d seeds = %d optimization runs.\n', ...
-        experimentPlan.numberOfCombinations, experimentPlan.numberOfSeeds, experimentPlan.numberOfRuns);
-fprintf('Maximum planned function evaluations: %d\n', maximumEvaluations);
+if ~isResuming
+    maximumEvaluations = experimentPlan.numberOfRuns * experimentSpec.optimizer.maxFunctionEvaluations;
+    fprintf('Created experiment: %s\n', experimentFolder);
+    fprintf('%d combinations x %d seeds = %d optimization runs.\n', ...
+            experimentPlan.numberOfCombinations, experimentPlan.numberOfSeeds, experimentPlan.numberOfRuns);
+    fprintf('Maximum planned function evaluations: %d\n', maximumEvaluations);
+else
+    numberOfRunsToDo = sum(summaryTable.status == "pending");
+    fprintf('\n===== Resuming experiment at %s =====\n', currentTimestamp());
+    fprintf('Experiment folder: %s\n', experimentFolder);
+    fprintf('%d of %d runs already finished, %d runs still to do.\n', ...
+            experimentPlan.numberOfRuns - numberOfRunsToDo, experimentPlan.numberOfRuns, numberOfRunsToDo);
+end
 
 %% RUN EACH COMBINATION
 
@@ -179,8 +180,9 @@ function summaryTable = runAllCombinations(experimentSpec, experimentPlan, exper
 initialPoseVector      = zeros(6, 1);
 % The ground truth is the same for every combination (same data, same
 % bone), so it only needs to be saved once. This flag remembers whether
-% that already happened.
-validationContextSaved = false;
+% that already happened (in a resumed experiment, possibly in the first
+% session).
+validationContextSaved = isfile(fullfile(experimentFolder, 'validation_context.mat'));
 
 % The outer loop walks through the combinations one by one. For each, we
 % first prepare the inputs and then (in the inner loop below) run all its
@@ -188,10 +190,19 @@ validationContextSaved = false;
 for combinationIndex = 1:experimentPlan.numberOfCombinations
 
     % Take this combination's row from the plan and find its runs (one per
-    % seed). The plan stores all seeds of a combination next to each other,
-    % so these are the runs the inner loop will execute.
+    % seed) that are still "pending". In a new experiment that is every
+    % run; when resuming, finished runs are left out so they are not redone.
     combinationRow        = experimentPlan.combinations(combinationIndex, :);
-    combinationRunIndexes = find(experimentPlan.runs.combinationNumber == combinationRow.combinationNumber);
+    combinationRunIndexes = find(experimentPlan.runs.combinationNumber == combinationRow.combinationNumber ...
+                                 & summaryTable.status == "pending");
+
+    % Nothing left to do for this combination: skip it before the slow
+    % input preparation.
+    if isempty(combinationRunIndexes)
+        fprintf('\nSkipping %s (%d of %d): all seeds already finished.\n', ...
+                char(combinationRow.combinationId), combinationIndex, experimentPlan.numberOfCombinations);
+        continue;
+    end
 
     % Turn the plan row into a plain one-run config (one value per setting,
     % no seed yet). Preparation and the cost function only understand this
@@ -295,9 +306,9 @@ for combinationIndex = 1:experimentPlan.numberOfCombinations
         fprintf('Running %s with seed %d.\n', char(runRow.runId), runRow.seed);
         [runResult, summaryRecord] = runOneSeed(runRow, seedConfig, seedData, validationReference, initialPoseVector, initialCost);
 
-        % Save the result and the updated summary right away. Since there
-        % is no resume feature, this is what protects finished runs if the
-        % sweep is interrupted later.
+        % Save the result and the updated summary right away. This is what
+        % protects finished runs if the sweep is interrupted later, and the
+        % saved file is what tells a resumed sweep to skip this run.
         % If the result file cannot be written even after retrying, the run
         % is marked "save_failed" and the sweep goes on: losing one result
         % is much better than losing every run still planned for the night.
@@ -316,6 +327,116 @@ end
 
 
 
+function [experimentFolder, experimentPlan] = createNewExperiment(experimentSpec)
+%CREATENEWEXPERIMENT Plan the runs and create a new experiment folder.
+% experimentSpec is the validated configuration. experimentFolder is the
+% new timestamped folder, which then holds the JSON snapshot and
+% experiment_plan.mat, and experimentPlan is the plan saved in it.
+
+% Before running anything, turn the candidate lists into the concrete list
+% of combinations and runs. Knowing the full workload up front lets us tell
+% the user how big the sweep is, and gives every run a fixed ID that the
+% folders, the summary table, and the progress messages all share.
+experimentPlan   = createBonePoseOptimizationExperimentPlan(experimentSpec);
+% Every sweep gets its own new, timestamped folder. Results of different
+% sweeps (or of a rerun of the same JSON) can then never overwrite or mix
+% with each other.
+experimentFolder = createExperimentFolder(experimentSpec.experiment.outputFolder, experimentSpec.experiment.name);
+
+% The JSON file on disk may be edited later for the next sweep. A copy of
+% it inside the experiment folder records exactly which settings produced
+% these results, so the experiment can be understood or repeated months
+% from now. Resuming also compares the JSON with this copy. If the copy
+% fails we stop, because results without their settings would be hard to
+% interpret.
+configSnapshotPath          = fullfile(experimentFolder, 'experiment_config_snapshot.json');
+[configCopied, copyMessage] = copyfile(experimentSpec.source.configFilePath, configSnapshotPath);
+if ~configCopied
+    error('runBonePoseOptimizationExperiment:ConfigCopyFailed', ...
+          'Could not copy the experiment configuration: %s', copyMessage);
+end
+
+% Results can depend on more than the JSON: the MATLAB version and whether
+% CMA-ES evaluates candidates in parallel. With parfor, the order in which
+% workers finish can vary, so the same seed may not give bit-identical
+% results. We note this context so a later reader knows how far results
+% are expected to be reproducible.
+environment.matlabVersion       = version;
+environment.parallelToolbox     = ver('parallel');
+environment.useParfor           = experimentSpec.optimizer.useParfor;
+environment.parforWorkers       = experimentSpec.optimizer.parforWorkers;
+environment.seedReproducibility = 'best_effort_when_internal_parfor_is_enabled';
+
+% Save the spec, the plan and the environment before the first run starts.
+% This file is the reference description of the experiment: analysis code
+% reads it to know what was planned, and a resumed sweep reads its spec
+% and plan from here.
+planFilePath = fullfile(experimentFolder, 'experiment_plan.mat');
+save(planFilePath, 'experimentSpec', 'experimentPlan', 'environment');
+end
+
+
+function summaryTable = fillSummaryFromSavedRuns(summaryTable, experimentFolder)
+%FILLSUMMARYFROMSAVEDRUNS Fill summary rows from run files that already exist.
+% summaryTable is a fresh summary with every run "pending", experimentFolder
+% is the experiment being resumed, and the output has every run that has a
+% valid runResult.mat filled in. Runs without one stay "pending".
+
+for runIndex = 1:height(summaryTable)
+    runRow         = summaryTable(runIndex, :);
+    resultFilePath = fullfile(getSeedFolder(experimentFolder, runRow), 'runResult.mat');
+    runResult      = loadFinishedRunResult(resultFilePath);
+
+    if ~isempty(runResult)
+        summaryRecord = createSummaryRecord(runResult);
+        % Use today's path of the file: the stored one is out of date when
+        % the experiment folder was moved or copied to another machine.
+        summaryRecord.resultFilePath = string(resultFilePath);
+        summaryTable = updateSummaryRow(summaryTable, runIndex, summaryRecord);
+    end
+end
+end
+
+
+function runResult = loadFinishedRunResult(resultFilePath)
+%LOADFINISHEDRUNRESULT Load a run's saved result, or [] if it must be rerun.
+% resultFilePath is the expected runResult.mat of one run. runResult is the
+% saved struct when the file exists and loads, and [] otherwise.
+%
+% Every file that loads holds a "completed" or "failed" run: a run whose
+% save failed has no file at all. Both are kept. A "failed" run is not
+% retried, because its error usually comes from the settings and would
+% simply happen again.
+
+runResult = [];
+if ~isfile(resultFilePath)
+    return;
+end
+
+% A file can be corrupt when MATLAB stopped in the middle of writing it
+% (for example by the crash this resume is recovering from). load then
+% throws; such a run counts as not finished and is run again.
+try
+    savedFile = load(resultFilePath, 'runResult');
+catch
+    return;
+end
+
+if isfield(savedFile, 'runResult')
+    runResult = savedFile.runResult;
+end
+end
+
+
+function seedFolder = getSeedFolder(experimentFolder, runRow)
+%GETSEEDFOLDER Return the folder of one run inside the experiment folder.
+% experimentFolder owns all outputs, runRow is a plan or summary row with
+% combinationId and seed, and seedFolder is runs/<combinationId>/seed_<seed>.
+
+seedFolder = fullfile(experimentFolder, 'runs', char(runRow.combinationId), sprintf('seed_%d', runRow.seed));
+end
+
+
 function runConfig = addRunOutputFolder(runConfig, runRow, experimentFolder)
 %ADDRUNOUTPUTFOLDER Add the deterministic output folder for one experiment run.
 % runConfig is the scalar combination configuration, runRow identifies one
@@ -323,7 +444,7 @@ function runConfig = addRunOutputFolder(runConfig, runRow, experimentFolder)
 % the CMA-ES base output folder for this run.
 
 % Build a readable folder hierarchy from the stable combination and seed values.
-seedFolder = fullfile(experimentFolder, 'runs', char(runRow.combinationId), sprintf('seed_%d', runRow.seed));
+seedFolder = getSeedFolder(experimentFolder, runRow);
 if ~isfolder(seedFolder)
     mkdir(seedFolder);
 end
