@@ -432,6 +432,8 @@ output/bonePoseOptimization/experiments/
 
 The summary begins with every run marked `pending`. After each attempt, its row is updated with identifiers, cost-model name, scalar hyperparameters, seed, status, timestamps, runtime, initial and best costs, function-evaluation count, CMA-ES stop reason, result path, and any error information.
 
+A run's status is `completed`, `failed` (an error was thrown during preparation or optimization), or `save_failed`. `save_failed` means the run itself finished but its `runResult.mat` could not be written, even after retrying (for example because antivirus or a sync client locked the file). Its costs remain in the summary, and the sweep continues with the next run.
+
 ### 7.4. Evaluation tables
 
 `main_bonePoseOptimization_evaluation.m` loads the schema-version-4 experiment

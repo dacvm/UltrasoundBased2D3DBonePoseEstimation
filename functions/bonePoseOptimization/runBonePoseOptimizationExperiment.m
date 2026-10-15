@@ -33,7 +33,9 @@ function experimentResult = runBonePoseOptimizationExperiment(experimentSpec)
 %       a manual stop late in the sweep still leaves all earlier results.
 %     - One failure must not stop the sweep. A failing combination or seed
 %       is recorded as "failed" (with its error message) and the loop moves
-%       on, so one bad setting does not waste the rest of the night.
+%       on, so one bad setting does not waste the rest of the night. The
+%       same holds when a result file cannot be written: the save is
+%       retried, and if it still fails the run is marked "save_failed".
 %   Every call starts a NEW experiment folder; there is no resume, which
 %   keeps the code simple and guarantees one folder = one complete,
 %   self-consistent experiment.
@@ -180,7 +182,10 @@ for combinationIndex = 1:experimentPlan.numberOfCombinations
             % truth), so later analysis can load every run the same way and
             % simply filter on its status. Save it right away, like any run.
             [runResult, summaryRecord] = createFailedRunResult(runRow, seedConfig, preparationError, 'preparation', NaN, struct());
-            saveRunResult(runResult);
+            [isSaved, saveFailureMessage] = saveRunResult(runResult);
+            if ~isSaved
+                summaryRecord = markSaveFailed(summaryRecord, saveFailureMessage);
+            end
 
             % Mark this run as "failed" in the summary, with the error
             % message, and rewrite the summary file, so the on-disk table
@@ -228,7 +233,13 @@ for combinationIndex = 1:experimentPlan.numberOfCombinations
         % Save the result and the updated summary right away. Since there
         % is no resume feature, this is what protects finished runs if the
         % sweep is interrupted later.
-        saveRunResult(runResult);
+        % If the result file cannot be written even after retrying, the run
+        % is marked "save_failed" and the sweep goes on: losing one result
+        % is much better than losing every run still planned for the night.
+        [isSaved, saveFailureMessage] = saveRunResult(runResult);
+        if ~isSaved
+            summaryRecord = markSaveFailed(summaryRecord, saveFailureMessage);
+        end
         summaryTable = updateSummaryRow(summaryTable, runIndex, summaryRecord);
         saveExperimentSummary(experimentFolder, summaryTable);
     end
@@ -468,14 +479,37 @@ summaryTable.errorMessage(runIndex)         = summaryRecord.errorMessage;
 end
 
 
-function saveRunResult(runResult)
+function [isSaved, failureMessage] = saveRunResult(runResult)
 %SAVERUNRESULT Save one complete result immediately after its attempt.
-% runResult contains the output and its destination path. This function has
-% no output and uses v7.3 because detailed intersection data can be large.
+% runResult contains the output and its destination path. isSaved is false
+% when the file could not be written after all retries, and failureMessage
+% then explains why.
+
+% Windows locks (antivirus, sync clients) usually clear within seconds, so
+% a few attempts with a short pause are enough without stalling the sweep.
+numberOfAttempts = 3;
+pauseSeconds     = 5;
 
 % The seed folder already exists because addRunOutputFolder created it.
-resultFilePath = runResult.run.resultFilePath;
-save(resultFilePath, 'runResult', '-v7.3');
+variablesToSave.runResult = runResult;
+[isSaved, failureMessage] = saveMatFileWithRetry(runResult.run.resultFilePath, ...
+    variablesToSave, numberOfAttempts, pauseSeconds);
+end
+
+
+function summaryRecord = markSaveFailed(summaryRecord, failureMessage)
+%MARKSAVEFAILED Mark a summary record whose result file could not be written.
+% summaryRecord is the record of a run that finished (or failed) normally,
+% failureMessage is the last save error, and the output is the same record
+% with status "save_failed".
+%
+% The costs and timing stay in the record: the computation itself worked,
+% and the summary is now the only place where these numbers survive.
+
+summaryRecord.status          = "save_failed";
+summaryRecord.errorStage      = "save";
+summaryRecord.errorIdentifier = "";
+summaryRecord.errorMessage    = string(failureMessage);
 end
 
 
@@ -496,8 +530,18 @@ function saveExperimentSummary(experimentFolder, summaryTable)
 % planned run, and this helper has no output.
 
 % MAT preserves MATLAB types while CSV supports later inspection in other tools.
-save(fullfile(experimentFolder, 'summary.mat'), 'summaryTable');
-writetable(summaryTable, fullfile(experimentFolder, 'summary.csv'));
+% The summary is rewritten after every run, so a failed write is not fatal:
+% the next run writes it again. One quick retry is enough here.
+variablesToSave.summaryTable = summaryTable;
+saveMatFileWithRetry(fullfile(experimentFolder, 'summary.mat'), variablesToSave, 2, 1);
+
+% summary.csv is often open in Excel while the sweep runs, and Excel locks
+% the file. That must not stop the sweep, so report it and carry on.
+try
+    writetable(summaryTable, fullfile(experimentFolder, 'summary.csv'));
+catch csvError
+    fprintf('Could not write summary.csv (is it open in another program?): %s\n', csvError.message);
+end
 end
 
 
