@@ -443,6 +443,11 @@ verifyTrue(testCase, isfile(fullfile( ...
 verifyFalse(testCase, isfile(fullfile( ...
     experimentResult.experimentFolder, 'validation_context.mat')));
 
+% The log file must hold the printed progress, including the closing line.
+logText = fileread(fullfile(experimentResult.experimentFolder, 'experiment_log.txt'));
+verifySubstring(testCase, logText, 'Created experiment');
+verifySubstring(testCase, logText, 'Experiment finished: 0 completed, 2 failed');
+
 % Summary rows must preserve every planned identity and parameter column unchanged.
 plannedColumnNames = experimentResult.experimentPlan.runs.Properties.VariableNames;
 verifyEqual(testCase, ...

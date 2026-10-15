@@ -399,6 +399,7 @@ output/bonePoseOptimization/experiments/
 +-- <experiment-name>_yyyyMMdd_HHmmss_SSS/
     +-- experiment_config_snapshot.json
     +-- experiment_plan.mat
+    +-- experiment_log.txt
     +-- validation_context.mat
     +-- summary.csv
     +-- summary.mat
@@ -426,6 +427,7 @@ output/bonePoseOptimization/experiments/
 | --- | --- |
 | `experiment_config_snapshot.json` | Copy of the original JSON used to start the experiment. |
 | `experiment_plan.mat` | Resolved experiment specification, complete combination and run tables, and MATLAB/parallel-environment metadata. |
+| `experiment_log.txt` | Copy of everything MATLAB printed during the sweep (progress, CMA-ES output, save retries, and the full error report if the sweep stopped). |
 | `validation_context.mat` | Ground-truth validation packet plus the shared initial CT-to-reference and bone-to-reference transforms. |
 | `summary.csv` | Flat, analysis-friendly row for every planned combination-seed run. |
 | `summary.mat` | MATLAB version of the same summary table with MATLAB data types preserved. |

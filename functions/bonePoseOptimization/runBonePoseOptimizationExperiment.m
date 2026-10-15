@@ -96,6 +96,16 @@ save(planFilePath, 'experimentSpec', 'experimentPlan', 'environment');
 summaryTable = createSummaryTable(experimentPlan.runs);
 saveExperimentSummary(experimentFolder, summaryTable);
 
+%% START THE EXPERIMENT LOG
+
+% A sweep runs unattended, often over Remote Desktop. When something goes
+% wrong, the Command Window may be gone or scrolled far past the message.
+% diary copies everything MATLAB prints from here on (progress, CMA-ES
+% tables, warnings, errors) into a text file inside the experiment folder,
+% so the history of the sweep can always be read back afterwards.
+logFilePath = fullfile(experimentFolder, 'experiment_log.txt');
+diary(logFilePath);
+
 % Tell the user where the results will go and how much work is ahead
 % (number of runs and the maximum number of cost evaluations), so they can
 % judge the run time and stop early if the sweep is larger than intended.
@@ -106,6 +116,61 @@ fprintf('%d combinations x %d seeds = %d optimization runs.\n', ...
 fprintf('Maximum planned function evaluations: %d\n', maximumEvaluations);
 
 %% RUN EACH COMBINATION
+
+% Why the try/catch: MATLAB prints an uncaught error only after this
+% function has exited, which is too late for the log file. Catching it
+% here lets us write the full error report into the log first, then stop
+% the log and pass the same error on to the caller unchanged.
+try
+    summaryTable = runAllCombinations(experimentSpec, experimentPlan, experimentFolder, summaryTable);
+catch sweepError
+    fprintf('\nThe sweep stopped with an error:\n%s\n', ...
+            getReport(sweepError, 'extended', 'hyperlinks', 'off'));
+    diary('off');
+    rethrow(sweepError);
+end
+
+%% RETURN A COMPACT EXPERIMENT RESULT
+
+% All planned runs have now been attempted. Print one closing line with how
+% many succeeded and failed, so after an unattended sweep the user sees at
+% a glance whether it is worth opening the summary for failures.
+numberCompleted  = sum(summaryTable.status == "completed");
+numberFailed     = sum(summaryTable.status == "failed");
+numberSaveFailed = sum(summaryTable.status == "save_failed");
+fprintf('\nExperiment finished: %d completed, %d failed, %d save_failed.\n', ...
+        numberCompleted, numberFailed, numberSaveFailed);
+
+% The closing line is the last thing worth logging, so stop the log here.
+diary('off');
+
+% Everything is already saved on disk. The returned struct is only a
+% convenience for the calling script: where the results are, what was
+% planned, and the final summary, ready for a quick look or a next
+% analysis step without reloading files.
+experimentResult.experimentFolder = experimentFolder;
+experimentResult.experimentPlan   = experimentPlan;
+experimentResult.summaryTable     = summaryTable;
+end
+
+
+
+
+
+
+function summaryTable = runAllCombinations(experimentSpec, experimentPlan, experimentFolder, summaryTable)
+%RUNALLCOMBINATIONS Prepare every combination and run all of its seeds.
+% This is the main loop of the sweep. It is a separate function only so
+% the caller can wrap it in one try/catch that writes a crash into the log.
+%
+% Input:
+%   experimentSpec   - Validated experiment specification.
+%   experimentPlan   - Plan with the combination and run tables.
+%   experimentFolder - Folder that receives all results of this experiment.
+%   summaryTable     - Current summary table, one row per planned run.
+%
+% Output:
+%   summaryTable     - The same table with a filled row for every run.
 
 % The optimizer does not search for the pose directly; it searches for a
 % small 6D correction [vx vy vz wx wy wz] on top of the coarse start pose.
@@ -244,23 +309,6 @@ for combinationIndex = 1:experimentPlan.numberOfCombinations
         saveExperimentSummary(experimentFolder, summaryTable);
     end
 end
-
-%% RETURN A COMPACT EXPERIMENT RESULT
-
-% All planned runs have now been attempted. Print one closing line with how
-% many succeeded and failed, so after an unattended sweep the user sees at
-% a glance whether it is worth opening the summary for failures.
-numberCompleted = sum(summaryTable.status == "completed");
-numberFailed    = sum(summaryTable.status == "failed");
-fprintf('\nExperiment finished: %d completed, %d failed.\n', numberCompleted, numberFailed);
-
-% Everything is already saved on disk. The returned struct is only a
-% convenience for the calling script: where the results are, what was
-% planned, and the final summary, ready for a quick look or a next
-% analysis step without reloading files.
-experimentResult.experimentFolder = experimentFolder;
-experimentResult.experimentPlan   = experimentPlan;
-experimentResult.summaryTable     = summaryTable;
 end
 
 
