@@ -381,7 +381,7 @@ If a sweep stops before it finishes (crash, Windows restart, Ctrl+C), it can be 
 2. Set `experiment.resumeFolder` to the experiment folder, for example `"output/bonePoseOptimization/experiments/<name>_<timestamp>"`. Relative paths are resolved from the project root.
 3. Run `main_bonePoseOptimization_hyperparamSweep` again.
 
-The runner then takes the experiment specification and plan from `experiment_plan.mat` in that folder, not from the JSON. Runs with a `runResult.mat` that loads are skipped; runs whose file is missing or corrupt, and runs marked `save_failed`, are run again. Runs marked `failed` are kept, because their errors usually come from the settings. If the JSON differs from the folder's `experiment_config_snapshot.json` (ignoring `resumeFolder` itself), the script stops and names the changed fields, so edited settings are never silently ignored. Set `resumeFolder` back to `""` before starting a new experiment.
+The runner then takes the experiment specification and plan from `experiment_plan.mat` in that folder, not from the JSON. Runs with a `runResult.mat` that loads are skipped; runs whose file is missing or corrupt, and runs marked `save_failed` or stopped by a `MATLAB:save:*` error (also in older sweeps that stored them as `failed`), are run again. Other `failed` runs are kept, because their errors usually come from the settings. If the JSON differs from the folder's `experiment_config_snapshot.json` (ignoring `resumeFolder` itself), the script stops and names the changed fields, so edited settings are never silently ignored. Set `resumeFolder` back to `""` before starting a new experiment.
 
 ## 7. Output structure
 
@@ -444,7 +444,7 @@ output/bonePoseOptimization/experiments/
 
 The summary begins with every run marked `pending`. After each attempt, its row is updated with identifiers, cost-model name, scalar hyperparameters, seed, status, timestamps, runtime, initial and best costs, function-evaluation count, CMA-ES stop reason, result path, and any error information.
 
-A run's status is `completed`, `failed` (an error was thrown during preparation or optimization), or `save_failed`. `save_failed` means the run itself finished but its `runResult.mat` could not be written, even after retrying (for example because antivirus or a sync client locked the file). Its costs remain in the summary, and the sweep continues with the next run.
+A run's status is `completed`, `failed` (an error was thrown during preparation or optimization), or `save_failed`. `save_failed` means the run itself finished but its `runResult.mat` could not be written, even after retrying (for example because antivirus or a sync client locked the file). Its costs remain in the summary, `errorStage` is `save`, `errorIdentifier` holds the identifier of the last save error, and the sweep continues with the next run. A run is also `save_failed` when the optimizer itself stopped on a MATLAB save error (`MATLAB:save:*`, for example CMA-ES failing to write `variablescmaes.mat` on a full or locked disk); its `errorStage` is then `optimization`, its costs are `NaN`, and `errorIdentifier` keeps the save error.
 
 ### 7.4. Evaluation tables
 

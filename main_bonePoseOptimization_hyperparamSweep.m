@@ -41,7 +41,8 @@
 %   2. Set "experiment.resumeFolder" to the experiment folder, for example
 %      "output/bonePoseOptimization/experiments/<name>_<timestamp>".
 %   3. Run this script again. Finished runs are skipped; missing, corrupt,
-%      and "save_failed" runs are run again. If the JSON no longer matches
+%      and "save_failed" runs (and runs stopped by a MATLAB:save error)
+%      are run again. If the JSON no longer matches
 %      the experiment, the script stops and names the changed settings.
 %   4. Set "resumeFolder" back to "" before starting a new experiment.
 

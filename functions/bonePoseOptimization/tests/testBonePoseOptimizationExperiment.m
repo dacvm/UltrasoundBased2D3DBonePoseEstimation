@@ -541,6 +541,8 @@ blockedResult = runBonePoseOptimizationExperiment(spec);
 % files were still written.
 verifyEqual(testCase, blockedResult.summaryTable.status, ["failed"; "save_failed"]);
 verifyEqual(testCase, blockedResult.summaryTable.errorStage(2), "save");
+% The identifier of the save error is kept, like for any other error.
+verifyNotEqual(testCase, blockedResult.summaryTable.errorIdentifier(2), "");
 verifyFalse(testCase, isfile(seed32FilePath));
 verifyTrue(testCase, isfile(fullfile(firstResult.experimentFolder, 'summary.csv')));
 
@@ -549,6 +551,41 @@ rmdir(blockingFolder);
 unblockedResult = runBonePoseOptimizationExperiment(spec);
 verifyEqual(testCase, unblockedResult.summaryTable.status, ["failed"; "failed"]);
 verifyTrue(testCase, isfile(seed32FilePath));
+clear temporaryOutputCleanup;
+end
+
+
+function testRunsStoppedBySaveErrorAreRerunOnResume(testCase)
+%TESTRUNSSTOPPEDBYSAVEERRORARERERUNONRESUME Check resume after a save error.
+% testCase supplies a valid active spec that is redirected to temporary output.
+% This function has no output.
+%
+% CMA-ES saves its own files, so an optimization can stop with a
+% MATLAB:save error on a full or locked disk. Such a run is saved as
+% "save_failed" (older sweeps saved it as "failed") and must be rerun on
+% resume, because the problem was the machine and not the settings.
+
+temporaryOutputRoot = tempname;
+temporaryOutputCleanup = onCleanup(@() removeTemporaryFolder(temporaryOutputRoot));
+spec = createPreparationFailureSpec(testCase.TestData.sweepSpec, temporaryOutputRoot);
+
+firstResult    = runBonePoseOptimizationExperiment(spec);
+seed31FilePath = char(firstResult.summaryTable.resultFilePath(1));
+seed32FilePath = char(firstResult.summaryTable.resultFilePath(2));
+
+% Turn both saved runs into runs stopped by a save error: seed 31 as a
+% current sweep stores it, seed 32 as an older sweep stored it.
+storeSaveError(seed31FilePath, 'save_failed');
+storeSaveError(seed32FilePath, 'failed');
+seed31StartTime = loadRunStartTime(seed31FilePath);
+seed32StartTime = loadRunStartTime(seed32FilePath);
+
+% The resume reruns both runs, so both get a new start time.
+spec.experiment.resumeFolder = firstResult.experimentFolder;
+resumedResult = runBonePoseOptimizationExperiment(spec);
+verifyEqual(testCase, resumedResult.summaryTable.status, ["failed"; "failed"]);
+verifyNotEqual(testCase, loadRunStartTime(seed31FilePath), seed31StartTime);
+verifyNotEqual(testCase, loadRunStartTime(seed32FilePath), seed32StartTime);
 clear temporaryOutputCleanup;
 end
 
@@ -651,6 +688,23 @@ function startTime = loadRunStartTime(resultFilePath)
 
 savedFile = load(resultFilePath, 'runResult');
 startTime = savedFile.runResult.run.startTime;
+end
+
+
+function storeSaveError(resultFilePath, status)
+%STORESAVEERROR Rewrite one runResult.mat as a run stopped by a save error.
+% resultFilePath is the run file and status the run status to store. The
+% start time is also changed, so a later rerun is visible even when it
+% happens within the same millisecond as the first run.
+
+savedFile = load(resultFilePath, 'runResult');
+runResult = savedFile.runResult;
+runResult.run.status         = status;
+runResult.run.startTime      = '2000-01-01 00:00:00.000';
+runResult.error.stage        = 'optimization';
+runResult.error.identifier   = 'MATLAB:save:cantWriteFile';
+runResult.error.message      = 'Unable to write file variablescmaes.mat.';
+save(resultFilePath, 'runResult');
 end
 
 
