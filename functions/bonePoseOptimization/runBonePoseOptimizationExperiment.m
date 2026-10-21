@@ -36,11 +36,14 @@ function experimentResult = runBonePoseOptimizationExperiment(experimentSpec)
 %       on, so one bad setting does not waste the rest of the night. The
 %       same holds when a result file cannot be written: the save is
 %       retried, and if it still fails the run is marked "save_failed".
+%       A run whose optimizer stopped on a save error (CMA-ES writing its
+%       own files) is also marked "save_failed", not "failed".
 %     - A stopped sweep can be resumed. When experimentSpec.experiment.
 %       resumeFolder is set, no new folder is created. The spec and plan
 %       are read back from that folder, every run with a valid
 %       runResult.mat is skipped, and only the remaining runs (missing,
-%       corrupt, or "save_failed") are run. Runs that "failed" are kept as
+%       corrupt, "save_failed", or stopped by any MATLAB:save error) are
+%       run. Runs that "failed" for another reason are kept as
 %       they are. One folder therefore always holds one self-consistent
 %       experiment, even when it took several MATLAB sessions to finish.
 %
@@ -401,10 +404,11 @@ function runResult = loadFinishedRunResult(resultFilePath)
 % resultFilePath is the expected runResult.mat of one run. runResult is the
 % saved struct when the file exists and loads, and [] otherwise.
 %
-% Every file that loads holds a "completed" or "failed" run: a run whose
-% save failed has no file at all. Both are kept. A "failed" run is not
-% retried, because its error usually comes from the settings and would
-% simply happen again.
+% "completed" and "failed" runs are kept. A "failed" run is not retried,
+% because its error usually comes from the settings and would simply happen
+% again. A run stopped by a save error (MATLAB:save:*) is rerun: the disk or
+% a file lock was the problem, not the settings. Older sweeps stored such
+% runs as "failed", so the error identifier is checked, not the status.
 
 runResult = [];
 if ~isfile(resultFilePath)
@@ -420,7 +424,7 @@ catch
     return;
 end
 
-if isfield(savedFile, 'runResult')
+if isfield(savedFile, 'runResult') && ~startsWith(savedFile.runResult.error.identifier, 'MATLAB:save:')
     runResult = savedFile.runResult;
 end
 end
@@ -475,10 +479,13 @@ try
 
 catch optimizationError
     % Keep one failed run from stopping later seeds or combinations.
+    % CMA-ES also writes its own files (variablescmaes.mat), so the error
+    % can be a disk problem instead of a real optimization failure; the
+    % status tells the two apart.
     optimizationResult  = struct();
     finalCost           = NaN;
     finalCostDetails    = struct();
-    runStatus           = "failed";
+    runStatus           = getFailureStatus(optimizationError);
     runError            = exceptionToStruct(optimizationError, 'optimization');
 end
 
@@ -511,7 +518,7 @@ function [runResult, summaryRecord] = createFailedRunResult(runRow, runConfig, c
 
 % Preparation failures have no meaningful optimizer duration, so use a zero duration.
 eventTime = currentTimestamp();
-runResult = createRunResultBase(runRow, runConfig, "failed", eventTime, eventTime, 0);
+runResult = createRunResultBase(runRow, runConfig, getFailureStatus(caughtError), eventTime, eventTime, 0);
 runResult.initial.poseVector    = zeros(6, 1);
 runResult.initial.cost          = initialCost;
 runResult.optimizationResult    = struct();
@@ -734,6 +741,25 @@ while isfolder(experimentFolder)
     experimentFolder = fullfile(outputFolder, sprintf('%s_%02d', baseName, collisionIndex));
 end
 mkdir(experimentFolder);
+end
+
+
+function runStatus = getFailureStatus(caughtError)
+%GETFAILURESTATUS Choose the status of a run that stopped with an error.
+% caughtError is the MException that stopped the run. runStatus is
+% "save_failed" when MATLAB could not write a file (identifier
+% MATLAB:save:*, for example CMA-ES saving variablescmaes.mat on a full or
+% locked disk), and "failed" for every other error.
+%
+% The difference matters on resume: a "failed" run is kept because its
+% error usually comes from the settings, but a save error comes from the
+% machine, so the run is worth running again.
+
+if startsWith(caughtError.identifier, 'MATLAB:save:')
+    runStatus = "save_failed";
+else
+    runStatus = "failed";
+end
 end
 
 
