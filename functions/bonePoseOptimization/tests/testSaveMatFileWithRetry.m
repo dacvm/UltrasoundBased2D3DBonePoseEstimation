@@ -42,12 +42,13 @@ function testNormalSaveWritesTargetAndNoPartialFile(testCase)
 targetFilePath = fullfile(testCase.TestData.folder, 'runResult.mat');
 variablesToSave.runResult = struct('value', 42);
 
-[isSaved, failureMessage] = saveMatFileWithRetry(targetFilePath, variablesToSave, 3, 0);
+[isSaved, failureMessage, failureIdentifier] = saveMatFileWithRetry(targetFilePath, variablesToSave, 3, 0);
 
 % The target must hold the variable under its field name, and the
 % temporary file must be gone after the rename.
 verifyTrue(testCase, isSaved);
 verifyEqual(testCase, failureMessage, '');
+verifyEqual(testCase, failureIdentifier, '');
 savedFile = load(targetFilePath, 'runResult');
 verifyEqual(testCase, savedFile.runResult.value, 42);
 verifyFalse(testCase, isfile(fullfile(testCase.TestData.folder, 'runResult_partial.mat')));
@@ -64,10 +65,12 @@ mkdir(blockingFolder);
 variablesToSave.runResult = struct('value', 42);
 
 % Every attempt fails; the function must report it instead of throwing.
-[isSaved, failureMessage] = saveMatFileWithRetry(targetFilePath, variablesToSave, 2, 0);
+[isSaved, failureMessage, failureIdentifier] = saveMatFileWithRetry(targetFilePath, variablesToSave, 2, 0);
 
 verifyFalse(testCase, isSaved);
 verifyNotEmpty(testCase, failureMessage);
+% The identifier is returned too, so callers can store it like any error.
+verifyNotEmpty(testCase, failureIdentifier);
 verifyFalse(testCase, isfile(targetFilePath));
 end
 

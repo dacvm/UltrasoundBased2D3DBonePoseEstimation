@@ -1,4 +1,4 @@
-function [isSaved, failureMessage] = saveMatFileWithRetry(filePath, variablesToSave, numberOfAttempts, pauseSeconds)
+function [isSaved, failureMessage, failureIdentifier] = saveMatFileWithRetry(filePath, variablesToSave, numberOfAttempts, pauseSeconds)
 %SAVEMATFILEWITHRETRY Save variables to a MAT file, retrying when Windows blocks it.
 % This function writes the variables to a temporary MAT file next to the
 % target, renames it to the target name, and tries again after a short
@@ -26,8 +26,12 @@ function [isSaved, failureMessage] = saveMatFileWithRetry(filePath, variablesToS
 %   pauseSeconds     - Seconds to wait between two attempts.
 %
 % Output:
-%   isSaved        - true when the target file was written, false otherwise.
-%   failureMessage - Message of the last failed attempt; '' when saved.
+%   isSaved           - true when the target file was written, false otherwise.
+%   failureMessage    - Message of the last failed attempt; '' when saved.
+%   failureIdentifier - Error identifier of the last failed attempt (for
+%                       example MATLAB:save:cantWriteFile); '' when saved.
+%                       Callers store it so a failed save can be recognised
+%                       by its identifier, like any other MATLAB error.
 
 %% PREPARE THE TEMPORARY FILE NAME
 
@@ -37,8 +41,9 @@ function [isSaved, failureMessage] = saveMatFileWithRetry(filePath, variablesToS
 [targetFolder, targetName] = fileparts(filePath);
 temporaryFilePath          = fullfile(targetFolder, [targetName '_partial.mat']);
 
-isSaved        = false;
-failureMessage = '';
+isSaved           = false;
+failureMessage    = '';
+failureIdentifier = '';
 
 %% TRY TO SAVE, PAUSING BETWEEN ATTEMPTS
 
@@ -53,15 +58,18 @@ for attemptNumber = 1:numberOfAttempts
         save(temporaryFilePath, '-struct', 'variablesToSave', '-v7.3');
         % 'f' replaces an existing target, e.g. a corrupt file from an
         % earlier attempt that is now being rerun.
-        [isMoved, moveMessage] = movefile(temporaryFilePath, filePath, 'f');
+        [isMoved, moveMessage, moveIdentifier] = movefile(temporaryFilePath, filePath, 'f');
         if isMoved
-            isSaved        = true;
-            failureMessage = '';
+            isSaved           = true;
+            failureMessage    = '';
+            failureIdentifier = '';
             return;
         end
-        failureMessage = moveMessage;
+        failureMessage    = moveMessage;
+        failureIdentifier = moveIdentifier;
     catch saveError
-        failureMessage = saveError.message;
+        failureMessage    = saveError.message;
+        failureIdentifier = saveError.identifier;
     end
 
     % Tell the user, so a slow sweep can be explained from the log later.

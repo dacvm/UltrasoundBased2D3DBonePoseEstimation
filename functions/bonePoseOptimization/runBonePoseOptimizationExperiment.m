@@ -259,9 +259,9 @@ for combinationIndex = 1:experimentPlan.numberOfCombinations
             % truth), so later analysis can load every run the same way and
             % simply filter on its status. Save it right away, like any run.
             [runResult, summaryRecord] = createFailedRunResult(runRow, seedConfig, preparationError, 'preparation', NaN, struct());
-            [isSaved, saveFailureMessage] = saveRunResult(runResult);
+            [isSaved, saveFailureMessage, saveFailureIdentifier] = saveRunResult(runResult);
             if ~isSaved
-                summaryRecord = markSaveFailed(summaryRecord, saveFailureMessage);
+                summaryRecord = markSaveFailed(summaryRecord, saveFailureMessage, saveFailureIdentifier);
             end
 
             % Mark this run as "failed" in the summary, with the error
@@ -313,9 +313,9 @@ for combinationIndex = 1:experimentPlan.numberOfCombinations
         % If the result file cannot be written even after retrying, the run
         % is marked "save_failed" and the sweep goes on: losing one result
         % is much better than losing every run still planned for the night.
-        [isSaved, saveFailureMessage] = saveRunResult(runResult);
+        [isSaved, saveFailureMessage, saveFailureIdentifier] = saveRunResult(runResult);
         if ~isSaved
-            summaryRecord = markSaveFailed(summaryRecord, saveFailureMessage);
+            summaryRecord = markSaveFailed(summaryRecord, saveFailureMessage, saveFailureIdentifier);
         end
         summaryTable = updateSummaryRow(summaryTable, runIndex, summaryRecord);
         saveExperimentSummary(experimentFolder, summaryTable);
@@ -653,11 +653,11 @@ summaryTable.errorMessage(runIndex)         = summaryRecord.errorMessage;
 end
 
 
-function [isSaved, failureMessage] = saveRunResult(runResult)
+function [isSaved, failureMessage, failureIdentifier] = saveRunResult(runResult)
 %SAVERUNRESULT Save one complete result immediately after its attempt.
 % runResult contains the output and its destination path. isSaved is false
-% when the file could not be written after all retries, and failureMessage
-% then explains why.
+% when the file could not be written after all retries; failureMessage and
+% failureIdentifier are then the message and identifier of the last error.
 
 % Windows locks (antivirus, sync clients) usually clear within seconds, so
 % a few attempts with a short pause are enough without stalling the sweep.
@@ -666,23 +666,26 @@ pauseSeconds     = 5;
 
 % The seed folder already exists because addRunOutputFolder created it.
 variablesToSave.runResult = runResult;
-[isSaved, failureMessage] = saveMatFileWithRetry(runResult.run.resultFilePath, ...
+[isSaved, failureMessage, failureIdentifier] = saveMatFileWithRetry(runResult.run.resultFilePath, ...
     variablesToSave, numberOfAttempts, pauseSeconds);
 end
 
 
-function summaryRecord = markSaveFailed(summaryRecord, failureMessage)
+function summaryRecord = markSaveFailed(summaryRecord, failureMessage, failureIdentifier)
 %MARKSAVEFAILED Mark a summary record whose result file could not be written.
 % summaryRecord is the record of a run that finished (or failed) normally,
-% failureMessage is the last save error, and the output is the same record
-% with status "save_failed".
+% failureMessage and failureIdentifier describe the last save error, and the
+% output is the same record with status "save_failed".
 %
 % The costs and timing stay in the record: the computation itself worked,
 % and the summary is now the only place where these numbers survive.
+% The identifier is kept (for example MATLAB:save:cantWriteFile) so this
+% row reads like a run stopped by a save error during optimization; only
+% errorStage ("save") tells the two apart.
 
 summaryRecord.status          = "save_failed";
 summaryRecord.errorStage      = "save";
-summaryRecord.errorIdentifier = "";
+summaryRecord.errorIdentifier = string(failureIdentifier);
 summaryRecord.errorMessage    = string(failureMessage);
 end
 

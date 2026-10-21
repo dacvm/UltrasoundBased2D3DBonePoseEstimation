@@ -541,6 +541,8 @@ blockedResult = runBonePoseOptimizationExperiment(spec);
 % files were still written.
 verifyEqual(testCase, blockedResult.summaryTable.status, ["failed"; "save_failed"]);
 verifyEqual(testCase, blockedResult.summaryTable.errorStage(2), "save");
+% The identifier of the save error is kept, like for any other error.
+verifyNotEqual(testCase, blockedResult.summaryTable.errorIdentifier(2), "");
 verifyFalse(testCase, isfile(seed32FilePath));
 verifyTrue(testCase, isfile(fullfile(firstResult.experimentFolder, 'summary.csv')));
 
