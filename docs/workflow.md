@@ -4,7 +4,7 @@ This page explains what happens when you run `main_bonePoseOptimization_hyperpar
 
 > Read the settings once, then for every combination of settings prepare the data once and run CMA-ES once per seed.
 
-Everything else (saving, resuming, catching errors) is bookkeeping around those two loops. When you read the code for the first time, you can skip the bookkeeping.
+Everything else (saving, resuming, catching errors) is bookkeeping around those two loops. When you read the code for the first time, you can skip the bookkeeping. Once the loops make sense, [Bookkeeping](bookkeeping.md) explains how a sweep that runs all night keeps its results safe when something goes wrong.
 
 The interactive script `main_bonePoseOptimization_oneSweep.m` uses the same functions. It runs exactly one combination with one seed, keeps the results in the workspace instead of saving them, and shows figures.
 
@@ -43,7 +43,7 @@ Colours: purple boxes handle **configuration**, coral boxes do the **science and
 
 - **Preparation is slow, and the seeds don't change it.** Loading the mesh and building the search trees can take a while. It depends on the settings of a combination, but not on the random seed. So it runs once per combination, and all seeds reuse the result.
 - **Each run is saved the moment it ends.** A sweep can run all night. If MATLAB crashes at 3 a.m., every finished run is already on disk, and the sweep can be resumed later (see [Running the project](running.md)).
-- **One failure does not stop the sweep.** A combination or seed that throws an error is recorded as `failed` in `summary.csv`, and the loop moves on.
+- **One failure does not stop the sweep.** A combination or seed that throws an error is recorded as `failed` in `summary.csv`, and the loop moves on. [Bookkeeping](bookkeeping.md) lists every failure case and what the sweep does about it.
 
 ## Functions worth knowing
 
@@ -141,5 +141,6 @@ The details and parameters of every model are in [Supported cost functions](cost
 
 ## Where to look next
 
+- To learn how results are saved, what can go wrong during a sweep, and how a stopped sweep continues: [Bookkeeping](bookkeeping.md).
 - To run a sweep or resume one: [Running the project](running.md).
 - To find out what each saved file contains: [Output structure](output-structure.md).

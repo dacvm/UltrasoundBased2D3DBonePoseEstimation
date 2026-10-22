@@ -40,4 +40,5 @@ See [Running the project](docs/running.md) for the required toolboxes and full d
 | [Running the project](docs/running.md) | Requirements, configuration, one sweep, hyperparameter sweep, resuming. |
 | [Output structure](docs/output-structure.md) | Output folders, summary and evaluation tables, `runResult.mat`. |
 | [Processing workflow](docs/workflow.md) | How configuration, planning, CMA-ES, and cost dispatch fit together. |
+| [Bookkeeping](docs/bookkeeping.md) | Saving results, failure cases, and resuming a stopped sweep. |
 | [Adding a new cost function](docs/adding-a-cost-function.md) | Naming rules and the recipe for a new cost model. |

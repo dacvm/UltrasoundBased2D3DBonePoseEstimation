@@ -10,6 +10,7 @@ These pages explain how the project works and how to use it. If you are new, rea
 | [Running the project](running.md) | Requirements, config setup, running one sweep, running and resuming a hyperparameter sweep. |
 | [Output structure](output-structure.md) | Folders and files written by each run, summary tables, evaluation tables, and `runResult.mat`. |
 | [Processing workflow](workflow.md) | How configuration, planning, input preparation, CMA-ES, and the cost dispatcher fit together. |
+| [Bookkeeping](bookkeeping.md) | How results are saved, what can go wrong during a sweep, and how a stopped sweep is resumed. |
 | [Adding a new cost function](adding-a-cost-function.md) | Naming rules and the step-by-step recipe for a new cost model. |
 
 The data-preparation tools have their own documentation in [`tools/README.md`](../tools/README.md).
