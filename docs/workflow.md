@@ -16,18 +16,18 @@ flowchart TD
     classDef compute fill:#FAECE7,stroke:#993C1D,color:#712B13,stroke-width:0.5px
     classDef book    fill:#F1EFE8,stroke:#5F5E5A,color:#444441,stroke-width:0.5px
 
-    A("<b>main_..._hyperparamSweep.m</b>"):::book
-    B("<b>createBonePoseOptimizationExperimentConfig</b><br/><small>JSON to checked experimentSpec, once</small>"):::config
-    C("<b>createBonePoseOptimizationExperimentPlan</b><br/><small>Combinations x seeds table, once</small>"):::config
+    A("<span style='display:inline-block;width:420px'><b>main_bonePoseOptimization_hyperparamSweep.m</b></span>"):::book
+    B("<span style='display:inline-block;width:420px'><b>createBonePoseOptimizationExperimentConfig</b><br/><small>JSON to checked experimentSpec, once</small></span>"):::config
+    C("<span style='display:inline-block;width:420px'><b>createBonePoseOptimizationExperimentPlan</b><br/><small>Combinations x seeds table, once</small></span>"):::config
 
-    subgraph combos ["runBonePoseOptimizationExperiment: loop over combinations"]
-        E("<b>createBonePoseOptimizationRunConfig</b><br/><small>Plan row to plain one-run config</small>"):::config
-        F("<b>prepareBonePoseOptimizationInputs</b><br/><small>Slow setup: mesh, planes, PD-tree</small>"):::compute
-        G("<b>bonePoseCostFunction</b><br/><small>Initial cost at the start pose</small>"):::compute
+    subgraph combos ["<span style='display:inline-block;width:480px'>runBonePoseOptimizationExperiment: loop over combinations</span>"]
+        E("<span style='display:inline-block;width:420px'><b>createBonePoseOptimizationRunConfig</b><br/><small>Plan row to plain one-run config</small></span>"):::config
+        F("<span style='display:inline-block;width:420px'><b>prepareBonePoseOptimizationInputs</b><br/><small>Slow setup: mesh, planes, PD-tree</small></span>"):::compute
+        G("<span style='display:inline-block;width:420px'><b>bonePoseCostFunction</b><br/><small>Initial cost at the start pose</small></span>"):::compute
         subgraph seeds ["Loop over seeds"]
-            H("<b>createBonePoseOptimizationRunConfig</b><br/><small>Same, plus seed and output folder</small>"):::config
-            I("<b>runBonePoseOptimization</b><br/><small>CMA-ES search, via runOneSeed</small>"):::compute
-            J("<b>saveRunResult + saveExperimentSummary</b>"):::book
+            H("<span style='display:inline-block;width:420px'><b>createBonePoseOptimizationRunConfig</b><br/><small>Same, plus seed and output folder</small></span>"):::config
+            I("<span style='display:inline-block;width:420px'><b>runBonePoseOptimization</b><br/><small>CMA-ES search, via runOneSeed</small></span>"):::compute
+            J("<span style='display:inline-block;width:420px'><b>saveRunResult + saveExperimentSummary</b></span>"):::book
         end
     end
 
@@ -98,13 +98,13 @@ flowchart TD
     classDef compute fill:#FAECE7,stroke:#993C1D,color:#712B13,stroke-width:0.5px
     classDef book    fill:#F1EFE8,stroke:#5F5E5A,color:#444441,stroke-width:0.5px
 
-    A("<b>cmaes_parfor</b><br/><small>External optimizer, proposes 6D vectors</small>"):::book
-    B("<b>bonePoseCostFunction</b><br/><small>Reads config.cost.model</small>"):::compute
-    C("<b>getBonePoseCostDefinition</b><br/><small>Registry: model name to cost_*.m</small>"):::config
-    D("<b>cost_intensityLine</b><br/><small>Image brightness</small>"):::compute
-    E("<b>cost_ICPLike</b><br/><small>Point-to-mesh</small>"):::compute
-    F("<b>cost_PIMLOP</b><br/><small>PD-tree matching</small>"):::compute
-    G("<b>stateVectorToTMatrix</b><br/><small>6D vector to T_CT_ref candidate</small>"):::compute
+    A("<span style='display:inline-block;width:380px'><b>cmaes_parfor</b><br/><small>External optimizer, proposes 6D vectors</small></span>"):::book
+    B("<span style='display:inline-block;width:380px'><b>bonePoseCostFunction</b><br/><small>Reads config.cost.model</small></span>"):::compute
+    C("<span style='display:inline-block;width:380px'><b>getBonePoseCostDefinition</b><br/><small>Registry: model name to cost_*.m</small></span>"):::config
+    D("<span style='display:inline-block;width:160px'><b>cost_intensityLine</b><br/><small>Image brightness</small></span>"):::compute
+    E("<span style='display:inline-block;width:160px'><b>cost_ICPLike</b><br/><small>Point-to-mesh</small></span>"):::compute
+    F("<span style='display:inline-block;width:160px'><b>cost_PIMLOP</b><br/><small>PD-tree matching</small></span>"):::compute
+    G("<span style='display:inline-block;width:380px'><b>stateVectorToTMatrix</b><br/><small>6D vector to T_CT_ref candidate</small></span>"):::compute
 
     A --> B --> C
     C --> D & E & F
