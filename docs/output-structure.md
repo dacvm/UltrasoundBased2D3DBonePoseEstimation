@@ -6,11 +6,11 @@ The one-sweep workflow stores raw CMA-ES files below the configured output folde
 
 ```text
 output/bonePoseOptimization/oneSweeps/
-+-- run_yyyyMMdd_HHmmss/
-    +-- variablescmaes.mat
-    +-- outcmaes*.dat
-    +-- functions/optimizers/CMAES/OptData/
-        +-- OptSaver.mat
+└── run_yyyyMMdd_HHmmss/
+    ├── variablescmaes.mat
+    ├── outcmaes*.dat
+    └── functions/optimizers/CMAES/OptData/
+        └── OptSaver.mat
 ```
 
 `variablescmaes.mat` and the `outcmaes*.dat` files contain the raw optimizer state, history, and diagnostics produced by the bundled CMA-ES implementation. `OptSaver.mat` is the progress file expected by that implementation.
@@ -21,27 +21,27 @@ Every sweep creates a separate experiment folder. Its name combines `experiment.
 
 ```text
 output/bonePoseOptimization/experiments/
-+-- <experiment-name>_yyyyMMdd_HHmmss_SSS/
-    +-- experiment_config_snapshot.json
-    +-- experiment_plan.mat
-    +-- experiment_log.txt
-    +-- validation_context.mat
-    +-- summary.csv
-    +-- summary.mat
-    +-- runs/
-        +-- combination_0001/
-        |   +-- seed_1001/
-        |   |   +-- runResult.mat
-        |   |   +-- cmaes/
-        |   |       +-- run_yyyyMMdd_HHmmss/
-        |   |           +-- variablescmaes.mat
-        |   |           +-- outcmaes*.dat
-        |   |           +-- functions/optimizers/CMAES/OptData/
-        |   |               +-- OptSaver.mat
-        |   +-- seed_1002/
-        |       +-- ...
-        +-- combination_0002/
-            +-- ...
+└── <experiment-name>_yyyyMMdd_HHmmss_SSS/
+    ├── experiment_config_snapshot.json
+    ├── experiment_plan.mat
+    ├── experiment_log.txt
+    ├── validation_context.mat
+    ├── summary.csv
+    ├── summary.mat
+    └── runs/
+        ├── combination_0001/
+        │   ├── seed_1001/
+        │   │   ├── runResult.mat
+        │   │   └── cmaes/
+        │   │       └── run_yyyyMMdd_HHmmss/
+        │   │           ├── variablescmaes.mat
+        │   │           ├── outcmaes*.dat
+        │   │           └── functions/optimizers/CMAES/OptData/
+        │   │               └── OptSaver.mat
+        │   └── seed_1002/
+        │       └── ...
+        └── combination_0002/
+            └── ...
 ```
 
 `validation_context.mat` is written after the first successful input preparation. It may be absent if every combination fails before validation data can be saved.
@@ -94,26 +94,26 @@ Each seed folder contains one `runResult.mat`, including failed runs. Its top-le
 
 ```text
 runResult
-+-- run
-|   +-- runNumber, runId
-|   +-- combinationNumber, combinationId
-|   +-- seed, status
-|   +-- startTime, endTime, runtimeSeconds
-|   +-- resultFilePath
-+-- configuration
-+-- initial
-|   +-- poseVector
-|   +-- cost
-+-- optimizationResult
-+-- final
-|   +-- cost
-|   +-- costDetails
-+-- validationReference
-+-- error
-    +-- stage
-    +-- identifier
-    +-- message
-    +-- stack
+├── run
+│   ├── runNumber, runId
+│   ├── combinationNumber, combinationId
+│   ├── seed, status
+│   ├── startTime, endTime, runtimeSeconds
+│   └── resultFilePath
+├── configuration
+├── initial
+│   ├── poseVector
+│   └── cost
+├── optimizationResult
+├── final
+│   ├── cost
+│   └── costDetails
+├── validationReference
+└── error
+    ├── stage
+    ├── identifier
+    ├── message
+    └── stack
 ```
 
 For a completed run, `optimizationResult` contains the initial and best pose vectors, initial and best rigid transforms, search bounds, sigma, raw CMA-ES outputs, seed, and optimizer output paths. `final.costDetails` contains the final candidate mesh, per-plane intersection geometry, and the diagnostics of the selected cost model, for example the per-plane evidence and sample points of the intensity cost, or the separated cost terms of a combined model.
