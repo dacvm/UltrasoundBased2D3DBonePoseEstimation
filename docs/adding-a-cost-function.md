@@ -11,14 +11,14 @@ flowchart TD
     classDef fixed  fill:#E6F1FB,stroke:#185FA5,color:#0C447C,stroke-width:0.5px
     classDef change fill:#FAEEDA,stroke:#BA7517,color:#854F0B,stroke-width:0.5px
 
-    J("<span style='display:inline-block;width:420px'><b>optconfig_oneSweep_#lt;name#gt;.json</b><br/><small>cost.model, fixedParameters, hyperparameters</small></span>"):::change
-    V("<span style='display:inline-block;width:420px'><b>validate_cost_#lt;name#gt;.m</b><br/><small>Checks the parameters, once, when the JSON is read</small></span>"):::change
+    J("<span style='display:inline-block;width:420px'><b>optconfig_oneSweep_name.json</b><br/><small>cost.model, fixedParameters, hyperparameters</small></span>"):::change
+    V("<span style='display:inline-block;width:420px'><b>validate_cost_name.m</b><br/><small>Checks the parameters, once, when the JSON is read</small></span>"):::change
     P("<span style='display:inline-block;width:420px'><b>Experiment plan + createBonePoseOptimizationRunConfig</b><br/><small>Picks one value per parameter into config.cost.parameters</small></span>"):::fixed
     D("<span style='display:inline-block;width:420px'><b>prepareBonePoseOptimizationInputs</b><br/><small>Slow setup, once per combination: fills data</small></span>"):::fixed
     C("<span style='display:inline-block;width:420px'><b>CMA-ES</b><br/><small>Proposes thousands of 6D pose vectors</small></span>"):::fixed
     B("<span style='display:inline-block;width:420px'><b>bonePoseCostFunction</b><br/><small>Reads config.cost.model</small></span>"):::fixed
     R("<span style='display:inline-block;width:420px'><b>getBonePoseCostDefinition.m</b><br/><small>Registry: your new case links the name to your files</small></span>"):::change
-    E("<span style='display:inline-block;width:420px'><b>cost_#lt;name#gt;.m</b><br/><small>Scores one pose, returns one number</small></span>"):::change
+    E("<span style='display:inline-block;width:420px'><b>cost_name.m</b><br/><small>Scores one pose, returns one number</small></span>"):::change
 
     J --> V --> P --> D --> C --> B --> R --> E
     E -- cost --> C
