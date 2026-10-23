@@ -74,29 +74,29 @@ These local files are git-ignored copies of the templates in `config/`. A script
 
 **How paths are resolved.** `project.root` is resolved relative to the folder of the JSON file; the templates use `".."`, which is the repository root. All other paths in the JSON (the MAT files, `outputFolder`, `resumeFolder`) are then resolved relative to `project.root`, not to MATLAB's current folder. Absolute paths also work.
 
-The JSON has these blocks. All fields are required unless the table says otherwise.
+The JSON has these blocks. A block is a top-level key, and its fields sit one level below it. All fields are required unless the table says otherwise.
 
-| Field | Meaning |
-| --- | --- |
-| `schemaVersion` | Must be `4`. Older configurations are not supported. |
-| `project.root` | The repository root, relative to the JSON file. |
-| `project.functionsFolderName` | The folder that holds the project functions, normally `"functions"`. |
-| `input.bone` | One bone code, such as `"F"` for femur or `"T"` for tibia. It picks the matching record from every MAT file. |
-| `input.validSnapshotsMatFile` | Path to the snapshots MAT file. |
-| `input.boneSurfaceMatFile` | *Optional.* Path to the bone-surface MAT file. Leave it out or set it to `""` when the cost model does not need it. |
-| `input.ctPostProcessedMatFile` | Path to the CT MAT file. |
-| `input.coarseRegistrationMatFile` | Path to the coarse-registration MAT file. |
-| `intersection.normalFacingToleranceDeg` | How far a mesh face may turn away from the probe and still count as visible, in degrees. Can be a list of values to sweep. |
-| `cost.model` | The cost model name, for example `"PIMLOP"`. See [Supported cost functions](cost-functions.md). |
-| `cost.fixedParameters` | Cost settings with one value, shared by all runs. |
-| `cost.hyperparameters` | Cost settings to sweep. Each one is a list of candidate values. |
-| `logging.printPreparationProgress` | `true` prints a short summary after input preparation. |
-| `logging.printEvaluationProgress` | `true` prints progress during cost evaluations. Keep it `false` for long sweeps. |
-| `optimizer.*` | *Optional.* The CMA-ES settings in [section 5](#5-optimizer-parameters). A missing setting gets its default. |
-| `experiment.name` | Name of the experiment, used in the output folder name. Only letters, numbers, `_`, and `-`, and it must start with a letter or number. |
-| `experiment.seeds` | List of distinct positive integer seeds. Every combination is run once per seed. |
-| `experiment.outputFolder` | Where results are written. |
-| `experiment.resumeFolder` | *Optional, sweep only.* An experiment folder to continue. Keep it `""` for a new experiment. See [Running the project](running.md#51-resuming-a-stopped-sweep). |
+| Block | Field | Meaning |
+| --- | --- | --- |
+| `schemaVersion` | | Must be `4`. Older configurations are not supported. |
+| `project` | `root` | The repository root, relative to the JSON file. |
+| | `functionsFolderName` | The folder that holds the project functions, normally `"functions"`. |
+| `input` | `bone` | One bone code, such as `"F"` for femur or `"T"` for tibia. It picks the matching record from every MAT file. |
+| | `validSnapshotsMatFile` | Path to the snapshots MAT file. |
+| | `boneSurfaceMatFile` | *Optional.* Path to the bone-surface MAT file. Leave it out or set it to `""` when the cost model does not need it. |
+| | `ctPostProcessedMatFile` | Path to the CT MAT file. |
+| | `coarseRegistrationMatFile` | Path to the coarse-registration MAT file. |
+| `intersection` | `normalFacingToleranceDeg` | How far a mesh face may turn away from the probe and still count as visible, in degrees. Can be a list of values to sweep. |
+| `cost` | `model` | The cost model name, for example `"PIMLOP"`. See [Supported cost functions](cost-functions.md). |
+| | `fixedParameters` | Cost settings with one value, shared by all runs. |
+| | `hyperparameters` | Cost settings to sweep. Each one is a list of candidate values. |
+| `logging` | `printPreparationProgress` | `true` prints a short summary after input preparation. |
+| | `printEvaluationProgress` | `true` prints progress during cost evaluations. Keep it `false` for long sweeps. |
+| `optimizer` | *all settings* | *Optional.* The CMA-ES settings in [section 5](#5-optimizer-parameters). A missing setting gets its default. |
+| `experiment` | `name` | Name of the experiment, used in the output folder name. Only letters, numbers, `_`, and `-`, and it must start with a letter or number. |
+| | `seeds` | List of distinct positive integer seeds. Every combination is run once per seed. |
+| | `outputFolder` | Where results are written. |
+| | `resumeFolder` | *Optional, sweep only.* An experiment folder to continue. Keep it `""` for a new experiment. See [Running the project](running.md#51-resuming-a-stopped-sweep). |
 
 A one-sweep JSON must give exactly one value in every list (`normalFacingToleranceDeg`, each hyperparameter, and `seeds`). Otherwise the one-sweep script stops, because the file is really a sweep.
 
