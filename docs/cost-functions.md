@@ -4,7 +4,7 @@ This is an ongoing list. The current framework registers the following five cost
 
 In the tables below, a **fixed parameter** has one value for the complete experiment. A **hyperparameter** is an array of candidate values; the experiment planner includes it in the Cartesian product used to create parameter combinations.
 
-## `intensityLine`: smoothed intensity along the predicted bone
+## 1. `intensityLine`: smoothed intensity along the predicted bone
 
 This model cuts the candidate CT mesh with every ultrasound plane and keeps the probe-facing parts of the cut, which are the surfaces ultrasound should show as a bright echo. It then reads the image along those lines:
 
@@ -34,7 +34,7 @@ A pose whose intersection is short but lies on a very bright spot can score well
 
 This model does not require `boneSurfaceMatFile`.
 
-## `ICPLike`: one-way 3D point-to-mesh distance
+## 2. `ICPLike`: one-way 3D point-to-mesh distance
 
 This model transforms the CT mesh to the candidate pose and measures the distance from every ultrasound-derived 3D bone-surface point to its closest location on the mesh triangles. The returned cost is the root-mean-square of all point-to-surface distances in millimetres. It is one-way: measured ultrasound points must agree with the mesh, but unobserved regions of the mesh do not require corresponding ultrasound points.
 
@@ -47,7 +47,7 @@ This model transforms the CT mesh to the candidate pose and measures the distanc
 
 This model requires aligned 3D bone-surface measurements from `boneSurfaceMatFile`.
 
-## `intensityICP`: combined intensity and 3D distance
+## 3. `intensityICP`: combined intensity and 3D distance
 
 This model evaluates `intensityLine` and `ICPLike` at the same candidate pose. It divides the point-to-mesh RMSE by a reference distance to make that term dimensionless, then returns the convex blend
 
@@ -70,7 +70,7 @@ A `weight` of `1` selects only the smoothed-intensity term, while `0` selects on
 
 This model requires aligned 3D bone-surface measurements from `boneSurfaceMatFile`.
 
-## `PIMLOP`: most-likely oriented point match
+## 4. `PIMLOP`: most-likely oriented point match
 
 This model implements the match error of P-IMLOP (Billings et al. 2015; see [`literatures/P-IMLOP/notes.md`](../literatures/P-IMLOP/notes.md)). Every ultrasound bone-surface measurement `x` has a 3D position and a 2D in-plane normal. For each measurement, the model finds the most likely point `y` on any CT mesh triangle and sums the resulting match errors:
 
@@ -95,7 +95,7 @@ cost = sum over all retained measurements of min_y E_match(x, y)
 
 This model requires aligned 3D bone-surface measurements with 2D normals (`surfaceNormalXY` and `surfaceNormalMask`) from `boneSurfaceMatFile`. One evaluation takes several seconds, so keep `populationSize` and `maxFunctionEvaluations` small for first runs. The reference demos and regression tests in `devs/pimlopDevelopment/` still run independently.
 
-## `intensityPIMLOP`: combined intensity and P-IMLOP
+## 5. `intensityPIMLOP`: combined intensity and P-IMLOP
 
 This model evaluates `intensityLine` and `PIMLOP` at the same candidate pose and blends them with one weight, in the same way `intensityICP` blends intensity with the 3D point-to-mesh distance. The P-IMLOP total is a sum over all retained measurements, so it grows with the number of segmented points. It is therefore averaged over the measurements before it is blended:
 

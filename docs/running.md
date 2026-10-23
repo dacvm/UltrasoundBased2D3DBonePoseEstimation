@@ -1,6 +1,6 @@
 # Running the project
 
-## Requirements
+## 1. Requirements
 
 - MATLAB R2024b with support for `triangulation`, tables, JSON decoding, and the functions used by the preparation tools.
 - Prepared input MAT files from the workflows under `tools/`.
@@ -20,7 +20,7 @@ Running only the `main_bonePoseOptimization_*.m` scripts needs just the first tw
 
 The external CMA-ES implementation used by this project is already stored under `functions/external/`. Do not modify files in that directory when changing project-specific optimization behavior.
 
-## Configure the input paths and settings
+## 2. Configure the input paths and settings
 
 The files in `config/` are **templates**. They are tracked by git and hold a complete, working set of settings for each cost model. The main scripts do not read them directly. Each script reads a **local copy** whose name ends in `.local.json`. Git ignores local copies, so you can edit them freely without changing tracked files.
 
@@ -56,7 +56,7 @@ Files under `config/legacy/` are retired configurations kept for reference only.
 
 Set `project.root` relative to the configuration directory or provide an absolute path. Local copies sit next to the templates, so relative paths work the same in both. The supplied configuration files use `".."`, which resolves to this repository root. Input paths are then resolved relative to that project root.
 
-## Start MATLAB in the repository root
+## 3. Start MATLAB in the repository root
 
 Both main scripts build the configuration path from `pwd`. Change MATLAB's current folder to the repository root (the folder containing `README.md`) before running either script:
 
@@ -64,7 +64,7 @@ Both main scripts build the configuration path from `pwd`. Change MATLAB's curre
 cd('D:/path/to/bmodeimage_3dspace')
 ```
 
-## Run one sweep first
+## 4. Run one sweep first
 
 ```matlab
 main_bonePoseOptimization_oneSweep
@@ -80,7 +80,7 @@ Use this workflow to confirm that:
 - The initial and optimized costs are finite.
 - Search bounds, population size, evaluation budget, and parallel settings are practical.
 
-## Run the hyperparameter sweep
+## 5. Run the hyperparameter sweep
 
 ```matlab
 main_bonePoseOptimization_hyperparamSweep
@@ -88,7 +88,7 @@ main_bonePoseOptimization_hyperparamSweep
 
 The sweep creates a new timestamped experiment on every invocation, unless `experiment.resumeFolder` is set (see below). Before starting, MATLAB prints the number of combinations, seeds, planned runs, and maximum planned CMA-ES function evaluations. During execution, each completed or failed run is written to disk and the summary files are refreshed.
 
-### Resuming a stopped sweep
+### 5.1. Resuming a stopped sweep
 
 If a sweep stops before it finishes (crash, Windows restart, Ctrl+C), it can be continued in the same experiment folder instead of starting over:
 
@@ -98,7 +98,7 @@ If a sweep stops before it finishes (crash, Windows restart, Ctrl+C), it can be 
 
 The runner then takes the experiment specification and plan from `experiment_plan.mat` in that folder, not from the JSON. Runs with a `runResult.mat` that loads are skipped; runs whose file is missing or corrupt, and runs marked `save_failed` or stopped by a `MATLAB:save:*` error (also in older sweeps that stored them as `failed`), are run again. Other `failed` runs are kept, because their errors usually come from the settings. If the JSON differs from the folder's `experiment_config_snapshot.json` (ignoring `resumeFolder` itself), the script stops and names the changed fields, so edited settings are never silently ignored. Set `resumeFolder` back to `""` before starting a new experiment.
 
-## Evaluate a finished sweep
+## 6. Evaluate a finished sweep
 
 ```matlab
 main_bonePoseOptimization_evaluation
@@ -112,9 +112,9 @@ The evaluation compares every completed run with the ground truth and ranks the 
 
 The script needs the experiment's `experiment_plan.mat`, `summary.mat`, and `validation_context.mat`. The plan must be schema version 4 and contain `parameterNames`, the list that says which summary columns are swept parameters and in which order. Older experiment plans without this list are not guessed from the table; inspect them with the code version that created them.
 
-The tables are written to an `evaluation/` folder inside the experiment folder. [Output structure](output-structure.md#evaluation-output) describes them.
+The tables are written to an `evaluation/` folder inside the experiment folder. [Output structure](output-structure.md#7-evaluation-output) describes them.
 
-### Arranging the heatmaps
+### 6.1. Arranging the heatmaps
 
 `heatmapSettings` controls one figure made of small heatmaps. `xParameter` and `yParameter` form the cells inside each heatmap. `panelRowParameter` and `panelColumnParameter` spread the remaining parameter values over rows and columns of heatmaps; leave them `''` when they are not needed. When the figure should show only one slice, give a parameter a single value in `parametersToHold` instead. This changes only the figure, not the optimization results.
 

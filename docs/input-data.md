@@ -18,7 +18,7 @@ The optimization configuration points to three required MAT files and one option
 
 The prepared files must describe the same specimen, bone, pin selection, marker geometry, units, and coordinate-frame conventions. The `input.bone` setting selects the target bone code, such as `F` for femur or `T` for tibia.
 
-## Optimization code organization
+## 1. Optimization code organization
 
 The three stable workflow entry points remain directly under
 `functions/bonePoseOptimization/`: cost evaluation, one optimization run, and
@@ -31,7 +31,7 @@ one experiment run. Supporting functions are grouped one level below:
 - `evaluationMetric/` and `evaluationPlot/` analyze saved results.
 - `tests/` test codes that verifies the active pipeline.
 
-## Optimizer parameters
+## 2. Optimizer parameters
 
 The optimizer represents a candidate as a local six-value perturbation `[vx; vy; vz; wx; wy; wz]` around the coarse CT-to-reference transform. Translation is expressed in the mesh length unit, normally millimetres, and rotation is configured in degrees before conversion to radians.
 

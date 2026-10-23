@@ -15,7 +15,7 @@ A few words used on this page:
 
 **Start with `summary.csv`.** It has one row per run with its status and costs, and points to that run's `runResult.mat`.
 
-## The experiment folder at a glance
+## 1. The experiment folder at a glance
 
 ```text
 output/bonePoseOptimization/experiments/
@@ -48,7 +48,7 @@ output/bonePoseOptimization/experiments/
 
 The folder name is `experiment.name` from the JSON plus a timestamp, so a new sweep never overwrites an old one.
 
-## Which file answers which question
+## 2. Which file answers which question
 
 | I want to know… | Look in |
 | --- | --- |
@@ -60,7 +60,7 @@ The folder name is `experiment.name` from the JSON plus a timestamp, so a new sw
 | Why the whole sweep stopped | `experiment_log.txt` |
 | How CMA-ES converged in one run | `outcmaes*.dat` in that run's `cmaes/` folder |
 
-## Experiment-level files
+## 3. Experiment-level files
 
 These files describe the experiment as a whole. They sit directly in the experiment folder.
 
@@ -73,7 +73,7 @@ These files describe the experiment as a whole. They sit directly in the experim
 | `experiment_log.txt` | Everything MATLAB printed during the sweep: progress, CMA-ES output, save retries, and the full error report if the sweep stopped. |
 | `validation_context.mat` | The ground-truth bone pose and mesh, plus the initial CT-to-reference and bone-to-reference transforms that every run starts from. Stored once here instead of in every run. Written after the first successful input preparation, so it is missing if every combination fails before that. |
 
-## The summary table
+## 4. The summary table
 
 `summary.csv` has one row for every planned run, in plan order. When the sweep starts, every row is `pending`; after each run, its row is filled in.
 
@@ -96,7 +96,7 @@ The three final statuses, in short:
 
 [Bookkeeping](bookkeeping.md) explains when each status is used, and which runs a resumed sweep runs again.
 
-## One run: `runResult.mat`
+## 5. One run: `runResult.mat`
 
 Each seed folder holds one `runResult.mat`, also for a failed run. It contains one struct, `runResult`, with everything needed to understand that run on its own:
 
@@ -135,7 +135,7 @@ The fields you will use most:
 
 A failed run keeps the same shape where it can. Values that do not exist are `NaN` or empty structs, and `error` records the stage (`preparation` or `optimization`) and the full MATLAB exception.
 
-## Raw CMA-ES files
+## 6. Raw CMA-ES files
 
 Each run's `cmaes/run_yyyyMMdd_HHmmss/` folder holds what the bundled CMA-ES code writes by itself. You rarely need it; `runResult.mat` already contains the important results.
 
@@ -143,9 +143,9 @@ Each run's `cmaes/run_yyyyMMdd_HHmmss/` folder holds what the bundled CMA-ES cod
 - `outcmaes*.dat`: the history per generation (costs, step sizes, axis lengths). Read these to see how the search converged.
 - `functions/optimizers/CMAES/OptData/OptSaver.mat`: a progress file. The external CMA-ES code loads it from a fixed path relative to its current folder, so the run folder recreates that path. Its odd location is expected, not a bug.
 
-## Evaluation output
+## 7. Evaluation output
 
-`main_bonePoseOptimization_evaluation.m` writes its tables to an `evaluation/` folder inside the experiment folder. Running it again overwrites them. How to run and configure it is in [Running the project](running.md#evaluate-a-finished-sweep).
+`main_bonePoseOptimization_evaluation.m` writes its tables to an `evaluation/` folder inside the experiment folder. Running it again overwrites them. How to run and configure it is in [Running the project](running.md#6-evaluate-a-finished-sweep).
 
 | File | What it holds |
 | --- | --- |
@@ -155,7 +155,7 @@ Each run's `cmaes/run_yyyyMMdd_HHmmss/` folder holds what the bundled CMA-ES cod
 
 The figures are only shown, not saved.
 
-## One-sweep output
+## 8. One-sweep output
 
 `main_bonePoseOptimization_oneSweep.m` is for checking one setup interactively. Its results (`optimizationResult`, the initial details, the prepared data, and the validation data) stay in the MATLAB workspace. Save them yourself if you need them.
 
@@ -170,9 +170,9 @@ output/bonePoseOptimization/oneSweeps/<cost-model>/
         └── OptSaver.mat
 ```
 
-These are the same files as in [Raw CMA-ES files](#raw-cma-es-files).
+These are the same files as in [Raw CMA-ES files](#6-raw-cma-es-files).
 
-## Where to look next
+## 9. Where to look next
 
 - To run a sweep and evaluate it: [Running the project](running.md).
 - To understand a status other than `completed`, or to resume a stopped sweep: [Bookkeeping](bookkeeping.md).
