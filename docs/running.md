@@ -97,3 +97,25 @@ If a sweep stops before it finishes (crash, Windows restart, Ctrl+C), it can be 
 3. Run `main_bonePoseOptimization_hyperparamSweep` again.
 
 The runner then takes the experiment specification and plan from `experiment_plan.mat` in that folder, not from the JSON. Runs with a `runResult.mat` that loads are skipped; runs whose file is missing or corrupt, and runs marked `save_failed` or stopped by a `MATLAB:save:*` error (also in older sweeps that stored them as `failed`), are run again. Other `failed` runs are kept, because their errors usually come from the settings. If the JSON differs from the folder's `experiment_config_snapshot.json` (ignoring `resumeFolder` itself), the script stops and names the changed fields, so edited settings are never silently ignored. Set `resumeFolder` back to `""` before starting a new experiment.
+
+## Evaluate a finished sweep
+
+```matlab
+main_bonePoseOptimization_evaluation
+```
+
+The evaluation compares every completed run with the ground truth and ranks the parameter combinations. The settings sit at the top of the script, not in a JSON file:
+
+- `experimentFolderName`: the name of the experiment folder to evaluate, for example `intensityLine_20261009_165543_181`. The script looks for it under `output/bonePoseOptimization/experiments/`.
+- `topCombinationCount`: how many of the best combinations the seed-distribution plot shows, so the plot stays readable for a large sweep.
+- `heatmapSettings`: how the paneled heatmap figure is arranged (see below).
+
+The script needs the experiment's `experiment_plan.mat`, `summary.mat`, and `validation_context.mat`. The plan must be schema version 4 and contain `parameterNames`, the list that says which summary columns are swept parameters and in which order. Older experiment plans without this list are not guessed from the table; inspect them with the code version that created them.
+
+The tables are written to an `evaluation/` folder inside the experiment folder. [Output structure](output-structure.md#evaluation-output) describes them.
+
+### Arranging the heatmaps
+
+`heatmapSettings` controls one figure made of small heatmaps. `xParameter` and `yParameter` form the cells inside each heatmap. `panelRowParameter` and `panelColumnParameter` spread the remaining parameter values over rows and columns of heatmaps; leave them `''` when they are not needed. When the figure should show only one slice, give a parameter a single value in `parametersToHold` instead. This changes only the figure, not the optimization results.
+
+Every swept parameter must have exactly one of these roles. This way a new cost-model parameter can never be hidden from the figure by accident. To look at a second arrangement, copy the settings block under a new name and call `plotHyperparameterPaneledHeatmaps` again.

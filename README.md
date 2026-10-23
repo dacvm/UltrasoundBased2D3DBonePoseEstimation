@@ -37,7 +37,7 @@ See [Running the project](docs/running.md) for the required toolboxes and full d
 | [Experiment setup](docs/experiment-setup.md) | Bone pins, CT scan, motion capture, probe calibration, and ultrasound acquisition. |
 | [Required input data](docs/input-data.md) | Input MAT files, preparation tools, code organization, and optimizer parameters. |
 | [Supported cost functions](docs/cost-functions.md) | Every registered cost model and its parameters. |
-| [Running the project](docs/running.md) | Requirements, configuration, one sweep, hyperparameter sweep, resuming. |
+| [Running the project](docs/running.md) | Requirements, configuration, one sweep, hyperparameter sweep, resuming, evaluation. |
 | [Output structure](docs/output-structure.md) | Output folders, summary and evaluation tables, `runResult.mat`. |
 | [Processing workflow](docs/workflow.md) | How configuration, planning, CMA-ES, and cost dispatch fit together. |
 | [Bookkeeping](docs/bookkeeping.md) | Saving results, failure cases, and resuming a stopped sweep. |
