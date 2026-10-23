@@ -4,27 +4,27 @@ A cost model answers one question: "how well does the bone, placed at this candi
 
 ## 1. The big picture
 
-The diagram shows where your pieces plug in. Green boxes are what you add. Gray boxes already exist, and you don't change them.
+The diagram shows where your pieces plug in. Orange boxes are what you add or change. Blue boxes already exist, and you leave them as they are.
 
 ```mermaid
 flowchart TD
-    classDef book fill:#F1EFE8,stroke:#5F5E5A,color:#444441,stroke-width:0.5px
-    classDef ok   fill:#E1F5EE,stroke:#0F6E56,color:#085041,stroke-width:0.5px
+    classDef fixed  fill:#E6F1FB,stroke:#185FA5,color:#0C447C,stroke-width:0.5px
+    classDef change fill:#FAEEDA,stroke:#BA7517,color:#854F0B,stroke-width:0.5px
 
-    J("<span style='display:inline-block;width:420px'><b>optconfig_oneSweep_&lt;name&gt;.json</b><br/><small>cost.model, fixedParameters, hyperparameters</small></span>"):::ok
-    V("<span style='display:inline-block;width:420px'><b>validate_cost_&lt;name&gt;.m</b><br/><small>Checks the parameters, once, when the JSON is read</small></span>"):::ok
-    P("<span style='display:inline-block;width:420px'><b>Experiment plan + createBonePoseOptimizationRunConfig</b><br/><small>Picks one value per parameter into config.cost.parameters</small></span>"):::book
-    D("<span style='display:inline-block;width:420px'><b>prepareBonePoseOptimizationInputs</b><br/><small>Slow setup, once per combination: fills data</small></span>"):::book
-    C("<span style='display:inline-block;width:420px'><b>CMA-ES</b><br/><small>Proposes thousands of 6D pose vectors</small></span>"):::book
-    B("<span style='display:inline-block;width:420px'><b>bonePoseCostFunction</b><br/><small>Reads config.cost.model</small></span>"):::book
-    R("<span style='display:inline-block;width:420px'><b>getBonePoseCostDefinition.m</b><br/><small>Registry: your new case links the name to your files</small></span>"):::ok
-    E("<span style='display:inline-block;width:420px'><b>cost_&lt;name&gt;.m</b><br/><small>Scores one pose, returns one number</small></span>"):::ok
+    J("<span style='display:inline-block;width:420px'><b>optconfig_oneSweep_#lt;name#gt;.json</b><br/><small>cost.model, fixedParameters, hyperparameters</small></span>"):::change
+    V("<span style='display:inline-block;width:420px'><b>validate_cost_#lt;name#gt;.m</b><br/><small>Checks the parameters, once, when the JSON is read</small></span>"):::change
+    P("<span style='display:inline-block;width:420px'><b>Experiment plan + createBonePoseOptimizationRunConfig</b><br/><small>Picks one value per parameter into config.cost.parameters</small></span>"):::fixed
+    D("<span style='display:inline-block;width:420px'><b>prepareBonePoseOptimizationInputs</b><br/><small>Slow setup, once per combination: fills data</small></span>"):::fixed
+    C("<span style='display:inline-block;width:420px'><b>CMA-ES</b><br/><small>Proposes thousands of 6D pose vectors</small></span>"):::fixed
+    B("<span style='display:inline-block;width:420px'><b>bonePoseCostFunction</b><br/><small>Reads config.cost.model</small></span>"):::fixed
+    R("<span style='display:inline-block;width:420px'><b>getBonePoseCostDefinition.m</b><br/><small>Registry: your new case links the name to your files</small></span>"):::change
+    E("<span style='display:inline-block;width:420px'><b>cost_#lt;name#gt;.m</b><br/><small>Scores one pose, returns one number</small></span>"):::change
 
     J --> V --> P --> D --> C --> B --> R --> E
     E -- cost --> C
 ```
 
-Colours: green boxes are **what you add**, gray boxes are **existing framework code**.
+Colours: orange boxes are **what you add or change**, blue boxes are **fixed framework code**.
 
 Two things in this picture are worth remembering:
 
@@ -40,7 +40,6 @@ Two things in this picture are worth remembering:
 | One `case` | `functions/bonePoseOptimization/costModels/getBonePoseCostDefinition.m` | Links the model name to both files |
 | Config template `optconfig_oneSweep_<name>.json` | `config/` | A complete, working set of settings |
 | Config template `optconfig_hyperparamSweep_<name>.json` | `config/` | Only if the model has hyperparameters worth sweeping |
-| Test `testBonePoseCost<Name>.m` | `functions/bonePoseOptimization/tests/` | Proves the model works inside the framework |
 | *Optional:* prepared data | `prepareBonePoseOptimizationInputs.m` | Only if the model needs slow setup that doesn't exist yet |
 
 ## 2. Before you start: pick a name
@@ -54,7 +53,6 @@ For the example on this page the name is `nearestVertexDistance`:
 | Registry key and `cost.model` | `nearestVertexDistance` |
 | Evaluator | `cost_nearestVertexDistance.m` |
 | Validator | `validate_cost_nearestVertexDistance.m` |
-| Test | `testBonePoseCostNearestVertexDistance.m` |
 | Config templates | `optconfig_oneSweep_nearestVertexDistance.json`, `optconfig_hyperparamSweep_nearestVertexDistance.json` |
 
 The full naming rules, including combined models and retiring old ones, are in [section 5](#5-naming-rules-in-detail).
@@ -281,49 +279,16 @@ For each run, the framework merges one value of each list with the fixed values.
 | `fixedParameters.pointStride: 2` | `config.cost.parameters.pointStride = 2` in every run |
 | `hyperparameters.distanceCapMm: [5.0, 10.0]` | `config.cost.parameters.distanceCapMm = 5` in the first combination, `10` in the second |
 
-### 3.6. Write a test
+### 3.6. Run and check
 
-A test proves that the new model works inside the framework, and keeps it working when someone else changes shared code later. Tests are function-based. Copy [`testBonePoseCostICPLike.m`](../functions/bonePoseOptimization/tests/testBonePoseCostICPLike.m) to `functions/bonePoseOptimization/tests/testBonePoseCostNearestVertexDistance.m`. Its `setupOnce` reads the config template, builds the plan and the run config, and prepares the data once, exactly as a real run does. Change the config file name there, and replace the tests with ones for your model. At a minimum, check that:
-
-- the validator accepts a good config and returns the expected field order and types;
-- the validator rejects a missing field, an unknown field, and a bad value;
-- the dispatcher returns one finite scalar cost for your model;
-- something specific to your model, for example that no capped distance is larger than `distanceCapMm`.
-
-```matlab
-function testCostIsOneFiniteNumber(testCase)
-%TESTCOSTISONEFINITENUMBER Check that the dispatcher returns a usable cost.
-% testCase provides MATLAB verification methods. This function has no output.
-
-[cost, details] = bonePoseCostFunction(zeros(6, 1), ...
-    testCase.TestData.data, testCase.TestData.config);
-
-verifyTrue(testCase, isscalar(cost) && isfinite(cost));
-verifyEqual(testCase, details.costModel, 'nearestVertexDistance');
-end
-```
-
-### 3.7. Run and check
-
-First run your own test, then the whole suite, from the project root:
-
-```matlab
-addpath(genpath('functions'));
-runtests('functions/bonePoseOptimization/tests/testBonePoseCostNearestVertexDistance.m')
-```
-
-```bash
-matlab -batch "addpath(genpath('functions')); assertSuccess(runtests('functions/bonePoseOptimization/tests'))"
-```
-
-Then run the model once like a user would. The main scripts read a git-ignored local copy of a template (see [Running the project](running.md#2-configure-the-input-paths-and-settings)). This overwrites your current `oneSweep.local.json`, so keep a copy if you still need it:
+Run the model once like a user would, from the project root. The main scripts read a git-ignored local copy of a template (see [Running the project](running.md#2-configure-the-input-paths-and-settings)). This overwrites your current `oneSweep.local.json`, so keep a copy if you still need it:
 
 ```matlab
 copyfile('config/optconfig_oneSweep_nearestVertexDistance.json', 'config/oneSweep.local.json')
 main_bonePoseOptimization_oneSweep
 ```
 
-The model is done when the tests pass and this script runs without error.
+The model works when this script runs without error and the `Initial cost` it prints is a finite number.
 
 ## 4. Rules every evaluator follows
 
