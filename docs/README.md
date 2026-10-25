@@ -7,7 +7,7 @@ These pages explain how the project works and how to use it. If you are new, rea
 | [Experiment setup](experiment-setup.md) | The physical setup: bone pins, CT scan, motion capture, probe calibration, and ultrasound acquisition. |
 | [Required input data](input-data.md) | The MAT files the optimizer needs, the tools that produce them, how the optimization code is organized, and the optimizer parameters. |
 | [Supported cost functions](cost-functions.md) | Every registered cost model, what it measures, and its parameters. |
-| [Running the project](running.md) | Requirements, config setup, running one sweep, running and resuming a hyperparameter sweep, and evaluating it. |
+| [Running the project](running.md) | What to prepare first (toolboxes, input data, cost model), config setup, running one sweep, running and resuming a hyperparameter sweep, and evaluating it. |
 | [Output structure](output-structure.md) | The experiment folder, which file answers which question, the summary and evaluation tables, and `runResult.mat`. |
 | [Processing workflow](workflow.md) | How configuration, planning, input preparation, CMA-ES, and the cost dispatcher fit together. |
 | [Bookkeeping](bookkeeping.md) | How results are saved, what can go wrong during a sweep, and how a stopped sweep is resumed. |
