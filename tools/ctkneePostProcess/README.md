@@ -62,7 +62,7 @@ acs.t.origin
 
 Here `f` is the femur and `t` is the tibia. Each `R` is a 3-by-3 rotation matrix and each `origin` contains three coordinates. The source ERC code stores the axes row-wise; this project transposes the rotations when building the column-wise 4-by-4 transforms used for display and later processing.
 
-The ACS implementation and its supporting documentation are in `functions/ERCkneeFrames/`. This is the current repository folder corresponding to the sometimes-referenced `function/ERCframeKnee` directory. The preprocessing entry point loads a precomputed ACS MAT file; it does not calculate the ACS during the marker-processing run. To generate or review the ACS definition, start with `ERCkneeReferenceFrames.m`, the `ERCrefFrameFemur.m` and `ERCrefFrameTibia.m` help text, and `ERC knee reference frame documentation.pdf`.
+The ACS implementation and its supporting documentation are in `functions/external/ERCkneeFrames/`. This is the current repository folder corresponding to the sometimes-referenced `function/ERCframeKnee` directory. The preprocessing entry point loads a precomputed ACS MAT file; it does not calculate the ACS during the marker-processing run. To generate or review the ACS definition, start with `ERCkneeReferenceFrames.m`, the `ERCrefFrameFemur.m` and `ERCrefFrameTibia.m` help text, and `ERC knee reference frame documentation.pdf`.
 
 ## Processing workflow
 
