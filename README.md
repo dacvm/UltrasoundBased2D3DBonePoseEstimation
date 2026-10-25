@@ -8,7 +8,7 @@ This repository is research and development code. The cost function, optimizatio
 
 ## Quick start
 
-1. Prepare the input MAT files with the tools in [`tools/`](tools/README.md) (see [Required input data](docs/input-data.md)).
+1. Prepare the input MAT files: record your own data with [BmodeMocapIntegration](https://github.com/dacvm/BmodeMocapIntegration), or contact the authors to request our dataset. Then run the four tools in [`tools/`](tools/README.md) in order (`ctkneePostProcess` → `ultrasoundSpatialProcessing` → `boneSegmentationProcess` → `bonePreRegistration`). See [Required input data](docs/input-data.md) for what each file contains.
 2. Copy a config template to the local config each script reads:
 
    ```matlab
