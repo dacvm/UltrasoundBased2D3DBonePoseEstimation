@@ -42,3 +42,9 @@ See [Running the project](docs/running.md) for the required toolboxes and full d
 | [Processing workflow](docs/workflow.md) | How configuration, planning, CMA-ES, and cost dispatch fit together. |
 | [Bookkeeping](docs/bookkeeping.md) | Saving results, failure cases, and resuming a stopped sweep. |
 | [Adding a new cost function](docs/adding-a-cost-function.md) | Naming rules and the recipe for a new cost model. |
+
+## AI-assisted development
+
+This project was developed with the help of [Claude Code](https://claude.com/claude-code). The AI assisted with writing code, while the method design, the geometric and algorithmic choices, and the review of every change remained with the authors. The code builds on our domain knowledge of ultrasound imaging, tracking, and bone registration, and its behavior is verified through unit tests and validation on recorded experiment data.
+
+To make it easy to continue this work with the same tools, the repository includes the project instructions ([`CLAUDE.md`](CLAUDE.md)) and the Claude Code skills in [`.claude/skills/`](.claude/skills/). They describe the project's conventions (frame naming, transform composition, code style, and where new code belongs), so that AI-assisted contributions stay consistent with the existing codebase.
