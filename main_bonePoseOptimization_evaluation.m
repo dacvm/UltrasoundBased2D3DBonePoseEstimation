@@ -107,7 +107,11 @@ for runIndex = 1:numberOfRuns
 
     try
         % Load the estimated transform and candidate mesh saved for this seed.
-        runFilePath = char(perRunTable.resultFilePath(runIndex));
+        % Rebuild the file path from this experiment folder instead of using
+        % the summary's resultFilePath: that saved path is absolute, so it
+        % points to the wrong place when the experiment was run on another
+        % machine and copied here.
+        runFilePath = getRunResultFilePath(experimentFolder, perRunTable.combinationId(runIndex), perRunTable.seed(runIndex));
         runData     = load(runFilePath, 'runResult');
 
         % Get the necessary data
@@ -122,6 +126,10 @@ for runIndex = 1:numberOfRuns
 
     catch evaluationError
         % Keep later runs usable when one saved result is missing or incomplete.
+        % Print a warning so the failure is noticed right away, not only
+        % later in the evaluationMessage column of the saved table.
+        warning('main_bonePoseOptimization_evaluation:RunEvaluationFailed', ...
+                'Could not evaluate run %d: %s', perRunTable.runNumber(runIndex), evaluationError.message);
         perRunTable.evaluationStatus(runIndex)   = "failed";
         perRunTable.evaluationMessage(runIndex)  = string(evaluationError.message);
     end
