@@ -207,7 +207,6 @@ disp(perCombinationTable);
 
 % Keep one figure handle per display so users can adjust figures interactively.
 figureSurfaceRmseBoxplot            = plotSurfaceRmseBoxplot(perRunTable, perCombinationTable, topCombinationCount);
-figureRankedSurfaceRmse             = plotRankedSurfaceRmse(perCombinationTable);
 figureTranslationRotationErrors     = plotTranslationRotationErrors(perCombinationTable);
 figureHyperparameterPaneledHeatmaps = plotHyperparameterPaneledHeatmaps(perCombinationTable, parameterNames, heatmapSettings);
 figureOptimizerDiagnostic           = plotOptimizerCostVsSurfaceRmse(perCombinationTable);
