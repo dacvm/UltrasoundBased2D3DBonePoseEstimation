@@ -6,7 +6,7 @@ addpath(genpath('functions'));
 %% SELECT THE COMPLETED EXPERIMENT
 
 % Edit only this folder name when evaluating a different sweep experiment.
-experimentFolderName = 'intensityLine_20261009_165543_181';
+experimentFolderName = 'intensityPIMLOP_20261015_161737_663';
 experimentFolder = fullfile(pwd, 'output', 'bonePoseOptimization', 'experiments', experimentFolderName);
 
 % Keep the detailed seed-distribution plot readable when a sweep is large.
@@ -15,16 +15,18 @@ topCombinationCount = 20;
 % Choose how the hyperparameter heatmaps are arranged. The x- and y-parameters
 % form each heatmap. The panel parameters create rows and columns of heatmaps,
 % so every swept value remains visible without adding more plot axes.
-% These settings match the default intensityLine sweep, which varies only
-% these two parameters; leave a panel parameter empty ('') when unused.
-heatmapSettings.xParameter           = 'intensitySmoothingSigmaMm';
-heatmapSettings.yParameter           = 'normalFacingToleranceDeg';
-heatmapSettings.panelRowParameter    = '';
+% These settings match the intensityPIMLOP sweep, which varies kappa, weight,
+% and intensitySmoothingSigmaMm; leave a panel parameter empty ('') when unused.
+heatmapSettings.xParameter           = 'kappa';
+heatmapSettings.yParameter           = 'weight';
+heatmapSettings.panelRowParameter    = 'intensitySmoothingSigmaMm';
 heatmapSettings.panelColumnParameter = '';
 
 % Put parameters here when this heatmap should hold them at chosen values.
 % This affects only the figure; it does not change the optimization settings.
-heatmapSettings.parametersToHold = struct();
+% The experiment plan always lists normalFacingToleranceDeg, even when it has
+% one value, so hold it at that value to keep it out of the figure layout.
+heatmapSettings.parametersToHold = struct('normalFacingToleranceDeg', 30);
 
 %% LOAD THE EXPERIMENT PLAN, SUMMARY, AND GROUND TRUTH
 
