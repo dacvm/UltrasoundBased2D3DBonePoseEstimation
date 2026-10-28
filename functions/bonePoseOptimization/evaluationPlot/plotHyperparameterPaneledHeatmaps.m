@@ -62,14 +62,18 @@ end
 
 %% CREATE THE PANEL LAYOUT
 
-% Share one colour range across all panels so equal colours mean equal errors.
-colorLimits = [min(finiteRmse), max(finiteRmse)];
-if colorLimits(1) == colorLimits(2)
-    colorLimits = colorLimits + [-0.5 0.5];
-end
+% Use the colour range of the whole experiment, not only of this slice, so
+% equal colours mean equal errors across panels and across all figures.
+colorLimits = getSurfaceRmseColorLimits(perCombinationTable);
 
-figureHandle = figure('Name', 'Hyperparameter Paneled Heatmaps');
-layout = tiledlayout(numel(panelRowValues), numel(panelColumnValues), 'TileSpacing', 'compact', 'Padding', 'compact');
+% Use the shared figure width, but give every panel row enough height so
+% stacked heatmaps do not get squeezed.
+style = getEvaluationPlotStyle();
+figureHeightCm = max(style.figureSizeCm(2), style.heatmapPanelHeightCm * numel(panelRowValues));
+figureHandle = createEvaluationFigure('Hyperparameter Paneled Heatmaps', ...
+    [style.figureSizeCm(1), figureHeightCm], style);
+layout = tiledlayout(figureHandle, numel(panelRowValues), numel(panelColumnValues), ...
+    'TileSpacing', 'compact', 'Padding', 'compact');
 
 for panelRowIndex = 1:numel(panelRowValues)
     for panelColumnIndex = 1:numel(panelColumnValues)
@@ -108,15 +112,15 @@ for panelRowIndex = 1:numel(panelRowValues)
         % other panel in the figure.
         ax = nexttile(layout);
         imagesc(ax, heatmapValues, 'AlphaData', isfinite(heatmapValues));
-        ax.Color = [0.82 0.82 0.82];
+        ax.Color = style.missingCellColor;
         ax.YDir = 'normal';
         clim(ax, colorLimits);
         xticks(ax, 1:numel(xValues));
         xticklabels(ax, string(xValues));
         yticks(ax, 1:numel(yValues));
         yticklabels(ax, string(yValues));
-        xlabel(ax, xParameter, 'Interpreter', 'none');
-        ylabel(ax, yParameter, 'Interpreter', 'none');
+        xlabel(ax, xParameter);
+        ylabel(ax, yParameter);
 
         % Name the panel only with parameter values that actually divide the
         % figure into multiple heatmaps.
@@ -124,7 +128,7 @@ for panelRowIndex = 1:numel(panelRowValues)
             panelRowParameter, panelRowValues(panelRowIndex), ...
             panelColumnParameter, panelColumnValues(panelColumnIndex));
         if ~isempty(panelTitle)
-            title(ax, panelTitle, 'Interpreter', 'none');
+            title(ax, panelTitle);
         end
     end
 end
@@ -132,17 +136,15 @@ end
 %% FINISH THE SHARED FIGURE LABELS
 
 % Place one colour bar beside the complete panel layout.
-colormap(figureHandle, parula);
-colorBar = colorbar;
-colorBar.Layout.Tile = 'east';
-colorBar.Label.String = 'Median surface RMSE (mm)';
+addSurfaceRmseColorbar(ax, style);
 
-% Include held selections in the title so a saved figure explains its slice.
-figureTitle = 'Hyperparameter Effects on Surface RMSE';
+% Keep the title short and put the held selections in the subtitle, so a
+% saved figure still explains which slice of the experiment it shows.
+figureSubtitle = 'Grey cells were not run';
 if ~isempty(heldParameterLabel)
-    figureTitle = sprintf('%s | Held: %s', figureTitle, heldParameterLabel);
+    figureSubtitle = sprintf('Held: %s; grey cells were not run', heldParameterLabel);
 end
-title(layout, figureTitle, 'Interpreter', 'none');
+addEvaluationFigureTitle(layout, 'Median surface RMSE by hyperparameter', figureSubtitle, style);
 end
 
 

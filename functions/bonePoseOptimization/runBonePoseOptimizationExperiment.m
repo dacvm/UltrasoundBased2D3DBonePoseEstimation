@@ -258,7 +258,7 @@ for combinationIndex = 1:experimentPlan.numberOfCombinations
             % successful one (stage "preparation", NaN costs, no ground
             % truth), so later analysis can load every run the same way and
             % simply filter on its status. Save it right away, like any run.
-            [runResult, summaryRecord] = createFailedRunResult(runRow, seedConfig, preparationError, 'preparation', NaN, struct());
+            [runResult, summaryRecord] = createFailedRunResult(runRow, seedConfig, experimentFolder, preparationError, 'preparation', NaN, struct());
             [isSaved, saveFailureMessage, saveFailureIdentifier] = saveRunResult(runResult);
             if ~isSaved
                 summaryRecord = markSaveFailed(summaryRecord, saveFailureMessage, saveFailureIdentifier);
@@ -305,7 +305,7 @@ for combinationIndex = 1:experimentPlan.numberOfCombinations
         % "failed" result instead, so one crashing seed does not stop the
         % others.
         fprintf('Running %s with seed %d.\n', char(runRow.runId), runRow.seed);
-        [runResult, summaryRecord] = runOneSeed(runRow, seedConfig, seedData, validationReference, initialPoseVector, initialCost);
+        [runResult, summaryRecord] = runOneSeed(runRow, seedConfig, experimentFolder, seedData, validationReference, initialPoseVector, initialCost);
 
         % Save the result and the updated summary right away. This is what
         % protects finished runs if the sweep is interrupted later, and the
@@ -385,7 +385,7 @@ function summaryTable = fillSummaryFromSavedRuns(summaryTable, experimentFolder)
 
 for runIndex = 1:height(summaryTable)
     runRow         = summaryTable(runIndex, :);
-    resultFilePath = fullfile(getSeedFolder(experimentFolder, runRow), 'runResult.mat');
+    resultFilePath = getRunResultFilePath(experimentFolder, runRow.combinationId, runRow.seed);
     runResult      = loadFinishedRunResult(resultFilePath);
 
     if ~isempty(runResult)
@@ -430,23 +430,15 @@ end
 end
 
 
-function seedFolder = getSeedFolder(experimentFolder, runRow)
-%GETSEEDFOLDER Return the folder of one run inside the experiment folder.
-% experimentFolder owns all outputs, runRow is a plan or summary row with
-% combinationId and seed, and seedFolder is runs/<combinationId>/seed_<seed>.
-
-seedFolder = fullfile(experimentFolder, 'runs', char(runRow.combinationId), sprintf('seed_%d', runRow.seed));
-end
-
-
 function runConfig = addRunOutputFolder(runConfig, runRow, experimentFolder)
 %ADDRUNOUTPUTFOLDER Add the deterministic output folder for one experiment run.
 % runConfig is the scalar combination configuration, runRow identifies one
 % repetition, experimentFolder owns all outputs, and the returned config has
 % the CMA-ES base output folder for this run.
 
-% Build a readable folder hierarchy from the stable combination and seed values.
-seedFolder = getSeedFolder(experimentFolder, runRow);
+% The seed folder is the folder that holds this run's runResult.mat. Taking
+% it from getRunResultFilePath keeps the folder layout defined in one place.
+seedFolder = fileparts(getRunResultFilePath(experimentFolder, runRow.combinationId, runRow.seed));
 if ~isfolder(seedFolder)
     mkdir(seedFolder);
 end
@@ -456,10 +448,11 @@ runConfig.optimizer.outputFolder = fullfile(seedFolder, 'cmaes');
 end
 
 
-function [runResult, summaryRecord] = runOneSeed(runRow, runConfig, data, validationReference, initialPoseVector, initialCost)
+function [runResult, summaryRecord] = runOneSeed(runRow, runConfig, experimentFolder, data, validationReference, initialPoseVector, initialCost)
 %RUNONESEED Execute and package one combination-seed optimization run.
-% runRow and runConfig identify the run, data contains prepared estimation
-% inputs, validationReference stores ground-truth transforms, and the initial
+% runRow and runConfig identify the run, experimentFolder is where its
+% result file is stored, data contains prepared estimation inputs,
+% validationReference stores ground-truth transforms, and the initial
 % inputs define the common starting pose. The outputs are the saved result
 % structure and its flat summary values.
 
@@ -502,17 +495,18 @@ runResult.final.cost            = finalCost;
 runResult.final.costDetails     = finalCostDetails;
 runResult.validationReference   = validationReference;
 runResult.error                 = runError;
-runResult.run.resultFilePath    = getRunResultFilePath(runConfig);
+runResult.run.resultFilePath    = getRunResultFilePath(experimentFolder, runRow.combinationId, runRow.seed);
 
 % Flatten the small comparison fields into one summary record.
 summaryRecord = createSummaryRecord(runResult);
 end
 
 
-function [runResult, summaryRecord] = createFailedRunResult(runRow, runConfig, caughtError, failureStage, initialCost, validationReference)
+function [runResult, summaryRecord] = createFailedRunResult(runRow, runConfig, experimentFolder, caughtError, failureStage, initialCost, validationReference)
 %CREATEFAILEDRUNRESULT Package a run that could not reach or finish CMA-ES.
-% runRow and runConfig identify the planned run, caughtError explains the
-% failure, failureStage identifies preparation or optimization, initialCost
+% runRow and runConfig identify the planned run, experimentFolder is where
+% its result file is stored, caughtError explains the failure,
+% failureStage identifies preparation or optimization, initialCost
 % may be unavailable, and validationReference may be empty. Outputs match a
 % normal run result and summary record so later analysis uses one format.
 
@@ -526,7 +520,7 @@ runResult.final.cost            = NaN;
 runResult.final.costDetails     = struct();
 runResult.validationReference   = validationReference;
 runResult.error                 = exceptionToStruct(caughtError, failureStage);
-runResult.run.resultFilePath    = getRunResultFilePath(runConfig);
+runResult.run.resultFilePath    = getRunResultFilePath(experimentFolder, runRow.combinationId, runRow.seed);
 
 summaryRecord = createSummaryRecord(runResult);
 end
@@ -687,17 +681,6 @@ summaryRecord.status          = "save_failed";
 summaryRecord.errorStage      = "save";
 summaryRecord.errorIdentifier = string(failureIdentifier);
 summaryRecord.errorMessage    = string(failureMessage);
-end
-
-
-function resultFilePath = getRunResultFilePath(runConfig)
-%GETRUNRESULTFILEPATH Locate runResult.mat beside the run's CMA-ES folder.
-% runConfig contains the CMA-ES base output path and resultFilePath is the
-% neighboring MAT-file used by the experiment runner.
-
-% The CMA-ES base is <seed folder>/cmaes, so its parent owns runResult.mat.
-seedFolder      = fileparts(runConfig.optimizer.outputFolder);
-resultFilePath  = fullfile(seedFolder, 'runResult.mat');
 end
 
 

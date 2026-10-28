@@ -1,11 +1,13 @@
-function figureHandle = plotTranslationRotationErrors(perCombinationTable)
+function figureHandle = plotTranslationRotationErrors(perCombinationTable, topCombinationCount)
 %PLOTTRANSLATIONROTATIONERRORS Compare position and orientation accuracy.
 % This plot places one hyperparameter combination at its median translation
 % and rotation error. Horizontal and vertical lines show the corresponding
-% IQR across CMA-ES seeds.
+% IQR across CMA-ES seeds. The top-ranked combinations are highlighted so
+% they match the combinations shown in the surface-RMSE boxplot.
 %
-% Input:
+% Inputs:
 %   perCombinationTable - Ranked table containing translation and rotation statistics.
+%   topCombinationCount - Number of best-ranked combinations to highlight.
 %
 % Output:
 %   figureHandle        - Handle to the created MATLAB figure.
@@ -19,39 +21,31 @@ if isempty(plotTable)
         'No evaluated combinations are available for the pose-error plot.');
 end
 
-% Draw both IQR directions before adding the median point markers.
-figureHandle = figure('Name', 'Translation and Rotation Errors');
-hold on;
-for combinationIndex = 1:height(plotTable)
+% Collect the seed statistics on each axis in [q25, median, q75] order.
+translationStatistics = [plotTable.q25TranslationErrorMm, ...
+                         plotTable.medianTranslationErrorMm, ...
+                         plotTable.q75TranslationErrorMm];
+rotationStatistics    = [plotTable.q25RotationErrorDeg, ...
+                         plotTable.medianRotationErrorDeg, ...
+                         plotTable.q75RotationErrorDeg];
 
-    xMedian = plotTable.medianTranslationErrorMm(combinationIndex);
-    yMedian = plotTable.medianRotationErrorDeg(combinationIndex);
-    
-    plot([plotTable.q25TranslationErrorMm(combinationIndex), ...
-          plotTable.q75TranslationErrorMm(combinationIndex)], ...
-         [yMedian, yMedian], ...
-         '-', 'Color', [0.45 0.45 0.45]);
-    plot([xMedian, xMedian], ...
-         [plotTable.q25RotationErrorDeg(combinationIndex), ...
-          plotTable.q75RotationErrorDeg(combinationIndex)], ...
-         '-', 'Color', [0.45 0.45 0.45]);
-end
-scatter(plotTable.medianTranslationErrorMm, ...
-        plotTable.medianRotationErrorDeg, 46, ...
-        [0.84 0.37 0.00], 'filled');
+% Highlight the same top combinations as the other ranked plots, and colour
+% the points on the RMSE range shared by every evaluation figure.
+isTopCombination  = plotTable.combinationRank <= topCombinationCount;
+combinationLabels = erase(string(plotTable.combinationId), "combination_");
+colorLimits       = getSurfaceRmseColorLimits(perCombinationTable);
 
-% Label only the best combinations so a large sweep does not hide the points.
-numberOfLabels = min(20, height(plotTable));
-for labelIndex = 1:numberOfLabels
-    text(plotTable.medianTranslationErrorMm(labelIndex), ...
-         plotTable.medianRotationErrorDeg(labelIndex), ...
-         ['  ', char(erase(plotTable.combinationId(labelIndex), "combination_"))], ...
-         'FontSize', 8, 'VerticalAlignment', 'bottom');
-end
-hold off;
+% Draw the points on the shared evaluation figure layout.
+style = getEvaluationPlotStyle();
+figureHandle = createEvaluationFigure('Translation and Rotation Errors', style.figureSizeCm, style);
+layout = tiledlayout(figureHandle, 1, 1, 'Padding', 'compact');
+ax = nexttile(layout);
+plotMedianIqrScatter(ax, translationStatistics, rotationStatistics, ...
+                     plotTable.medianSurfaceRmseMm, colorLimits, ...
+                     isTopCombination, combinationLabels, style);
 
-grid on;
-xlabel('Median translation error (mm)');
-ylabel('Median rotation error (deg)');
-title('Translation and Rotation Errors with IQR');
+xlabel(ax, 'Median translation error (mm)');
+ylabel(ax, 'Median rotation error (deg)');
+addEvaluationFigureTitle(layout, 'Translation vs. rotation error', ...
+    'Median per combination; top combinations ranked by median surface RMSE', style);
 end

@@ -6,25 +6,28 @@ addpath(genpath('functions'));
 %% SELECT THE COMPLETED EXPERIMENT
 
 % Edit only this folder name when evaluating a different sweep experiment.
-experimentFolderName = 'intensityLine_20261009_165543_181';
+experimentFolderName = 'intensityPIMLOP_20261015_161737_663';
 experimentFolder = fullfile(pwd, 'output', 'bonePoseOptimization', 'experiments', experimentFolderName);
 
-% Keep the detailed seed-distribution plot readable when a sweep is large.
+% Number of best-ranked combinations shown in the seed-distribution plot and
+% highlighted in the scatter plots, so all plots point at the same set.
 topCombinationCount = 20;
 
 % Choose how the hyperparameter heatmaps are arranged. The x- and y-parameters
 % form each heatmap. The panel parameters create rows and columns of heatmaps,
 % so every swept value remains visible without adding more plot axes.
-% These settings match the default intensityLine sweep, which varies only
-% these two parameters; leave a panel parameter empty ('') when unused.
-heatmapSettings.xParameter           = 'intensitySmoothingSigmaMm';
-heatmapSettings.yParameter           = 'normalFacingToleranceDeg';
-heatmapSettings.panelRowParameter    = '';
+% These settings match the intensityPIMLOP sweep, which varies kappa, weight,
+% and intensitySmoothingSigmaMm; leave a panel parameter empty ('') when unused.
+heatmapSettings.xParameter           = 'kappa';
+heatmapSettings.yParameter           = 'weight';
+heatmapSettings.panelRowParameter    = 'intensitySmoothingSigmaMm';
 heatmapSettings.panelColumnParameter = '';
 
 % Put parameters here when this heatmap should hold them at chosen values.
 % This affects only the figure; it does not change the optimization settings.
-heatmapSettings.parametersToHold = struct();
+% The experiment plan always lists normalFacingToleranceDeg, even when it has
+% one value, so hold it at that value to keep it out of the figure layout.
+heatmapSettings.parametersToHold = struct('normalFacingToleranceDeg', 30);
 
 %% LOAD THE EXPERIMENT PLAN, SUMMARY, AND GROUND TRUTH
 
@@ -107,7 +110,11 @@ for runIndex = 1:numberOfRuns
 
     try
         % Load the estimated transform and candidate mesh saved for this seed.
-        runFilePath = char(perRunTable.resultFilePath(runIndex));
+        % Rebuild the file path from this experiment folder instead of using
+        % the summary's resultFilePath: that saved path is absolute, so it
+        % points to the wrong place when the experiment was run on another
+        % machine and copied here.
+        runFilePath = getRunResultFilePath(experimentFolder, perRunTable.combinationId(runIndex), perRunTable.seed(runIndex));
         runData     = load(runFilePath, 'runResult');
 
         % Get the necessary data
@@ -122,6 +129,10 @@ for runIndex = 1:numberOfRuns
 
     catch evaluationError
         % Keep later runs usable when one saved result is missing or incomplete.
+        % Print a warning so the failure is noticed right away, not only
+        % later in the evaluationMessage column of the saved table.
+        warning('main_bonePoseOptimization_evaluation:RunEvaluationFailed', ...
+                'Could not evaluate run %d: %s', perRunTable.runNumber(runIndex), evaluationError.message);
         perRunTable.evaluationStatus(runIndex)   = "failed";
         perRunTable.evaluationMessage(runIndex)  = string(evaluationError.message);
     end
@@ -197,7 +208,6 @@ disp(perCombinationTable);
 
 % Keep one figure handle per display so users can adjust figures interactively.
 figureSurfaceRmseBoxplot            = plotSurfaceRmseBoxplot(perRunTable, perCombinationTable, topCombinationCount);
-figureRankedSurfaceRmse             = plotRankedSurfaceRmse(perCombinationTable);
-figureTranslationRotationErrors     = plotTranslationRotationErrors(perCombinationTable);
+figureTranslationRotationErrors     = plotTranslationRotationErrors(perCombinationTable, topCombinationCount);
 figureHyperparameterPaneledHeatmaps = plotHyperparameterPaneledHeatmaps(perCombinationTable, parameterNames, heatmapSettings);
-figureOptimizerDiagnostic           = plotOptimizerCostVsSurfaceRmse(perCombinationTable);
+figureOptimizerDiagnostic           = plotOptimizerCostVsSurfaceRmse(perCombinationTable, topCombinationCount);
