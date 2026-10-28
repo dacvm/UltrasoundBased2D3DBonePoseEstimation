@@ -9,7 +9,8 @@ addpath(genpath('functions'));
 experimentFolderName = 'intensityPIMLOP_20261015_161737_663';
 experimentFolder = fullfile(pwd, 'output', 'bonePoseOptimization', 'experiments', experimentFolderName);
 
-% Keep the detailed seed-distribution plot readable when a sweep is large.
+% Number of best-ranked combinations shown in the seed-distribution plot and
+% highlighted in the scatter plots, so all plots point at the same set.
 topCombinationCount = 20;
 
 % Choose how the hyperparameter heatmaps are arranged. The x- and y-parameters
@@ -207,6 +208,6 @@ disp(perCombinationTable);
 
 % Keep one figure handle per display so users can adjust figures interactively.
 figureSurfaceRmseBoxplot            = plotSurfaceRmseBoxplot(perRunTable, perCombinationTable, topCombinationCount);
-figureTranslationRotationErrors     = plotTranslationRotationErrors(perCombinationTable);
+figureTranslationRotationErrors     = plotTranslationRotationErrors(perCombinationTable, topCombinationCount);
 figureHyperparameterPaneledHeatmaps = plotHyperparameterPaneledHeatmaps(perCombinationTable, parameterNames, heatmapSettings);
-figureOptimizerDiagnostic           = plotOptimizerCostVsSurfaceRmse(perCombinationTable);
+figureOptimizerDiagnostic           = plotOptimizerCostVsSurfaceRmse(perCombinationTable, topCombinationCount);
