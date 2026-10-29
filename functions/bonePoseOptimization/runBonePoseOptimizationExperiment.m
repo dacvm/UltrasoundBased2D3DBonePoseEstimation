@@ -32,18 +32,18 @@ function experimentResult = runBonePoseOptimizationExperiment(experimentSpec)
 %       the summary table on disk is updated after every run, so a crash or
 %       a manual stop late in the sweep still leaves all earlier results.
 %     - One failure must not stop the sweep. A failing combination or seed
-%       is recorded as "failed" (with its error message) and the loop moves
+%       is recorded as "run_failed" (with its error message) and the loop moves
 %       on, so one bad setting does not waste the rest of the night. The
 %       same holds when a result file cannot be written: the save is
 %       retried, and if it still fails the run is marked "save_failed".
 %       A run whose optimizer stopped on a save error (CMA-ES writing its
-%       own files) is also marked "save_failed", not "failed".
+%       own files) is also marked "save_failed", not "run_failed".
 %     - A stopped sweep can be resumed. When experimentSpec.experiment.
 %       resumeFolder is set, no new folder is created. The spec and plan
 %       are read back from that folder, every run with a valid
 %       runResult.mat is skipped, and only the remaining runs (missing,
 %       corrupt, "save_failed", or stopped by any MATLAB:save error) are
-%       run. Runs that "failed" for another reason are kept as
+%       run. Runs marked "run_failed" for another reason are kept as
 %       they are. One folder therefore always holds one self-consistent
 %       experiment, even when it took several MATLAB sessions to finish.
 %
@@ -139,9 +139,9 @@ end
 % many succeeded and failed, so after an unattended sweep the user sees at
 % a glance whether it is worth opening the summary for failures.
 numberCompleted  = sum(summaryTable.status == "completed");
-numberFailed     = sum(summaryTable.status == "failed");
+numberFailed     = sum(summaryTable.status == "run_failed");
 numberSaveFailed = sum(summaryTable.status == "save_failed");
-fprintf('\nExperiment finished: %d completed, %d failed, %d save_failed.\n', numberCompleted, numberFailed, numberSaveFailed);
+fprintf('\nExperiment finished: %d completed, %d run_failed, %d save_failed.\n', numberCompleted, numberFailed, numberSaveFailed);
 
 % The closing line is the last thing worth logging, so stop the log here.
 diary('off');
@@ -241,7 +241,7 @@ for combinationIndex = 1:experimentPlan.numberOfCombinations
     catch preparationError
 
         % Without prepared inputs no seed of this combination can run. We
-        % still write a "failed" result file and summary row for each of its
+        % still write a "run_failed" result file and summary row for each of its
         % seeds, so the summary shows exactly what happened (and why) for
         % every planned run, instead of rows that stay "pending" forever.
         for runIndex = combinationRunIndexes(:).'
@@ -264,7 +264,7 @@ for combinationIndex = 1:experimentPlan.numberOfCombinations
                 summaryRecord = markSaveFailed(summaryRecord, saveFailureMessage, saveFailureIdentifier);
             end
 
-            % Mark this run as "failed" in the summary, with the error
+            % Mark this run as "run_failed" in the summary, with the error
             % message, and rewrite the summary file, so the on-disk table
             % is up to date even if the sweep stops before the next run.
             summaryTable = updateSummaryRow(summaryTable, runIndex, summaryRecord);
@@ -302,7 +302,7 @@ for combinationIndex = 1:experimentPlan.numberOfCombinations
         seedData.config = seedConfig;
 
         % Run CMA-ES. runOneSeed catches its own errors and returns a
-        % "failed" result instead, so one crashing seed does not stop the
+        % "run_failed" result instead, so one crashing seed does not stop the
         % others.
         fprintf('Running %s with seed %d.\n', char(runRow.runId), runRow.seed);
         [runResult, summaryRecord] = runOneSeed(runRow, seedConfig, experimentFolder, seedData, validationReference, initialPoseVector, initialCost);
@@ -404,7 +404,7 @@ function runResult = loadFinishedRunResult(resultFilePath)
 % resultFilePath is the expected runResult.mat of one run. runResult is the
 % saved struct when the file exists and loads, and [] otherwise.
 %
-% "completed" and "failed" runs are kept. A "failed" run is not retried,
+% "completed" and "run_failed" runs are kept. A "run_failed" run is not retried,
 % because its error usually comes from the settings and would simply happen
 % again. A run stopped by a save error (MATLAB:save:*) is rerun: the disk or
 % a file lock was the problem, not the settings. Older sweeps stored such
@@ -735,16 +735,16 @@ function runStatus = getFailureStatus(caughtError)
 % caughtError is the MException that stopped the run. runStatus is
 % "save_failed" when MATLAB could not write a file (identifier
 % MATLAB:save:*, for example CMA-ES saving variablescmaes.mat on a full or
-% locked disk), and "failed" for every other error.
+% locked disk), and "run_failed" for every other error.
 %
-% The difference matters on resume: a "failed" run is kept because its
+% The difference matters on resume: a "run_failed" run is kept because its
 % error usually comes from the settings, but a save error comes from the
 % machine, so the run is worth running again.
 
 if startsWith(caughtError.identifier, 'MATLAB:save:')
     runStatus = "save_failed";
 else
-    runStatus = "failed";
+    runStatus = "run_failed";
 end
 end
 

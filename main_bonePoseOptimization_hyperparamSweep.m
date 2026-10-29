@@ -20,7 +20,8 @@
 %     - validation_context.mat          : ground truth, saved once;
 %     - summary.csv / summary.mat       : one row per run with status,
 %                                         initial and best cost, run time,
-%                                         and error text for failed runs;
+%                                         and error text for failed runs
+%                                         ("run_failed" or "save_failed");
 %     - runs/<combinationId>/seed_<n>/  : runResult.mat and CMA-ES logs of
 %                                         each single run.
 %   In MATLAB, the workspace variable experimentResult holds the folder
@@ -91,7 +92,7 @@ experimentSpec = createBonePoseOptimizationExperimentConfig(configFilePath);
 %   - for each seed, runs the CMA-ES optimizer and saves the result
 %     immediately,
 %   - keeps summary.csv up to date after every run.
-% A failing combination or seed is recorded as "failed" and the sweep
+% A failing combination or seed is recorded as "run_failed" and the sweep
 % continues, so one bad setting does not waste the rest of the experiment.
 % We call it here because this single call is the whole experiment; after it
 % returns, every result is already on disk.

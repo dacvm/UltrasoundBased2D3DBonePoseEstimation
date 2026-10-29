@@ -30,15 +30,15 @@ When the sweep starts, every row is `pending`. After each run, its row is filled
 
 | What goes wrong | Example | What the sweep does |
 | --- | --- | --- |
-| **Preparation fails** for a combination | An extreme setting breaks the mesh–image intersection | Marks every seed of that combination as `failed`, then moves on to the next combination |
-| **The optimization fails** for one seed | The cost model or CMA-ES throws an error | Marks this seed as `failed` and continues with the next seed |
+| **Preparation fails** for a combination | An extreme setting breaks the mesh–image intersection | Marks every seed of that combination as `run_failed`, then moves on to the next combination |
+| **The optimization fails** for one seed | The cost model or CMA-ES throws an error | Marks this seed as `run_failed` and continues with the next seed |
 | **A file can't be written** during a run | CMA-ES can't write its own log file because the disk is full | Marks this seed as `save_failed` and continues |
 | **`runResult.mat` can't be saved** | Antivirus keeps the new file locked | Tries again a few times. If that still fails, marks the run as `save_failed`. The costs stay in the summary. |
 | **`summary.csv` can't be written** | The file is open in Excel | Prints a warning and carries on. The next run writes the summary again. |
 | **Something unexpected happens** | A bug in the bookkeeping itself | Writes the full error into `experiment_log.txt` and stops. Everything saved so far is safe, so you can resume. |
 | **The machine stops** | Windows restart, crash, Ctrl+C | Nothing can catch this. Every finished run is already on disk, so you can resume. |
 
-A failed or `save_failed` run is still saved like a normal run, with its error message. This way, later analysis can load every run the same way and filter on the status.
+A `run_failed` or `save_failed` run is still saved like a normal run, with its error message. This way, later analysis can load every run the same way and filter on the status.
 
 ## 4. How a run gets its status
 
@@ -54,7 +54,7 @@ flowchart TD
     Q1{"Error?"}:::book
     Q2{"Error while<br/>writing a file?"}:::book
     OK("<span style='display:inline-block;width:120px'><b>completed</b></span>"):::ok
-    F("<span style='display:inline-block;width:120px'><b>failed</b></span>"):::fail
+    F("<span style='display:inline-block;width:120px'><b>run_failed</b></span>"):::fail
     SF("<span style='display:inline-block;width:120px'><b>save_failed</b></span>"):::fail
     S("<span style='display:inline-block;width:300px'><b>Save runResult.mat</b><br/><small>Tries up to 3 times</small></span>"):::book
     Q3{"Saved?"}:::book
@@ -73,11 +73,11 @@ flowchart TD
 
 Colours: green means the run **worked**, coral means **something went wrong**, and gray boxes are **bookkeeping** steps.
 
-### 4.1. Why `failed` and `save_failed` are kept apart
+### 4.1. Why `run_failed` and `save_failed` are kept apart
 
 The two statuses point to different causes, and they are treated differently when you resume:
 
-- **`failed`: the problem is probably in the settings.** Running the same settings again would most likely give the same error, so a resumed sweep **does not** retry these runs.
+- **`run_failed`: the problem is probably in the settings.** Running the same settings again would most likely give the same error, so a resumed sweep **does not** retry these runs.
 - **`save_failed`: the problem was the computer, not the settings.** A locked file or a full disk is often fine an hour later, so a resumed sweep **does** run these again.
 
 ## 5. Saving carefully
@@ -123,7 +123,7 @@ flowchart TD
     X("<span style='display:inline-block;width:240px'><b>Stop with an error</b><br/><small>Names the changed settings</small></span>"):::fail
     B("<span style='display:inline-block;width:340px'><b>Read the plan from the experiment folder</b><br/><small>Not from the JSON</small></span>"):::book
     Q2{"Usable<br/>runResult.mat?"}:::book
-    K("<span style='display:inline-block;width:240px'><b>Skip it</b><br/><small>completed, or failed by its settings</small></span>"):::ok
+    K("<span style='display:inline-block;width:240px'><b>Skip it</b><br/><small>completed, or run_failed</small></span>"):::ok
     R("<span style='display:inline-block;width:240px'><b>Run it again</b><br/><small>Missing, broken, or save_failed</small></span>"):::fail
     C("<span style='display:inline-block;width:340px'><b>Continue the sweep</b><br/><small>Only the runs still to do</small></span>"):::book
 
@@ -140,8 +140,8 @@ flowchart TD
 
 ## 7. Things you may need to do yourself
 
-- **Check the status column after a sweep.** The last line printed says how many runs completed, failed, and were `save_failed`. The `errorMessage` column in `summary.csv` says why.
-- **Retry a `failed` run on purpose.** Resuming never retries these. If you fixed the cause (for example a bug in a cost model), delete that run's `runResult.mat` and resume. Note that changing a setting in the JSON is not allowed when resuming; start a new experiment instead.
+- **Check the status column after a sweep.** The last line printed says how many runs completed, were `run_failed`, and were `save_failed`. The `errorMessage` column in `summary.csv` says why.
+- **Retry a `run_failed` run on purpose.** Resuming never retries these. If you fixed the cause (for example a bug in a cost model), delete that run's `runResult.mat` and resume. Note that changing a setting in the JSON is not allowed when resuming; start a new experiment instead.
 - **Read `experiment_log.txt`** when a sweep stopped while you were away. It holds everything MATLAB printed, including the full error report.
 
 ## 8. Where this lives in the code
