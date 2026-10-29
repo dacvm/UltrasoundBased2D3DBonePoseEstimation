@@ -150,7 +150,7 @@ for combinationIndex = 1:numberOfCombinations
     evaluationStatus = string(currentRuns.evaluationStatus);
     perCombinationTable.numberPlanned(combinationIndex)             = height(currentRuns);
     perCombinationTable.numberOptimizerCompleted(combinationIndex)  = sum(optimizerStatus == "completed");
-    perCombinationTable.numberOptimizerFailed(combinationIndex)     = sum(optimizerStatus == "failed");
+    perCombinationTable.numberOptimizerFailed(combinationIndex)     = sum(optimizerStatus == "run_failed");
     perCombinationTable.numberEvaluated(combinationIndex)           = sum(evaluationStatus == "evaluated");
     perCombinationTable.numberEvaluationFailed(combinationIndex)    = sum(evaluationStatus == "failed");
     perCombinationTable.numberSkipped(combinationIndex)             = sum(evaluationStatus == "skipped");

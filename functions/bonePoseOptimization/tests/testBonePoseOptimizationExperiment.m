@@ -426,7 +426,7 @@ spec = createPreparationFailureSpec(testCase.TestData.sweepSpec, temporaryOutput
 % One preparation failure should create one failed result for each planned seed.
 experimentResult = runBonePoseOptimizationExperiment(spec);
 verifyEqual(testCase, experimentResult.summaryTable.status, ...
-    ["failed"; "failed"]);
+    ["run_failed"; "run_failed"]);
 verifyEqual(testCase, experimentResult.summaryTable.costModel, ...
     repmat("intensityLine", 2, 1));
 verifyTrue(testCase, all(isfile(experimentResult.summaryTable.resultFilePath)));
@@ -438,7 +438,7 @@ verifyFalse(testCase, isfile(fullfile( ...
 % The log file must hold the printed progress, including the closing line.
 logText = fileread(fullfile(experimentResult.experimentFolder, 'experiment_log.txt'));
 verifySubstring(testCase, logText, 'Created experiment');
-verifySubstring(testCase, logText, 'Experiment finished: 0 completed, 2 failed');
+verifySubstring(testCase, logText, 'Experiment finished: 0 completed, 2 run_failed');
 
 % Summary rows must preserve every planned identity and parameter column unchanged.
 plannedColumnNames = experimentResult.experimentPlan.runs.Properties.VariableNames;
@@ -466,7 +466,7 @@ function testResumeRerunsOnlyMissingAndCorruptResults(testCase)
 % testCase supplies a valid active spec that is redirected to temporary output.
 % This function has no output.
 %
-% The spec fails during preparation, so every run ends "failed" within
+% The spec fails during preparation, so every run ends "run_failed" within
 % milliseconds and no CMA-ES is needed. That is enough to test the resume
 % bookkeeping: which runs are skipped and which are run again.
 
@@ -489,8 +489,8 @@ resumedResult = runBonePoseOptimizationExperiment(spec);
 % The same folder is reused, and no second experiment folder appears.
 verifyEqual(testCase, resumedResult.experimentFolder, experimentFolder);
 verifyEqual(testCase, numel(listSubfolders(temporaryOutputRoot)), 1);
-% Seed 32 was run again; seed 31 ("failed") was kept as it was, not rerun.
-verifyEqual(testCase, resumedResult.summaryTable.status, ["failed"; "failed"]);
+% Seed 32 was run again; seed 31 ("run_failed") was kept as it was, not rerun.
+verifyEqual(testCase, resumedResult.summaryTable.status, ["run_failed"; "run_failed"]);
 verifyTrue(testCase, isfile(seed32FilePath));
 verifyEqual(testCase, loadRunStartTime(seed31FilePath), seed31StartTime);
 
@@ -501,7 +501,7 @@ fclose(fileId);
 resumedAgainResult = runBonePoseOptimizationExperiment(spec);
 
 % The corrupt file was replaced by a new, loadable result.
-verifyEqual(testCase, resumedAgainResult.summaryTable.status, ["failed"; "failed"]);
+verifyEqual(testCase, resumedAgainResult.summaryTable.status, ["run_failed"; "run_failed"]);
 verifyNotEqual(testCase, loadRunStartTime(seed31FilePath), seed31StartTime);
 
 % Both resumes are recorded in the same log file as the first session.
@@ -539,7 +539,7 @@ blockedResult = runBonePoseOptimizationExperiment(spec);
 
 % The sweep did not stop: seed 32 is marked save_failed and the summary
 % files were still written.
-verifyEqual(testCase, blockedResult.summaryTable.status, ["failed"; "save_failed"]);
+verifyEqual(testCase, blockedResult.summaryTable.status, ["run_failed"; "save_failed"]);
 verifyEqual(testCase, blockedResult.summaryTable.errorStage(2), "save");
 % The identifier of the save error is kept, like for any other error.
 verifyNotEqual(testCase, blockedResult.summaryTable.errorIdentifier(2), "");
@@ -549,7 +549,7 @@ verifyTrue(testCase, isfile(fullfile(firstResult.experimentFolder, 'summary.csv'
 % Once the lock is gone, the next resume reruns the save_failed run.
 rmdir(blockingFolder);
 unblockedResult = runBonePoseOptimizationExperiment(spec);
-verifyEqual(testCase, unblockedResult.summaryTable.status, ["failed"; "failed"]);
+verifyEqual(testCase, unblockedResult.summaryTable.status, ["run_failed"; "run_failed"]);
 verifyTrue(testCase, isfile(seed32FilePath));
 clear temporaryOutputCleanup;
 end
@@ -583,7 +583,7 @@ seed32StartTime = loadRunStartTime(seed32FilePath);
 % The resume reruns both runs, so both get a new start time.
 spec.experiment.resumeFolder = firstResult.experimentFolder;
 resumedResult = runBonePoseOptimizationExperiment(spec);
-verifyEqual(testCase, resumedResult.summaryTable.status, ["failed"; "failed"]);
+verifyEqual(testCase, resumedResult.summaryTable.status, ["run_failed"; "run_failed"]);
 verifyNotEqual(testCase, loadRunStartTime(seed31FilePath), seed31StartTime);
 verifyNotEqual(testCase, loadRunStartTime(seed32FilePath), seed32StartTime);
 clear temporaryOutputCleanup;
