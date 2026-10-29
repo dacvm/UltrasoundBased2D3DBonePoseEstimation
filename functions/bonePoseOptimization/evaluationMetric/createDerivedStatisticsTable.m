@@ -28,18 +28,26 @@ function derivedStatisticsTable = createDerivedStatisticsTable(perRunTable, perC
 %   derivedStatisticsTable - Table with columns group, statistic, detail,
 %                            value (text), unit, and definition.
 
-% Start with an empty table and let addRow append one statistic at a time.
+% Every statistic becomes one row with the same six columns:
+%   group      - which question the row helps answer (e.g. "accuracy"),
+%   statistic  - the name of the statistic,
+%   detail     - what the statistic is about, when it needs one (a parameter
+%                name, a stop reason, an input role, or a combination id),
+%   value      - the number or text, always stored as text,
+%   unit       - "mm", "deg", or empty for counts and fractions,
+%   definition - a short explanation of how the value was computed.
+% We start with an empty table and let addRow append one row at a time.
 derivedStatisticsTable = table('Size', [0 6], ...
     'VariableTypes', {'string', 'string', 'string', 'string', 'string', 'string'}, ...
     'VariableNames', {'group', 'statistic', 'detail', 'value', 'unit', 'definition'});
 
-% Most statistics only make sense for runs that produced a pose and errors.
-evaluatedRuns = perRunTable(perRunTable.evaluationStatus == "evaluated", :);
-
 %% METADATA: WHAT WAS RUN
 
-% These rows describe the experiment so a reader (or a later comparison)
-% can tell whether two experiments used the same data and settings.
+% The first rows describe the experiment itself, so a reader (or a later
+% comparison between experiments) can tell whether two experiments used
+% the same cost model, data, grid, and optimizer settings.
+
+% Row: the name of the cost model that every run in this sweep used.
 derivedStatisticsTable = addRow(derivedStatisticsTable, ...
     "metadata", ...
     "costModel", ...
@@ -48,6 +56,7 @@ derivedStatisticsTable = addRow(derivedStatisticsTable, ...
     "", ...
     "Cost model used by every run");
 
+% Row: how many different hyperparameter combinations the sweep tested.
 derivedStatisticsTable = addRow(derivedStatisticsTable, ...
     "metadata", ...
     "numberOfCombinations", ...
@@ -56,6 +65,9 @@ derivedStatisticsTable = addRow(derivedStatisticsTable, ...
     "", ...
     "Hyperparameter combinations in the sweep");
 
+% Row: how many times each combination was repeated with a different
+% random seed. With few seeds, small differences between combinations
+% can be pure chance.
 derivedStatisticsTable = addRow(derivedStatisticsTable, ...
     "metadata", ...
     "numberOfSeeds", ...
@@ -64,15 +76,19 @@ derivedStatisticsTable = addRow(derivedStatisticsTable, ...
     "", ...
     "Repeated optimizer runs per combination");
 
-% Store only the file names of the inputs. The saved paths are absolute and
-% depend on the machine that ran the sweep, but the file names identify the
-% recording, segmentation, CT model, and start pose (coarse registration).
+% Next, record which input files the sweep used. The saved paths are
+% absolute and depend on the machine that ran the sweep, so only the file
+% names are kept: they are enough to identify the recording, segmentation,
+% CT model, and start pose (coarse registration), on any machine.
 inputFieldNames = fieldnames(experimentSpec.input);
 for fieldIndex = 1:numel(inputFieldNames)
 
+    % Split the saved path so only "name.ext" remains. The "bone" field is
+    % a plain name (e.g. 'T') and passes through unchanged.
     fieldName = inputFieldNames{fieldIndex};
     [~, fileName, fileExtension] = fileparts(experimentSpec.input.(fieldName));
 
+    % Row: one input file; detail says which role the file has.
     derivedStatisticsTable = addRow(derivedStatisticsTable, ...
         "metadata", ...
         "input", ...
@@ -82,13 +98,16 @@ for fieldIndex = 1:numel(inputFieldNames)
         "Input file (or bone name) used by the sweep");
 end
 
-% The swept values define the search grid, which later tells us whether
-% the best value sits on the edge of that grid.
+% Then record the tested values of every hyperparameter. Together they
+% form the search grid, which later tells us whether the best value sits
+% on the edge of that grid.
 for parameterIndex = 1:numel(parameterNames)
 
-    parameterName = parameterNames{parameterIndex};
+    % Collect the distinct values this parameter took across combinations.
+    parameterName   = parameterNames{parameterIndex};
     parameterValues = unique(perCombinationTable.(parameterName));
 
+    % Row: the tested values of one hyperparameter, separated by spaces.
     derivedStatisticsTable = addRow(derivedStatisticsTable, ...
         "metadata", ...
         "sweptValues", ...
@@ -98,11 +117,14 @@ for parameterIndex = 1:numel(parameterNames)
         "Values tested for this hyperparameter");
 end
 
-% The optimizer budget and search bounds limit what any cost function can
-% reach, so they are needed to judge the results fairly.
+% Finally, record the optimizer settings that limit what any cost function
+% can achieve: the evaluation budget, the population size, and how far the
+% search may move from the start pose. Without them, a poor result cannot be
+% blamed fairly on either the cost function or the optimizer.
 optimizerSettingNames = {'maxFunctionEvaluations', 'populationSize', 'translationBoundMm', 'rotationBoundDeg'};
 for settingIndex = 1:numel(optimizerSettingNames)
 
+    % Row: one optimizer setting; detail names the setting.
     settingName = optimizerSettingNames{settingIndex};
     derivedStatisticsTable = addRow(derivedStatisticsTable, ...
         "metadata", ...
@@ -115,8 +137,11 @@ end
 
 %% START POSE: HOW FAR THE SHARED STARTING POINT IS FROM THE TRUTH
 
-% Every run starts from the same pose, so these three numbers are the
-% baseline that the optimization must improve on.
+% Every run starts from the same pose, so its error is the baseline that
+% the optimization must improve on. A final error close to these numbers
+% means the optimizer barely moved the bone.
+
+% Row: surface RMSE between the start-pose mesh and the ground-truth mesh.
 derivedStatisticsTable = addRow(derivedStatisticsTable, ...
     "startPose", ...
     "initialSurfaceRmseMm", ...
@@ -125,6 +150,7 @@ derivedStatisticsTable = addRow(derivedStatisticsTable, ...
     "mm", ...
     "Surface RMSE of the start pose against ground truth");
 
+% Row: distance between the start-pose bone origin and the true origin.
 derivedStatisticsTable = addRow(derivedStatisticsTable, ...
     "startPose", ...
     "initialTranslationErrorMm", ...
@@ -133,6 +159,7 @@ derivedStatisticsTable = addRow(derivedStatisticsTable, ...
     "mm", ...
     "Translation error of the start pose");
 
+% Row: rotation angle between the start-pose orientation and the true one.
 derivedStatisticsTable = addRow(derivedStatisticsTable, ...
     "startPose", ...
     "initialRotationErrorDeg", ...
@@ -143,16 +170,22 @@ derivedStatisticsTable = addRow(derivedStatisticsTable, ...
 
 %% OPTIMIZER HEALTH: DID THE RUNS FINISH, AND WHY DID THEY STOP?
 
-% Count runs by outcome so failures are visible before accuracy is judged.
-completedRuns = perRunTable(string(perRunTable.status) == "completed", :);
+% Before judging accuracy, check that the runs actually finished. Missing
+% or failed runs reduce the evidence behind every later statistic.
 
+% Row: the total number of runs the sweep planned (combinations x seeds).
 derivedStatisticsTable = addRow(derivedStatisticsTable, ...
     "optimizerHealth", ...
-    "numberOfRuns", "", ...
+    "numberOfRuns", ...
+    "", ...
     height(perRunTable), ...
     "", ...
     "Planned runs");
 
+% Keep only the runs where the optimizer reached its end without crashing.
+completedRuns = perRunTable(string(perRunTable.status) == "completed", :);
+
+% Row: how many runs the optimizer finished.
 derivedStatisticsTable = addRow(derivedStatisticsTable, ...
     "optimizerHealth", ...
     "numberOptimizerCompleted", ...
@@ -161,6 +194,12 @@ derivedStatisticsTable = addRow(derivedStatisticsTable, ...
     "", ...
     "Runs where the optimizer finished");
 
+% A finished run is only useful when its result could also be scored
+% against the ground truth. These evaluated runs are the ones every
+% accuracy statistic below is computed from.
+evaluatedRuns = perRunTable(perRunTable.evaluationStatus == "evaluated", :);
+
+% Row: how many runs have computed errors.
 derivedStatisticsTable = addRow(derivedStatisticsTable, ...
     "optimizerHealth", ...
     "numberEvaluated", ...
@@ -169,17 +208,24 @@ derivedStatisticsTable = addRow(derivedStatisticsTable, ...
     "", ...
     "Runs with computed errors (used by all accuracy statistics)");
 
-% CMA-ES can report several stop reasons for one run, joined by "; ".
-% Count, for each reason, the share of completed runs that report it.
-% A high share for "maxfunevals" means runs ran out of budget rather than
-% converging, so their accuracy may reflect the budget, not the cost function.
+% Next, look at why the finished runs stopped. CMA-ES can report several
+% stop reasons for one run, saved as one text joined by "; ", so we split
+% that text into a list of reasons per run and collect every reason that
+% appears at least once.
 stopReasonsPerRun = arrayfun(@(stopFlag) strtrim(split(stopFlag, ";")), string(completedRuns.stopFlag), 'UniformOutput', false);
-allStopReasons = unique(vertcat(stopReasonsPerRun{:}));
+allStopReasons    = unique(vertcat(stopReasonsPerRun{:}));
+
+% For each reason, compute the share of finished runs that report it.
+% A high share for "maxfunevals" means runs ran out of evaluation budget
+% instead of converging, so their accuracy may reflect the budget rather
+% than the cost function.
 for reasonIndex = 1:numel(allStopReasons)
 
-    stopReason = allStopReasons(reasonIndex);
+    % Mark the runs whose list of reasons contains this reason.
+    stopReason   = allStopReasons(reasonIndex);
     runHasReason = cellfun(@(reasons) any(reasons == stopReason), stopReasonsPerRun);
-    
+
+    % Row: share of finished runs that stopped (also) for this reason.
     derivedStatisticsTable = addRow(derivedStatisticsTable, ...
         "optimizerHealth", ...
         "fractionRunsStoppedBy", ...
@@ -191,13 +237,17 @@ end
 
 %% COST VALIDITY: DOES A LOWER COST MEAN A MORE ACCURATE POSE?
 
-% If the cost function is a good guide, runs with a lower final cost should
-% have a lower surface RMSE. Spearman (rank) correlation is used because we
-% only care whether the order agrees, not whether the relation is linear.
-% Note: hyperparameters such as weights change the scale of the cost, so
-% this pools runs whose costs are not on exactly the same scale.
+% The optimizer only sees the cost, never the true error. So the cost
+% function is only useful if a lower cost goes together with a lower
+% surface RMSE. Spearman (rank) correlation checks whether the two put the
+% runs in the same order, without assuming a straight-line relation:
+% +1 means perfect agreement, 0 means no relation, and a negative value
+% means a lower cost tends to come with a worse pose. Note that
+% hyperparameters such as weights change the scale of the cost, so this
+% pools runs whose costs are not on exactly the same scale.
 costRmseCorrelation = corr(evaluatedRuns.bestCost, evaluatedRuns.surfaceRmseMm, 'Type', 'Spearman');
 
+% Row: rank correlation between final cost and surface RMSE.
 derivedStatisticsTable = addRow(derivedStatisticsTable, ...
     "costValidity", ...
     "spearmanBestCostVsSurfaceRmse", ...
@@ -206,8 +256,9 @@ derivedStatisticsTable = addRow(derivedStatisticsTable, ...
     "", ...
     "Rank correlation of final cost and surface RMSE over all evaluated runs; cost scale differs between combinations");
 
-% Check that the optimizer lowers the cost at all, and by how much.
-relativeCostDecrease = (evaluatedRuns.initialCost - evaluatedRuns.bestCost) ./ abs(evaluatedRuns.initialCost);
+% Row: share of runs where the optimizer found any pose with a lower cost
+% than the start pose. A low share means the optimizer usually stays at
+% the start pose.
 derivedStatisticsTable = addRow(derivedStatisticsTable, ...
     "costValidity", ...
     "fractionRunsCostDecreased", ...
@@ -216,6 +267,13 @@ derivedStatisticsTable = addRow(derivedStatisticsTable, ...
     "", ...
     "Share of evaluated runs whose final cost is below the start cost");
 
+% To see how much the cost dropped, express each run's decrease as a
+% fraction of its start cost. Dividing by the start cost makes runs with
+% different cost scales comparable; abs keeps the sign meaningful when a
+% cost model produces negative values.
+relativeCostDecrease = (evaluatedRuns.initialCost - evaluatedRuns.bestCost) ./ abs(evaluatedRuns.initialCost);
+
+% Row: the typical relative cost decrease (0 means no decrease at all).
 derivedStatisticsTable = addRow(derivedStatisticsTable, ...
     "costValidity", ...
     "medianRelativeCostDecrease", ...
@@ -224,9 +282,12 @@ derivedStatisticsTable = addRow(derivedStatisticsTable, ...
     "", ...
     "Median of (initialCost - bestCost) / |initialCost|");
 
-% Lowering the cost is only useful when it also moves the bone closer to
-% the truth, so compare each final RMSE with the start-pose RMSE.
+% Lowering the cost only helps when it also moves the bone closer to the
+% truth, so compare each final surface RMSE with the start-pose RMSE.
+% A positive improvement means the run ended closer to the truth.
 surfaceRmseImprovementMm = initialPoseErrors.surfaceRmseMm - evaluatedRuns.surfaceRmseMm;
+
+% Row: share of runs that ended closer to the truth than they started.
 derivedStatisticsTable = addRow(derivedStatisticsTable, ...
     "costValidity", ...
     "fractionRunsSurfaceRmseImproved", ...
@@ -235,6 +296,7 @@ derivedStatisticsTable = addRow(derivedStatisticsTable, ...
     "", ...
     "Share of evaluated runs whose surface RMSE is below the start pose's");
 
+% Row: the typical improvement in millimetres (negative means worse).
 derivedStatisticsTable = addRow(derivedStatisticsTable, ...
     "costValidity", ...
     "medianSurfaceRmseImprovementMm", ...
@@ -245,12 +307,12 @@ derivedStatisticsTable = addRow(derivedStatisticsTable, ...
 
 %% ACCURACY: HOW GOOD ARE THE RESULTS AGAINST OUR TARGETS?
 
-% Success uses the surface RMSE alone; the clinical rate needs both the
+% Improving on the start pose is not enough; the result must also be
+% accurate enough to use. Two targets are checked: "success" looks at the
+% surface RMSE alone, while "clinically acceptable" needs both the
 % translation and the rotation error to be within tolerance.
-isSuccess  = evaluatedRuns.surfaceRmseMm <= accuracyThresholds.successSurfaceRmseMm;
-isClinical = evaluatedRuns.translationErrorMm <= accuracyThresholds.clinicalTranslationErrorMm & ...
-             evaluatedRuns.rotationErrorDeg   <= accuracyThresholds.clinicalRotationErrorDeg;
 
+% Row: the surface RMSE target used for the success rate.
 derivedStatisticsTable = addRow(derivedStatisticsTable, ...
     "accuracy", ...
     "successSurfaceRmseThresholdMm", ...
@@ -259,6 +321,10 @@ derivedStatisticsTable = addRow(derivedStatisticsTable, ...
     "mm", ...
     "Surface RMSE at or below this counts as success");
 
+% Mark the runs whose surface RMSE meets the success target.
+isSuccess = evaluatedRuns.surfaceRmseMm <= accuracyThresholds.successSurfaceRmseMm;
+
+% Row: share of runs that meet the success target.
 derivedStatisticsTable = addRow(derivedStatisticsTable, ...
     "accuracy", ...
     "successRate", ...
@@ -267,6 +333,7 @@ derivedStatisticsTable = addRow(derivedStatisticsTable, ...
     "", ...
     "Share of evaluated runs that meet the success threshold");
 
+% Row: the translation tolerance used for the clinical rate.
 derivedStatisticsTable = addRow(derivedStatisticsTable, ...
     "accuracy", ...
     "clinicalTranslationThresholdMm", ...
@@ -275,6 +342,7 @@ derivedStatisticsTable = addRow(derivedStatisticsTable, ...
     "mm", ...
     "Clinically acceptable translation error");
 
+% Row: the rotation tolerance used for the clinical rate.
 derivedStatisticsTable = addRow(derivedStatisticsTable, ...
     "accuracy", ...
     "clinicalRotationThresholdDeg", ...
@@ -283,6 +351,11 @@ derivedStatisticsTable = addRow(derivedStatisticsTable, ...
     "deg", ...
     "Clinically acceptable rotation error");
 
+% Mark the runs that are within both clinical tolerances at the same time.
+isClinical = evaluatedRuns.translationErrorMm <= accuracyThresholds.clinicalTranslationErrorMm & ...
+             evaluatedRuns.rotationErrorDeg   <= accuracyThresholds.clinicalRotationErrorDeg;
+
+% Row: share of runs that are clinically acceptable.
 derivedStatisticsTable = addRow(derivedStatisticsTable, ...
     "accuracy", ...
     "clinicalRate", ...
@@ -291,8 +364,12 @@ derivedStatisticsTable = addRow(derivedStatisticsTable, ...
     "", ...
     "Share of evaluated runs within both clinical thresholds");
 
-% The combination table is already ranked by median surface RMSE.
+% The combination table is already ranked by median surface RMSE, so the
+% row with rank 1 is the best combination. It is also used later to check
+% whether the best values sit on the edge of the grid.
 bestCombination = perCombinationTable(perCombinationTable.combinationRank == 1, :);
+
+% Row: the median surface RMSE of the best combination; detail names it.
 derivedStatisticsTable = addRow(derivedStatisticsTable, ...
     "accuracy", ...
     "bestMedianSurfaceRmseMm", ...
@@ -301,6 +378,8 @@ derivedStatisticsTable = addRow(derivedStatisticsTable, ...
     "mm", ...
     "Lowest median surface RMSE over seeds; detail names the combination");
 
+% Row: the lowest surface RMSE of any single run. Comparing it with the
+% best median shows whether good results are typical or a lucky seed.
 derivedStatisticsTable = addRow(derivedStatisticsTable, ...
     "accuracy", ...
     "bestRunSurfaceRmseMm", ...
@@ -311,38 +390,48 @@ derivedStatisticsTable = addRow(derivedStatisticsTable, ...
 
 %% SEED SPREAD: HOW REPEATABLE IS ONE COMBINATION?
 
-% A large spread means one seed can land far from another with the same
-% settings, so small differences between combinations are not meaningful.
+% Runs with the same settings but different seeds can end in different
+% places. The interquartile range (IQR) over seeds measures this spread
+% for one combination; its median over all combinations gives the typical
+% spread. When combinations differ by less than this, the difference is
+% not meaningful.
+
+% Row: typical seed-to-seed spread of surface RMSE within one combination.
 derivedStatisticsTable = addRow(derivedStatisticsTable, ...
     "seedSpread", ...
     "medianIqrSurfaceRmseMm", ...
     "", ...
-    ...
     median(perCombinationTable.iqrSurfaceRmseMm, 'omitnan'), ...
     "mm", ...
     "Median over combinations of the seed IQR of surface RMSE");
 
 %% PARAMETER EFFECT AND GRID EDGE: WHICH PARAMETERS MATTER, AND WHERE TO SEARCH NEXT
 
+% The last rows look at one hyperparameter at a time: how much it changes
+% the accuracy, and whether its best value lies on the edge of the grid.
 for parameterIndex = 1:numel(parameterNames)
 
+    % Collect the distinct values this parameter took across combinations.
     parameterName   = parameterNames{parameterIndex};
     parameterValues = unique(perCombinationTable.(parameterName));
 
-    % A parameter held at one value has no effect to measure.
+    % A parameter held at one value has no effect to measure and no grid
+    % edge to check, so it gets no rows here.
     if numel(parameterValues) < 2
         continue;
     end
 
-    % Main effect: for each value, the median RMSE over all runs that used
-    % it (pooling every value of the other parameters). The range between
-    % the best and worst value shows how much this parameter matters.
+    % Main effect: for each tested value, take the median surface RMSE over
+    % all runs that used it, whatever the other parameters were. If these
+    % medians differ a lot between values, the parameter matters.
     medianRmsePerValue = zeros(numel(parameterValues), 1);
     for valueIndex = 1:numel(parameterValues)
-        
-        runsWithValue = evaluatedRuns.(parameterName) == parameterValues(valueIndex);
+
+        % Select the runs that used this value and take their median RMSE.
+        runsWithValue                  = evaluatedRuns.(parameterName) == parameterValues(valueIndex);
         medianRmsePerValue(valueIndex) = median(evaluatedRuns.surfaceRmseMm(runsWithValue));
 
+        % Row: the median surface RMSE at one value; detail is "name = value".
         derivedStatisticsTable = addRow(derivedStatisticsTable, ...
             "parameterEffect", ...
             "medianSurfaceRmseMm", ...
@@ -352,6 +441,9 @@ for parameterIndex = 1:numel(parameterNames)
             "Median surface RMSE over all evaluated runs with this value");
     end
 
+    % Row: the gap between the best and worst value of this parameter.
+    % A large range means the parameter strongly affects accuracy; a range
+    % near zero means it could be fixed in the next sweep to save time.
     derivedStatisticsTable = addRow(derivedStatisticsTable, ...
         "parameterEffect", ...
         "surfaceRmseRangeMm", ...
@@ -361,7 +453,8 @@ for parameterIndex = 1:numel(parameterNames)
         "Max minus min of the per-value median surface RMSE");
 
     % Grid edge: when the best combination uses the lowest or highest tested
-    % value, the true optimum may lie outside the tested range.
+    % value, the true optimum may lie outside the tested range, so the next
+    % sweep should extend the grid in that direction.
     bestValue = bestCombination.(parameterName);
     if bestValue == min(parameterValues)
         bestValuePosition = "lowest";
@@ -371,6 +464,7 @@ for parameterIndex = 1:numel(parameterNames)
         bestValuePosition = "interior";
     end
 
+    % Row: where the best combination's value sits in this parameter's grid.
     derivedStatisticsTable = addRow(derivedStatisticsTable, ...
         "gridEdge", ...
         "bestValuePosition", ...
@@ -384,11 +478,14 @@ end
 
 function derivedStatisticsTable = addRow(derivedStatisticsTable, group, statistic, detail, value, unit, definition)
 %ADDROW Append one statistic to the long table.
-% Numbers are stored as text with 6 significant digits so numeric and text
-% values (such as file names) can share the single value column.
+% The value column must hold both numbers and text (such as file names),
+% so numbers are converted to text first. Six significant digits keep
+% enough precision for millimetres and fractions without long tails.
 
 if isnumeric(value) || islogical(value)
     value = compose("%.6g", value);
 end
+
+% Add the new statistic as the last row of the table.
 derivedStatisticsTable(end + 1, :) = {group, statistic, detail, value, unit, definition};
 end
