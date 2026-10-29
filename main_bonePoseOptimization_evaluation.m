@@ -29,6 +29,13 @@ heatmapSettings.panelColumnParameter = '';
 % one value, so hold it at that value to keep it out of the figure layout.
 heatmapSettings.parametersToHold = struct('normalFacingToleranceDeg', 30);
 
+% Accuracy targets used by the derived statistics. A run is a "success" when
+% its surface RMSE is at or below the first value, and "clinically
+% acceptable" when both its translation and rotation errors are within tolerance.
+accuracyThresholds.successSurfaceRmseMm       = 1;
+accuracyThresholds.clinicalTranslationErrorMm = 1;
+accuracyThresholds.clinicalRotationErrorDeg   = 1;
+
 %% LOAD THE EXPERIMENT PLAN, SUMMARY, AND GROUND TRUTH
 
 % The experiment plan tells the evaluator which cost model was used and which
@@ -87,6 +94,24 @@ validationData = load(validationFilePath, 'validationContext');
 groundTruthBonePose    = validationData.validationContext.validationData.groundTruthBonePose;
 T_bone_ref_groundTruth = groundTruthBonePose.T_bone_ref;
 boneMeshRefGroundTruth = groundTruthBonePose.boneMeshRef;
+
+%% MEASURE THE ERROR OF THE SHARED START POSE
+
+% Every run starts from the same pose, so its error is the baseline that
+% tells us whether the optimization moved the bone closer to the truth.
+T_bone_ref_initial = validationData.validationContext.T_bone_ref_initial;
+
+% Build the bone mesh at the start pose: express the ground-truth mesh in
+% the bone frame, then place it with the start pose. Keeping the original
+% connectivity gives vertex-to-vertex correspondence for the surface RMSE.
+T_ref_bone_groundTruth = inv(T_bone_ref_groundTruth);
+bonePointsBone         = applyRigidTransform(boneMeshRefGroundTruth.Points, T_ref_bone_groundTruth);
+boneMeshRefInitial     = triangulation(boneMeshRefGroundTruth.ConnectivityList, ...
+                                       applyRigidTransform(bonePointsBone, T_bone_ref_initial));
+
+initialPoseErrors.surfaceRmseMm      = calculateSurfaceRmseMm(boneMeshRefGroundTruth, boneMeshRefInitial);
+initialPoseErrors.translationErrorMm = calculateTranslationErrorMm(T_bone_ref_groundTruth, T_bone_ref_initial);
+initialPoseErrors.rotationErrorDeg   = calculateRotationErrorDeg(T_bone_ref_groundTruth, T_bone_ref_initial);
 
 %% PREPARE THE PER-RUN EVALUATION TABLE
 
@@ -184,6 +209,13 @@ perRunTable = movevars(perRunTable, 'surfaceRmseRank', 'Before', 'runNumber');
 % Aggregate the seed rows using the parameter order saved by the experiment plan.
 perCombinationTable = createCombinationEvaluationTable(perRunTable, parameterNames);
 
+%% CREATE THE EXPERIMENT-LEVEL DERIVED STATISTICS
+
+% Summarize the whole sweep (optimizer health, cost validity, accuracy,
+% parameter effects) in one long table, computed the same way every time.
+derivedStatisticsTable = createDerivedStatisticsTable(perRunTable, perCombinationTable, parameterNames, ...
+    planData.experimentSpec, initialPoseErrors, accuracyThresholds);
+
 %% SAVE THE EVALUATION TABLES
 
 % Keep evaluation results beside the experiment that produced them.
@@ -194,12 +226,13 @@ end
 
 writetable(perRunTable, fullfile(evaluationFolder, 'per_run_evaluation.csv'));
 writetable(perCombinationTable, fullfile(evaluationFolder, 'per_combination_evaluation.csv'));
+writetable(derivedStatisticsTable, fullfile(evaluationFolder, 'derived_statistics.csv'));
 
 % Save the small metadata needed to interpret generic parameter columns later.
 evaluationMetadata.schemaVersion  = planData.experimentSpec.schemaVersion;
 evaluationMetadata.costModel      = char(expectedCostModel);
 evaluationMetadata.parameterNames = parameterNames;
-save(fullfile(evaluationFolder, 'evaluation_tables.mat'), 'perRunTable', 'perCombinationTable', 'evaluationMetadata');
+save(fullfile(evaluationFolder, 'evaluation_tables.mat'), 'perRunTable', 'perCombinationTable', 'derivedStatisticsTable', 'evaluationMetadata');
 
 % Show the main hyperparameter-selection table after saving exact values.
 disp(perCombinationTable);
@@ -211,3 +244,13 @@ figureSurfaceRmseBoxplot            = plotSurfaceRmseBoxplot(perRunTable, perCom
 figureTranslationRotationErrors     = plotTranslationRotationErrors(perCombinationTable, topCombinationCount);
 figureHyperparameterPaneledHeatmaps = plotHyperparameterPaneledHeatmaps(perCombinationTable, parameterNames, heatmapSettings);
 figureOptimizerDiagnostic           = plotOptimizerCostVsSurfaceRmse(perCombinationTable, topCombinationCount);
+
+%% SAVE THE EVALUATION PLOTS AS IMAGES
+
+% Save each figure beside the tables so the plots can be reviewed (and put
+% into reports) later without rerunning this script. Fixed file names let
+% other tools find the same plot in every experiment.
+exportgraphics(figureSurfaceRmseBoxplot,            fullfile(evaluationFolder, 'surfaceRmseBoxplot.png'),         'Resolution', 200);
+exportgraphics(figureTranslationRotationErrors,     fullfile(evaluationFolder, 'translationRotationErrors.png'),  'Resolution', 200);
+exportgraphics(figureHyperparameterPaneledHeatmaps, fullfile(evaluationFolder, 'hyperparameterHeatmaps.png'),     'Resolution', 200);
+exportgraphics(figureOptimizerDiagnostic,           fullfile(evaluationFolder, 'optimizerCostVsSurfaceRmse.png'), 'Resolution', 200);

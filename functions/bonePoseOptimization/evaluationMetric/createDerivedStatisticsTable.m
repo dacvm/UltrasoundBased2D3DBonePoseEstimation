@@ -1,0 +1,222 @@
+function derivedStatisticsTable = createDerivedStatisticsTable(perRunTable, perCombinationTable, parameterNames, experimentSpec, initialPoseErrors, accuracyThresholds)
+%CREATEDERIVEDSTATISTICSTABLE Summarize a whole sweep in one long table.
+% This function turns the per-run and per-combination evaluation tables into
+% experiment-level statistics: what was run, how the optimizer behaved,
+% whether a lower cost means a more accurate pose, how accurate the results
+% are, and how much each hyperparameter matters. It is needed so these
+% conclusions are computed once, the same way for every experiment, instead
+% of being re-derived by hand (or by Claude) from the raw tables.
+%
+% The table is "long": one row per statistic. New statistics can be added
+% as new rows without changing the columns of the saved CSV.
+%
+% Inputs:
+%   perRunTable         - One row per run, after evaluation. Needs the
+%                         parameter columns, status, stopFlag, initialCost,
+%                         bestCost, evaluationStatus, and the three errors.
+%   perCombinationTable - Ranked combination table from
+%                         createCombinationEvaluationTable.
+%   parameterNames      - Row cell array of swept parameter names.
+%   experimentSpec      - Saved experiment specification; its input files
+%                         and optimizer settings are copied as metadata.
+%   initialPoseErrors   - Struct with the errors of the shared start pose:
+%                         surfaceRmseMm, translationErrorMm, rotationErrorDeg.
+%   accuracyThresholds  - Struct with successSurfaceRmseMm,
+%                         clinicalTranslationErrorMm, clinicalRotationErrorDeg.
+%
+% Output:
+%   derivedStatisticsTable - Table with columns group, statistic, detail,
+%                            value (text), unit, and definition.
+
+% Start with an empty table and let addRow append one statistic at a time.
+derivedStatisticsTable = table('Size', [0 6], ...
+    'VariableTypes', {'string', 'string', 'string', 'string', 'string', 'string'}, ...
+    'VariableNames', {'group', 'statistic', 'detail', 'value', 'unit', 'definition'});
+
+% Most statistics only make sense for runs that produced a pose and errors.
+evaluatedRuns = perRunTable(perRunTable.evaluationStatus == "evaluated", :);
+
+%% METADATA: WHAT WAS RUN
+
+% These rows describe the experiment so a reader (or a later comparison)
+% can tell whether two experiments used the same data and settings.
+derivedStatisticsTable = addRow(derivedStatisticsTable, "metadata", "costModel", "", ...
+    string(experimentSpec.cost.model), "", "Cost model used by every run");
+derivedStatisticsTable = addRow(derivedStatisticsTable, "metadata", "numberOfCombinations", "", ...
+    height(perCombinationTable), "", "Hyperparameter combinations in the sweep");
+derivedStatisticsTable = addRow(derivedStatisticsTable, "metadata", "numberOfSeeds", "", ...
+    numel(unique(perRunTable.seed)), "", "Repeated optimizer runs per combination");
+
+% Store only the file names of the inputs. The saved paths are absolute and
+% depend on the machine that ran the sweep, but the file names identify the
+% recording, segmentation, CT model, and start pose (coarse registration).
+inputFieldNames = fieldnames(experimentSpec.input);
+for fieldIndex = 1:numel(inputFieldNames)
+    fieldName = inputFieldNames{fieldIndex};
+    [~, fileName, fileExtension] = fileparts(experimentSpec.input.(fieldName));
+    derivedStatisticsTable = addRow(derivedStatisticsTable, "metadata", "input", string(fieldName), ...
+        string(fileName) + string(fileExtension), "", "Input file (or bone name) used by the sweep");
+end
+
+% The swept values define the search grid, which later tells us whether
+% the best value sits on the edge of that grid.
+for parameterIndex = 1:numel(parameterNames)
+    parameterName = parameterNames{parameterIndex};
+    parameterValues = unique(perCombinationTable.(parameterName));
+    derivedStatisticsTable = addRow(derivedStatisticsTable, "metadata", "sweptValues", string(parameterName), ...
+        strjoin(compose("%g", parameterValues), " "), "", "Values tested for this hyperparameter");
+end
+
+% The optimizer budget and search bounds limit what any cost function can
+% reach, so they are needed to judge the results fairly.
+optimizerSettingNames = {'maxFunctionEvaluations', 'populationSize', 'translationBoundMm', 'rotationBoundDeg'};
+for settingIndex = 1:numel(optimizerSettingNames)
+    settingName = optimizerSettingNames{settingIndex};
+    derivedStatisticsTable = addRow(derivedStatisticsTable, "metadata", "optimizer", string(settingName), ...
+        experimentSpec.optimizer.(settingName), "", "Optimizer setting shared by every run");
+end
+
+%% START POSE: HOW FAR THE SHARED STARTING POINT IS FROM THE TRUTH
+
+% Every run starts from the same pose, so these three numbers are the
+% baseline that the optimization must improve on.
+derivedStatisticsTable = addRow(derivedStatisticsTable, "startPose", "initialSurfaceRmseMm", "", ...
+    initialPoseErrors.surfaceRmseMm, "mm", "Surface RMSE of the start pose against ground truth");
+derivedStatisticsTable = addRow(derivedStatisticsTable, "startPose", "initialTranslationErrorMm", "", ...
+    initialPoseErrors.translationErrorMm, "mm", "Translation error of the start pose");
+derivedStatisticsTable = addRow(derivedStatisticsTable, "startPose", "initialRotationErrorDeg", "", ...
+    initialPoseErrors.rotationErrorDeg, "deg", "Rotation error of the start pose");
+
+%% OPTIMIZER HEALTH: DID THE RUNS FINISH, AND WHY DID THEY STOP?
+
+% Count runs by outcome so failures are visible before accuracy is judged.
+completedRuns = perRunTable(string(perRunTable.status) == "completed", :);
+derivedStatisticsTable = addRow(derivedStatisticsTable, "optimizerHealth", "numberOfRuns", "", ...
+    height(perRunTable), "", "Planned runs");
+derivedStatisticsTable = addRow(derivedStatisticsTable, "optimizerHealth", "numberOptimizerCompleted", "", ...
+    height(completedRuns), "", "Runs where the optimizer finished");
+derivedStatisticsTable = addRow(derivedStatisticsTable, "optimizerHealth", "numberEvaluated", "", ...
+    height(evaluatedRuns), "", "Runs with computed errors (used by all accuracy statistics)");
+
+% CMA-ES can report several stop reasons for one run, joined by "; ".
+% Count, for each reason, the share of completed runs that report it.
+% A high share for "maxfunevals" means runs ran out of budget rather than
+% converging, so their accuracy may reflect the budget, not the cost function.
+stopReasonsPerRun = arrayfun(@(stopFlag) strtrim(split(stopFlag, ";")), string(completedRuns.stopFlag), 'UniformOutput', false);
+allStopReasons = unique(vertcat(stopReasonsPerRun{:}));
+for reasonIndex = 1:numel(allStopReasons)
+    stopReason = allStopReasons(reasonIndex);
+    runHasReason = cellfun(@(reasons) any(reasons == stopReason), stopReasonsPerRun);
+    derivedStatisticsTable = addRow(derivedStatisticsTable, "optimizerHealth", "fractionRunsStoppedBy", stopReason, ...
+        mean(runHasReason), "", "Share of completed runs that report this CMA-ES stop reason");
+end
+
+%% COST VALIDITY: DOES A LOWER COST MEAN A MORE ACCURATE POSE?
+
+% If the cost function is a good guide, runs with a lower final cost should
+% have a lower surface RMSE. Spearman (rank) correlation is used because we
+% only care whether the order agrees, not whether the relation is linear.
+% Note: hyperparameters such as weights change the scale of the cost, so
+% this pools runs whose costs are not on exactly the same scale.
+costRmseCorrelation = corr(evaluatedRuns.bestCost, evaluatedRuns.surfaceRmseMm, 'Type', 'Spearman');
+derivedStatisticsTable = addRow(derivedStatisticsTable, "costValidity", "spearmanBestCostVsSurfaceRmse", "", ...
+    costRmseCorrelation, "", "Rank correlation of final cost and surface RMSE over all evaluated runs; cost scale differs between combinations");
+
+% Check that the optimizer lowers the cost at all, and by how much.
+relativeCostDecrease = (evaluatedRuns.initialCost - evaluatedRuns.bestCost) ./ abs(evaluatedRuns.initialCost);
+derivedStatisticsTable = addRow(derivedStatisticsTable, "costValidity", "fractionRunsCostDecreased", "", ...
+    mean(evaluatedRuns.bestCost < evaluatedRuns.initialCost), "", "Share of evaluated runs whose final cost is below the start cost");
+derivedStatisticsTable = addRow(derivedStatisticsTable, "costValidity", "medianRelativeCostDecrease", "", ...
+    median(relativeCostDecrease), "", "Median of (initialCost - bestCost) / |initialCost|");
+
+% Lowering the cost is only useful when it also moves the bone closer to
+% the truth, so compare each final RMSE with the start-pose RMSE.
+surfaceRmseImprovementMm = initialPoseErrors.surfaceRmseMm - evaluatedRuns.surfaceRmseMm;
+derivedStatisticsTable = addRow(derivedStatisticsTable, "costValidity", "fractionRunsSurfaceRmseImproved", "", ...
+    mean(surfaceRmseImprovementMm > 0), "", "Share of evaluated runs whose surface RMSE is below the start pose's");
+derivedStatisticsTable = addRow(derivedStatisticsTable, "costValidity", "medianSurfaceRmseImprovementMm", "", ...
+    median(surfaceRmseImprovementMm), "mm", "Median of (initial surface RMSE - final surface RMSE); negative means worse than the start");
+
+%% ACCURACY: HOW GOOD ARE THE RESULTS AGAINST OUR TARGETS?
+
+% Success uses the surface RMSE alone; the clinical rate needs both the
+% translation and the rotation error to be within tolerance.
+isSuccess  = evaluatedRuns.surfaceRmseMm <= accuracyThresholds.successSurfaceRmseMm;
+isClinical = evaluatedRuns.translationErrorMm <= accuracyThresholds.clinicalTranslationErrorMm & ...
+             evaluatedRuns.rotationErrorDeg   <= accuracyThresholds.clinicalRotationErrorDeg;
+derivedStatisticsTable = addRow(derivedStatisticsTable, "accuracy", "successSurfaceRmseThresholdMm", "", ...
+    accuracyThresholds.successSurfaceRmseMm, "mm", "Surface RMSE at or below this counts as success");
+derivedStatisticsTable = addRow(derivedStatisticsTable, "accuracy", "successRate", "", ...
+    mean(isSuccess), "", "Share of evaluated runs that meet the success threshold");
+derivedStatisticsTable = addRow(derivedStatisticsTable, "accuracy", "clinicalTranslationThresholdMm", "", ...
+    accuracyThresholds.clinicalTranslationErrorMm, "mm", "Clinically acceptable translation error");
+derivedStatisticsTable = addRow(derivedStatisticsTable, "accuracy", "clinicalRotationThresholdDeg", "", ...
+    accuracyThresholds.clinicalRotationErrorDeg, "deg", "Clinically acceptable rotation error");
+derivedStatisticsTable = addRow(derivedStatisticsTable, "accuracy", "clinicalRate", "", ...
+    mean(isClinical), "", "Share of evaluated runs within both clinical thresholds");
+
+% The combination table is already ranked by median surface RMSE.
+bestCombination = perCombinationTable(perCombinationTable.combinationRank == 1, :);
+derivedStatisticsTable = addRow(derivedStatisticsTable, "accuracy", "bestMedianSurfaceRmseMm", bestCombination.combinationId, ...
+    bestCombination.medianSurfaceRmseMm, "mm", "Lowest median surface RMSE over seeds; detail names the combination");
+derivedStatisticsTable = addRow(derivedStatisticsTable, "accuracy", "bestRunSurfaceRmseMm", "", ...
+    min(evaluatedRuns.surfaceRmseMm), "mm", "Lowest surface RMSE of any single run");
+
+%% SEED SPREAD: HOW REPEATABLE IS ONE COMBINATION?
+
+% A large spread means one seed can land far from another with the same
+% settings, so small differences between combinations are not meaningful.
+derivedStatisticsTable = addRow(derivedStatisticsTable, "seedSpread", "medianIqrSurfaceRmseMm", "", ...
+    median(perCombinationTable.iqrSurfaceRmseMm, 'omitnan'), "mm", "Median over combinations of the seed IQR of surface RMSE");
+
+%% PARAMETER EFFECT AND GRID EDGE: WHICH PARAMETERS MATTER, AND WHERE TO SEARCH NEXT
+
+for parameterIndex = 1:numel(parameterNames)
+    parameterName = parameterNames{parameterIndex};
+    parameterValues = unique(perCombinationTable.(parameterName));
+
+    % A parameter held at one value has no effect to measure.
+    if numel(parameterValues) < 2
+        continue;
+    end
+
+    % Main effect: for each value, the median RMSE over all runs that used
+    % it (pooling every value of the other parameters). The range between
+    % the best and worst value shows how much this parameter matters.
+    medianRmsePerValue = zeros(numel(parameterValues), 1);
+    for valueIndex = 1:numel(parameterValues)
+        runsWithValue = evaluatedRuns.(parameterName) == parameterValues(valueIndex);
+        medianRmsePerValue(valueIndex) = median(evaluatedRuns.surfaceRmseMm(runsWithValue));
+        derivedStatisticsTable = addRow(derivedStatisticsTable, "parameterEffect", "medianSurfaceRmseMm", ...
+            compose("%s = %g", parameterName, parameterValues(valueIndex)), medianRmsePerValue(valueIndex), "mm", ...
+            "Median surface RMSE over all evaluated runs with this value");
+    end
+    derivedStatisticsTable = addRow(derivedStatisticsTable, "parameterEffect", "surfaceRmseRangeMm", string(parameterName), ...
+        max(medianRmsePerValue) - min(medianRmsePerValue), "mm", "Max minus min of the per-value median surface RMSE");
+
+    % Grid edge: when the best combination uses the lowest or highest tested
+    % value, the true optimum may lie outside the tested range.
+    bestValue = bestCombination.(parameterName);
+    if bestValue == min(parameterValues)
+        bestValuePosition = "lowest";
+    elseif bestValue == max(parameterValues)
+        bestValuePosition = "highest";
+    else
+        bestValuePosition = "interior";
+    end
+    derivedStatisticsTable = addRow(derivedStatisticsTable, "gridEdge", "bestValuePosition", string(parameterName), ...
+        bestValuePosition, "", "Where the best combination's value sits in the tested grid");
+end
+end
+
+
+function derivedStatisticsTable = addRow(derivedStatisticsTable, group, statistic, detail, value, unit, definition)
+%ADDROW Append one statistic to the long table.
+% Numbers are stored as text with 6 significant digits so numeric and text
+% values (such as file names) can share the single value column.
+
+if isnumeric(value) || islogical(value)
+    value = compose("%.6g", value);
+end
+derivedStatisticsTable(end + 1, :) = {group, statistic, detail, value, unit, definition};
+end

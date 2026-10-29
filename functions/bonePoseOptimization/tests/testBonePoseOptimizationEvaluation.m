@@ -169,6 +169,71 @@ verifyError(testCase, ...
 end
 
 
+function testDerivedStatisticsSummarizeTheSweep(testCase)
+%TESTDERIVEDSTATISTICSSUMMARIZETHESWEEP Check experiment-level statistics.
+% testCase provides MATLAB verification methods. This function has no output.
+
+[perRunTable, parameterNames] = createSyntheticPerRunTable();
+perCombinationTable = createCombinationEvaluationTable(perRunTable, parameterNames);
+
+% Add the optimizer columns that only the derived statistics need. Run 2
+% reports two stop reasons; run 3 failed, so it has no stop reason or cost.
+perRunTable.initialCost = [1; 1; NaN; 1.2; 1.2];
+perRunTable.stopFlag = ["maxfunevals"; "maxfunevals; tolfun"; ""; "maxfunevals"; "tolfun"];
+
+% Use a small experiment specification with one absolute input path.
+experimentSpec.cost.model = 'intensityPIMLOP';
+experimentSpec.input.bone = 'T';
+experimentSpec.input.coarseRegistrationMatFile = 'C:\someMachine\outputs\coarseRegistration_1.mat';
+experimentSpec.optimizer.maxFunctionEvaluations = 100;
+experimentSpec.optimizer.populationSize = 8;
+experimentSpec.optimizer.translationBoundMm = 10;
+experimentSpec.optimizer.rotationBoundDeg = 10;
+
+% The start pose sits between the evaluated RMSE values 2, 4, 5, and 7 mm.
+initialPoseErrors.surfaceRmseMm = 4.5;
+initialPoseErrors.translationErrorMm = 4;
+initialPoseErrors.rotationErrorDeg = 5;
+accuracyThresholds.successSurfaceRmseMm = 2;
+accuracyThresholds.clinicalTranslationErrorMm = 3;
+accuracyThresholds.clinicalRotationErrorDeg = 4;
+
+derivedStatisticsTable = createDerivedStatisticsTable(perRunTable, perCombinationTable, ...
+    parameterNames, experimentSpec, initialPoseErrors, accuracyThresholds);
+
+% Only the file name of an input is kept, so the value does not depend on the machine.
+verifyEqual(testCase, getDerivedValue(derivedStatisticsTable, "input", "coarseRegistrationMatFile"), ...
+    "coarseRegistration_1.mat");
+verifyEqual(testCase, getDerivedValue(derivedStatisticsTable, "sweptValues", "intensitySmoothingSigmaMm"), ...
+    "0.5 1");
+
+% Three of the four completed runs hit the budget; two report tolfun.
+verifyEqual(testCase, getDerivedValue(derivedStatisticsTable, "fractionRunsStoppedBy", "maxfunevals"), "0.75");
+verifyEqual(testCase, getDerivedValue(derivedStatisticsTable, "fractionRunsStoppedBy", "tolfun"), "0.5");
+
+% Final cost and RMSE increase together, so their rank correlation is one.
+verifyEqual(testCase, getDerivedValue(derivedStatisticsTable, "spearmanBestCostVsSurfaceRmse", ""), "1");
+verifyEqual(testCase, getDerivedValue(derivedStatisticsTable, "fractionRunsCostDecreased", ""), "1");
+
+% Runs at 2 and 4 mm beat the 4.5 mm start; the improvements are 2.5, 0.5, -0.5, -2.5.
+verifyEqual(testCase, getDerivedValue(derivedStatisticsTable, "fractionRunsSurfaceRmseImproved", ""), "0.5");
+verifyEqual(testCase, getDerivedValue(derivedStatisticsTable, "medianSurfaceRmseImprovementMm", ""), "0");
+
+% One run is at or below 2 mm; two runs meet both clinical tolerances.
+verifyEqual(testCase, getDerivedValue(derivedStatisticsTable, "successRate", ""), "0.25");
+verifyEqual(testCase, getDerivedValue(derivedStatisticsTable, "clinicalRate", ""), "0.5");
+
+% Only the smoothing sigma varies. Its per-value medians are 3 and 6 mm,
+% and the best combination uses the lowest tested value.
+verifyEqual(testCase, getDerivedValue(derivedStatisticsTable, "surfaceRmseRangeMm", "intensitySmoothingSigmaMm"), "3");
+verifyEqual(testCase, getDerivedValue(derivedStatisticsTable, "bestValuePosition", "intensitySmoothingSigmaMm"), "lowest");
+
+% Parameters held at one value get no effect or grid-edge rows.
+verifyEmpty(testCase, derivedStatisticsTable(derivedStatisticsTable.detail == "kappa" & ...
+    derivedStatisticsTable.group ~= "metadata", :));
+end
+
+
 function testEvaluationPlotsReturnFigures(testCase)
 %TESTEVALUATIONPLOTSRETURNFIGURES Smoke-test all dedicated plot functions.
 % testCase provides MATLAB verification methods. This function has no output.
@@ -312,6 +377,15 @@ perRunTable = table(runNumber, runId, combinationNumber, combinationId, ...
 % validator and planner.
 parameterNames = {'normalFacingToleranceDeg', 'intensitySmoothingSigmaMm', ...
     'kappa', 'weight'};
+end
+
+
+function value = getDerivedValue(derivedStatisticsTable, statistic, detail)
+%GETDERIVEDVALUE Look up one value in the long derived-statistics table.
+% statistic and detail select exactly one row; value is its text value.
+
+matchingRow = derivedStatisticsTable.statistic == statistic & derivedStatisticsTable.detail == detail;
+value = derivedStatisticsTable.value(matchingRow);
 end
 
 
