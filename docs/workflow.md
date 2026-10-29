@@ -43,7 +43,7 @@ Colours: purple boxes handle **configuration**, coral boxes do the **science and
 
 - **Preparation is slow, and the seeds don't change it.** Loading the mesh and building the search trees can take a while. It depends on the settings of a combination, but not on the random seed. So it runs once per combination, and all seeds reuse the result.
 - **Each run is saved the moment it ends.** A sweep can run all night. If MATLAB crashes at 3 a.m., every finished run is already on disk, and the sweep can be resumed later (see [Running the project](running.md)).
-- **One failure does not stop the sweep.** A combination or seed that throws an error is recorded as `failed` in `summary.csv`, and the loop moves on. [Bookkeeping](bookkeeping.md) lists every failure case and what the sweep does about it.
+- **One failure does not stop the sweep.** A combination or seed that throws an error is recorded as `run_failed` in `summary.csv`, and the loop moves on. [Bookkeeping](bookkeeping.md) lists every failure case and what the sweep does about it.
 
 ## 2. Functions worth knowing
 

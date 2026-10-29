@@ -81,7 +81,7 @@ These files describe the experiment as a whole. They sit directly in the experim
 | --- | --- |
 | `runNumber`, `runId`, `combinationNumber`, `combinationId`, `seed` | Which run this is. `combinationId` and `seed` also name its folder: `runs/<combinationId>/seed_<seed>/`. |
 | `costModel` and one column per swept parameter | The settings of this run. `normalFacingToleranceDeg` comes first, then the cost model's own parameters. |
-| `status` | `pending`, `completed`, `failed`, or `save_failed`. |
+| `status` | `pending`, `completed`, `run_failed`, or `save_failed`. |
 | `startTime`, `endTime`, `runtimeSeconds` | When the run ran and how long it took. |
 | `initialCost`, `bestCost` | The cost at the starting pose and the lowest cost CMA-ES found. Lower is better. |
 | `functionEvaluations`, `stopFlag` | How many times the cost was evaluated, and why CMA-ES stopped. |
@@ -91,7 +91,7 @@ These files describe the experiment as a whole. They sit directly in the experim
 The three final statuses, in short:
 
 - `completed`: the run finished and was saved.
-- `failed`: an error was thrown during preparation or optimization.
+- `run_failed`: an error was thrown during preparation or optimization.
 - `save_failed`: a file could not be written, during the run or when saving `runResult.mat`.
 
 [Bookkeeping](bookkeeping.md) explains when each status is used, and which runs a resumed sweep runs again.
