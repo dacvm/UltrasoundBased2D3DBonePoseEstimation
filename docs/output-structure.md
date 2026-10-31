@@ -31,7 +31,10 @@ output/bonePoseOptimization/experiments/
     │   ├── per_combination_evaluation.csv
     │   ├── derived_statistics.csv
     │   ├── evaluation_tables.mat
-    │   └── *.png                                 the four evaluation figures
+    │   ├── evaluation_tables.js                  the same tables, for report.html
+    │   ├── *.png                                 the four evaluation figures
+    │   ├── findings.md                           written by /analyze-hyperparamsweep
+    │   └── report.html                           written by /analyze-hyperparamsweep
     └── runs/
         ├── combination_0001/                     one set of parameter values
         │   ├── seed_1001/                        one run
@@ -155,7 +158,15 @@ Each run's `cmaes/run_yyyyMMdd_HHmmss/` folder holds what the bundled CMA-ES cod
 | `per_combination_evaluation.csv` | One row per combination: its parameter values, how many seeds completed and were evaluated, and the median, 25th and 75th percentile, and IQR of the cost, the three errors, the start-to-final movement, and the runtime over its seeds. `medianSeedPairTranslationMm` and `medianSeedPairRotationDeg` show how far apart the final poses of its seeds are. Sorted by `combinationRank`, which ranks the median surface RMSE. **This is the table for choosing hyperparameters.** |
 | `derived_statistics.csv` | Experiment-level statistics, one per row, with columns `group`, `statistic`, `detail`, `value`, `unit`, and `definition` (how the value is computed). Groups: `metadata` (cost model, input files, swept values, optimizer settings), `startPose`, `optimizerHealth`, `costValidity`, `movement`, `accuracy`, `seedSpread`, `parameterEffect`, and `gridEdge`. |
 | `evaluation_tables.mat` | The three tables (`perRunTable`, `perCombinationTable`, `derivedStatisticsTable`) plus `evaluationMetadata`: the schema version, cost model, and parameter names needed to read the parameter columns later. |
+| `evaluation_tables.js` | The same content as `evaluation_tables.mat`, plus `experimentName`, as JSON in one JavaScript statement that sets `window.EVALUATION_TABLES`. The HTML report loads it, because a page opened from disk cannot read CSV or MAT files. It holds no new numbers. |
 | `surfaceRmseBoxplot.png`, `translationRotationErrors.png`, `hyperparameterHeatmaps.png`, `optimizerCostVsSurfaceRmse.png` | The four evaluation figures, saved at 200 dpi. |
+
+The `/analyze-hyperparamsweep` Claude skill (`.claude/skills/analyze-hyperparamsweep/`) adds two files to the same folder. Both are generated; don't edit them by hand.
+
+| File | What it holds |
+| --- | --- |
+| `findings.md` | A short summary of the experiment: a fixed header (cost model, dataset, start pose, swept parameters, seeds), the two-part verdict, optimizer health, accuracy, hyperparameters, next step, and limitations. |
+| `report.html` | An interactive report to open in a browser. It reads `evaluation_tables.js` and the PNGs from the same folder, so keep the folder together. |
 
 ## 8. One-sweep output
 

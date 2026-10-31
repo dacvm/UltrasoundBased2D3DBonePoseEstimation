@@ -191,13 +191,28 @@ The evaluation compares every completed run with the ground truth and ranks the 
 
 The script needs the experiment's `experiment_plan.mat`, `summary.mat`, and `validation_context.mat`. The plan must be schema version 4 and contain `parameterNames`, the list that says which summary columns are swept parameters and in which order. Older experiment plans without this list are not guessed from the table; inspect them with the code version that created them.
 
-The tables are written to an `evaluation/` folder inside the experiment folder. [Output structure](output-structure.md#7-evaluation-output) describes them.
+The tables, the figure images, and `evaluation_tables.js` (the tables for the HTML report) are written to an `evaluation/` folder inside the experiment folder. [Output structure](output-structure.md#7-evaluation-output) describes them.
 
 ### 6.1. Arranging the heatmaps
 
 `heatmapSettings` controls one figure made of small heatmaps. `xParameter` and `yParameter` form the cells inside each heatmap. `panelRowParameter` and `panelColumnParameter` spread the remaining parameter values over rows and columns of heatmaps; leave them `''` when they are not needed. When the figure should show only one slice, give a parameter a single value in `parametersToHold` instead. This changes only the figure, not the optimization results.
 
 Every swept parameter must have exactly one of these roles. This way a new cost-model parameter can never be hidden from the figure by accident. To look at a second arrangement, copy the settings block under a new name and call `plotHyperparameterPaneledHeatmaps` again.
+
+### 6.2. Analyze the results with Claude
+
+After the evaluation, Claude Code can interpret the results with the project skill in `.claude/skills/analyze-hyperparamsweep/`. In a Claude Code session in the repository root, run:
+
+```
+/analyze-hyperparamsweep <experimentFolderName>
+```
+
+The skill reads only the CSV tables, the figure images, and the cost model's notes in `literatures/`; it does not run MATLAB. It checks the optimizer first, then answers two questions separately: does the optimization behave (judged without the ground truth), and is the result accurate (which depends on the ground truth being accurate). It writes two files to the experiment's `evaluation/` folder:
+
+- `findings.md`: a short summary with the verdict and the recommended next step.
+- `report.html`: an interactive report. Open it in a browser straight from the folder; it needs `evaluation_tables.js` and the PNGs next to it, so run the evaluation first and keep the folder together.
+
+Both files are generated: run the skill again instead of editing them by hand.
 
 ## 7. Where to look next
 

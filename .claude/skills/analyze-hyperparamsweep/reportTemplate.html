@@ -6,7 +6,7 @@
 <title>Sweep report</title>
 <!--
   Report template for /analyze-hyperparamsweep.
-  - All numbers come from report_data.js (written next to this file by MATLAB).
+  - All numbers come from evaluation_tables.js (written next to this file by MATLAB).
   - Claude fills in only the REPORT_TEXT block below; nothing else changes.
   - The figure PNGs are loaded from the same folder, so keep the evaluation folder together.
 -->
@@ -208,7 +208,7 @@ window.REPORT_TEXT = {
 </script>
 
 <!-- All numbers: written by MATLAB next to this file. -->
-<script src="report_data.js"></script>
+<script src="evaluation_tables.js"></script>
 
 <div class="page">
   <nav class="toc" aria-label="Sections">
@@ -322,10 +322,10 @@ window.REPORT_TEXT = {
 
 <script>
 (function () {
-  const DATA = window.REPORT_DATA;
+  const DATA = window.EVALUATION_TABLES;
   const TEXT = window.REPORT_TEXT;
   if (!DATA) {
-    document.querySelector('main').innerHTML = '<p class="empty-note">report_data.js was not found next to this report. Run main_bonePoseOptimization_evaluation.m first.</p>';
+    document.querySelector('main').innerHTML = '<p class="empty-note">evaluation_tables.js was not found next to this report. Run main_bonePoseOptimization_evaluation.m first.</p>';
     return;
   }
 
@@ -344,7 +344,7 @@ window.REPORT_TEXT = {
   };
 
   // Look up one derived statistic row; detail is optional.
-  const derived = DATA.derived;
+  const derived = DATA.derivedStatisticsTable;
   const stat = (group, statistic, detail) => derived.find((r) =>
     r.group === group && r.statistic === statistic && (detail === undefined || (r.detail || '') === detail));
   const statValue = (group, statistic, detail) => { const r = stat(group, statistic, detail); return r ? r.value : NaN; };
@@ -450,11 +450,11 @@ window.REPORT_TEXT = {
 
   // ---------- Runs and combinations ----------
   // A run "moved" with the same rule as the MATLAB helper: more than 1e-3 mm or 1e-3 deg from the start.
-  const runs = (DATA.runs || []).filter((r) => isFinite(num(r.surfaceRmseMm))).map((r) => ({
+  const runs = (DATA.perRunTable || []).filter((r) => isFinite(num(r.surfaceRmseMm))).map((r) => ({
     ...r,
     moved: num(r.startToFinalTranslationMm) > 1e-3 || num(r.startToFinalRotationDeg) > 1e-3,
   }));
-  const combinations = (DATA.combinations || []).map((c) => ({
+  const combinations = (DATA.perCombinationTable || []).map((c) => ({
     ...c,
     movedCount: runs.filter((r) => r.combinationId === c.combinationId && r.moved).length,
   }));

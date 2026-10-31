@@ -270,6 +270,26 @@ save(fullfile(evaluationFolder, 'evaluation_tables.mat'), 'perRunTable', 'perCom
 % Show the main hyperparameter-selection table after saving exact values.
 disp(perCombinationTable);
 
+%% SAVE THE TABLES FOR THE HTML REPORT
+
+% The HTML sweep report is opened from disk. Browsers let such a page load
+% a script next to it, but block it from reading CSV or MAT files. So save
+% the same tables once more as a JavaScript file that sets one variable,
+% window.EVALUATION_TABLES. It holds no new numbers.
+
+% Use the same field names as the variables in evaluation_tables.mat, so
+% both files describe the evaluation in the same words.
+evaluationTables.experimentName         = experimentFolderName;
+evaluationTables.perRunTable            = perRunTable;
+evaluationTables.perCombinationTable    = perCombinationTable;
+evaluationTables.derivedStatisticsTable = derivedStatisticsTable;
+evaluationTables.evaluationMetadata     = evaluationMetadata;
+
+% jsonencode turns each table into a list of row objects and NaN into null,
+% which the report's JavaScript reads directly.
+writelines("window.EVALUATION_TABLES = " + jsonencode(evaluationTables) + ";", ...
+           fullfile(evaluationFolder, 'evaluation_tables.js'));
+
 %% DISPLAY THE EVALUATION PLOTS
 
 % Keep one figure handle per display so users can adjust figures interactively.
