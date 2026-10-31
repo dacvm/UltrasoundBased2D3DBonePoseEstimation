@@ -124,6 +124,12 @@ perRunTable.translationErrorMm = nan(numberOfRuns, 1);
 perRunTable.rotationErrorDeg   = nan(numberOfRuns, 1);
 perRunTable.surfaceRmseMm      = nan(numberOfRuns, 1);
 
+% These two columns measure how far each run moved away from the start pose.
+% They compare the final pose with the start pose, not with the ground truth,
+% so they stay meaningful even when the ground truth is inaccurate.
+perRunTable.startToFinalTranslationMm = nan(numberOfRuns, 1);
+perRunTable.startToFinalRotationDeg   = nan(numberOfRuns, 1);
+
 %% CALCULATE THE ERROR METRICS FOR EVERY COMPLETED RUN
 
 for runIndex = 1:numberOfRuns
@@ -151,6 +157,12 @@ for runIndex = 1:numberOfRuns
         perRunTable.translationErrorMm(runIndex) = calculateTranslationErrorMm(T_bone_ref_groundTruth, T_bone_ref_estimate);
         perRunTable.rotationErrorDeg(runIndex)   = calculateRotationErrorDeg(T_bone_ref_groundTruth, T_bone_ref_estimate);
         perRunTable.surfaceRmseMm(runIndex)      = calculateSurfaceRmseMm(boneMeshRefGroundTruth, boneMeshRefEstimate);
+
+        % The same pose-distance functions also measure how far the run moved
+        % from the start pose; here the start pose takes the ground truth's place.
+        perRunTable.startToFinalTranslationMm(runIndex) = calculateTranslationErrorMm(T_bone_ref_initial, T_bone_ref_estimate);
+        perRunTable.startToFinalRotationDeg(runIndex)   = calculateRotationErrorDeg(T_bone_ref_initial, T_bone_ref_estimate);
+
         perRunTable.evaluationStatus(runIndex)   = "evaluated";
 
     catch evaluationError

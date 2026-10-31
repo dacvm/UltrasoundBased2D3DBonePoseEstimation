@@ -99,6 +99,10 @@ verifyEqual(testCase, perCombinationTable.iqrSurfaceRmseMm, ...
     perCombinationTable.q75SurfaceRmseMm - ...
     perCombinationTable.q25SurfaceRmseMm, 'AbsTol', 1e-12);
 
+% Movement from the start pose is summarized like the errors: combination
+% one moved 1 and 0 mm, combination two moved 3 and 0 mm.
+verifyEqual(testCase, perCombinationTable.medianStartToFinalTranslationMm, [0.5; 1.5]);
+
 % The generic identity and parameter columns must keep the saved plan order.
 expectedLeadingColumns = [{'combinationRank', 'combinationNumber', ...
     'combinationId', 'costModel'}, parameterNames];
@@ -221,6 +225,10 @@ verifyEqual(testCase, getDerivedValue(derivedStatisticsTable, "fractionRunsCostD
 % Only the 2 mm run really improves; the improvements are about 2, 0, -1, -3.
 verifyEqual(testCase, getDerivedValue(derivedStatisticsTable, "fractionRunsSurfaceRmseImproved", ""), "0.25");
 verifyEqual(testCase, getDerivedValue(derivedStatisticsTable, "medianSurfaceRmseImprovementMm", ""), "-0.5");
+
+% Runs 1 and 4 moved; run 5's 1e-6 deg rotation is below the movement tolerance.
+verifyEqual(testCase, getDerivedValue(derivedStatisticsTable, "fractionRunsMoved", ""), "0.5");
+verifyEqual(testCase, getDerivedValue(derivedStatisticsTable, "medianStartToFinalTranslationMm", ""), "0.5");
 
 % One run is at or below 2 mm; two runs meet both clinical tolerances.
 verifyEqual(testCase, getDerivedValue(derivedStatisticsTable, "successRate", ""), "0.25");
@@ -371,10 +379,16 @@ translationErrorMm = [1; 3; NaN; 5; 7];
 rotationErrorDeg = [2; 4; NaN; 6; 8];
 surfaceRmseMm = [2; 4; NaN; 5; 7];
 
+% Runs 1 and 4 move away from the start pose. Run 5 only shows the tiny
+% rotation that two identical poses produce, so it must count as not moved.
+startToFinalTranslationMm = [1; 0; NaN; 3; 0];
+startToFinalRotationDeg = [0; 0; NaN; 2; 1e-6];
+
 perRunTable = table(runNumber, runId, combinationNumber, combinationId, ...
     costModel, seed, normalFacingToleranceDeg, intensitySmoothingSigmaMm, kappa, ...
     weight, status, runtimeSeconds, bestCost, evaluationStatus, ...
-    translationErrorMm, rotationErrorDeg, surfaceRmseMm);
+    translationErrorMm, rotationErrorDeg, surfaceRmseMm, ...
+    startToFinalTranslationMm, startToFinalRotationDeg);
 
 % Match the canonical parameter order returned by the intensityPIMLOP
 % validator and planner.
