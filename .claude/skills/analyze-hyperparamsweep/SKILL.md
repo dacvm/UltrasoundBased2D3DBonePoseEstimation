@@ -52,6 +52,8 @@ Keep two kinds of evidence apart throughout:
 - Share of runs per stop reason (`fractionRunsStoppedBy`). If most hit the evaluation budget,
   say that the results may reflect the budget, not the cost function.
 - Failed, skipped, or unevaluated runs, and whether they cluster in certain combinations.
+  Use `errorStage` and `errorMessage` in `per_run_evaluation.csv` to say whether a failure comes
+  from the setup (e.g. a file could not be written) or from the optimizer or cost function.
 - Search bounds vs start-pose error: compare `initialTranslationErrorMm` and `initialRotationErrorDeg`
   with the `optimizer` bounds (`translationBoundMm`, `rotationBoundDeg`).
   - Error larger than the bound: warn that the true pose is out of reach of the search.
@@ -64,7 +66,8 @@ Keep two kinds of evidence apart throughout:
 - `fractionRunsCostDecreased` decides the gate:
   - **< 10% (stuck):** the optimizer almost never found a pose the cost prefers over the start.
     Sections C and D shrink to one line each. Recommend diagnosing the optimizer and the
-    cost function before any new sweep.
+    cost function before any new sweep. As a hint for that diagnosis, say which parameter
+    values the few runs that did move had in common (computed by Claude from `per_run_evaluation.csv`).
   - **10–60% (partial):** do C and D, but warn at the top that only some runs moved,
     so parameter effects are uncertain.
   - **> 60% (healthy):** full analysis.
@@ -96,6 +99,8 @@ Start with: "Parameter effects are measured in surface RMSE, so they are valid o
 ground truth is accurate."
 - Top combinations by median surface RMSE. Report the IQR next to each.
   With only a few seeds, say when the top combinations' IQRs overlap so they can't be told apart.
+  Check whether a combination ranks high only because more of its seeds moved away from the start;
+  if so, say that its rank reflects movement, not a better cost.
 - Effect size of each parameter (`parameterEffect/surfaceRmseRangeMm`). Say which parameters
   matter and which barely do.
 - Interactions seen in the heatmaps (e.g. the best value of one parameter depends on another).
@@ -123,7 +128,7 @@ Write `<experiment>/evaluation/findings.md` from `findingsTemplate.md` in this s
 - Fill the header only from the `metadata` and `startPose` rows of `derived_statistics.csv`.
   Keep the header to its five fields.
 - Follow the `<!-- -->` instructions in the template and leave them out of the written file.
-- Keep the filled file under 400 words.
+- Keep the text below the header under 400 words.
 - Overwrite it on every run; it is generated and never edited by hand.
 
 ## Step 6: Write report.html
