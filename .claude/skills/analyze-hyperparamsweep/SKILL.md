@@ -1,6 +1,6 @@
 ---
 name: analyze-hyperparamsweep
-description: Analyze the evaluation of one bone-pose hyperparameter sweep experiment and write a findings summary (and, once its template exists, an interactive local HTML report). Use when the user asks to analyze, interpret, or report on the output of main_bonePoseOptimization_evaluation.m, or invokes /analyze-hyperparamsweep <experimentFolderName>.
+description: Analyze the evaluation of one bone-pose hyperparameter sweep experiment and write a findings summary and an interactive local HTML report. Use when the user asks to analyze, interpret, or report on the output of main_bonePoseOptimization_evaluation.m, or invokes /analyze-hyperparamsweep <experimentFolderName>.
 ---
 
 # Analyze a hyperparameter sweep
@@ -132,15 +132,24 @@ Write `<experiment>/evaluation/findings.md` from `findingsTemplate.md` in this s
 - Overwrite it on every run; it is generated and never edited by hand.
 
 ## Step 6: Write report.html
-The report template is not available yet: skip this step and say so in the chat reply.
+The report needs `report_data.js` in `<experiment>/evaluation/` (all numbers, written by MATLAB).
+If it is missing, skip this step and say so in the chat reply.
 
-Once `reportTemplate.html` exists in this skill folder: copy it to
-`<experiment>/evaluation/report.html` and fill in only the data block and the text sections.
-Do not change the layout, styles, or chart code.
-- Heatmaps and box plot: embed the MATLAB PNGs.
-- Cost-vs-RMSE scatter and translation-vs-rotation plot: interactive Chart.js.
-- Combination table: sortable, plain JavaScript.
-The page must work offline: Chart.js and all PNGs are embedded in the file.
+Copy `reportTemplate.html` from this skill folder to `<experiment>/evaluation/report.html`.
+Then replace only the `window.REPORT_TEXT = { ... };` block; do not change anything else.
+- Never type numbers into the page's tiles, charts, or tables: the page computes them from
+  `report_data.js`, and the behaviour verdict follows the gate automatically.
+- `accuracyVerdict`: exactly one of `"accurate"`, `"partly"`, `"not accurate"`.
+- `behaveSentence`, `accuracySentence`: the two verdict sentences from `findings.md`.
+- `health` (sections A and B1), `accuracy` (B2), `hyperparameters` (C): short `<p>` paragraphs.
+- `nextSteps` (D): an `<ol>` list. `limitations`: a `<ul>` list. `focus`: answers to focus
+  questions, or empty to hide that section.
+- Strings are JavaScript template literals: write simple HTML (`<p>`, `<ul>`, `<li>`, `<code>`,
+  `<strong>`) and never use a backtick inside the text.
+- Keep the text consistent with `findings.md`; the page may say more, never something different.
+
+The page works offline with no libraries; it loads `report_data.js` and the PNGs from its own
+folder, so the evaluation folder must stay together.
 
 ## Step 7: Reply in chat
 A short summary: the two-part verdict, the gate band, the best combination, the recommended next
