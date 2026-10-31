@@ -178,7 +178,8 @@ perCombinationTable = createCombinationEvaluationTable(perRunTable, parameterNam
 
 % Add the optimizer columns that only the derived statistics need. Run 2
 % reports two stop reasons; run 3 failed, so it has no stop reason or cost.
-perRunTable.initialCost = [1; 1; NaN; 1.2; 1.2];
+% Run 5 ends 1e-14 below its start cost: floating-point noise, not a decrease.
+perRunTable.initialCost = [1; 1; NaN; 1.2; 1.1 + 1e-14];
 perRunTable.stopFlag = ["maxfunevals"; "maxfunevals; tolfun"; ""; "maxfunevals"; "tolfun"];
 
 % Use a small experiment specification with one absolute input path.
@@ -190,8 +191,9 @@ experimentSpec.optimizer.populationSize = 8;
 experimentSpec.optimizer.translationBoundMm = 10;
 experimentSpec.optimizer.rotationBoundDeg = 10;
 
-% The start pose sits between the evaluated RMSE values 2, 4, 5, and 7 mm.
-initialPoseErrors.surfaceRmseMm = 4.5;
+% The start pose is 2e-14 mm worse than the 4 mm run, so that run only
+% "improves" by floating-point noise and must not count as improved.
+initialPoseErrors.surfaceRmseMm = 4 + 2e-14;
 initialPoseErrors.translationErrorMm = 4;
 initialPoseErrors.rotationErrorDeg = 5;
 accuracyThresholds.successSurfaceRmseMm = 2;
@@ -213,11 +215,12 @@ verifyEqual(testCase, getDerivedValue(derivedStatisticsTable, "fractionRunsStopp
 
 % Final cost and RMSE increase together, so their rank correlation is one.
 verifyEqual(testCase, getDerivedValue(derivedStatisticsTable, "spearmanBestCostVsSurfaceRmse", ""), "1");
-verifyEqual(testCase, getDerivedValue(derivedStatisticsTable, "fractionRunsCostDecreased", ""), "1");
+% Three runs lower the cost; run 5's 1e-14 difference stays below the tolerance.
+verifyEqual(testCase, getDerivedValue(derivedStatisticsTable, "fractionRunsCostDecreased", ""), "0.75");
 
-% Runs at 2 and 4 mm beat the 4.5 mm start; the improvements are 2.5, 0.5, -0.5, -2.5.
-verifyEqual(testCase, getDerivedValue(derivedStatisticsTable, "fractionRunsSurfaceRmseImproved", ""), "0.5");
-verifyEqual(testCase, getDerivedValue(derivedStatisticsTable, "medianSurfaceRmseImprovementMm", ""), "0");
+% Only the 2 mm run really improves; the improvements are about 2, 0, -1, -3.
+verifyEqual(testCase, getDerivedValue(derivedStatisticsTable, "fractionRunsSurfaceRmseImproved", ""), "0.25");
+verifyEqual(testCase, getDerivedValue(derivedStatisticsTable, "medianSurfaceRmseImprovementMm", ""), "-0.5");
 
 % One run is at or below 2 mm; two runs meet both clinical tolerances.
 verifyEqual(testCase, getDerivedValue(derivedStatisticsTable, "successRate", ""), "0.25");
