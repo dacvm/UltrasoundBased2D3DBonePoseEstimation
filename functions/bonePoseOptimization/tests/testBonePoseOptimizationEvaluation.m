@@ -180,6 +180,12 @@ function testDerivedStatisticsSummarizeTheSweep(testCase)
 [perRunTable, parameterNames] = createSyntheticPerRunTable();
 perCombinationTable = createCombinationEvaluationTable(perRunTable, parameterNames);
 
+% Attach seed agreement as the evaluation script does. The two seeds of
+% combination one end 5 mm apart, those of combination two 1 mm apart.
+T_bone_ref_estimates = createSyntheticFinalPoses();
+seedAgreementTable = calculateSeedAgreement(perRunTable, T_bone_ref_estimates);
+perCombinationTable = join(perCombinationTable, seedAgreementTable, 'Keys', 'combinationId');
+
 % Add the optimizer columns that only the derived statistics need. Run 2
 % reports two stop reasons; run 3 failed, so it has no stop reason or cost.
 % Run 5 ends 1e-14 below its start cost: floating-point noise, not a decrease.
@@ -230,6 +236,10 @@ verifyEqual(testCase, getDerivedValue(derivedStatisticsTable, "medianSurfaceRmse
 verifyEqual(testCase, getDerivedValue(derivedStatisticsTable, "fractionRunsMoved", ""), "0.5");
 verifyEqual(testCase, getDerivedValue(derivedStatisticsTable, "medianStartToFinalTranslationMm", ""), "0.5");
 
+% The seed pairs are 5 and 1 mm apart, so the median over combinations is 3 mm.
+verifyEqual(testCase, getDerivedValue(derivedStatisticsTable, "medianSeedPairTranslationMm", ""), "3");
+verifyEqual(testCase, getDerivedValue(derivedStatisticsTable, "medianSeedPairRotationDeg", ""), "0");
+
 % One run is at or below 2 mm; two runs meet both clinical tolerances.
 verifyEqual(testCase, getDerivedValue(derivedStatisticsTable, "successRate", ""), "0.25");
 verifyEqual(testCase, getDerivedValue(derivedStatisticsTable, "clinicalRate", ""), "0.5");
@@ -242,6 +252,27 @@ verifyEqual(testCase, getDerivedValue(derivedStatisticsTable, "bestValuePosition
 % Parameters held at one value get no effect or grid-edge rows.
 verifyEmpty(testCase, derivedStatisticsTable(derivedStatisticsTable.detail == "kappa" & ...
     derivedStatisticsTable.group ~= "metadata", :));
+end
+
+
+function testSeedAgreementMeasuresPairwisePoseDistance(testCase)
+%TESTSEEDAGREEMENTMEASURESPAIRWISEPOSEDISTANCE Check seed-to-seed pose distances.
+% testCase provides MATLAB verification methods. This function has no output.
+
+[perRunTable, ~] = createSyntheticPerRunTable();
+T_bone_ref_estimates = createSyntheticFinalPoses();
+
+% Combination one has two evaluated seeds 5 mm apart (the third run failed
+% and has no pose); combination two has two seeds 1 mm apart.
+seedAgreementTable = calculateSeedAgreement(perRunTable, T_bone_ref_estimates);
+verifyEqual(testCase, seedAgreementTable.combinationId, ["combination_0001"; "combination_0002"]);
+verifyEqual(testCase, seedAgreementTable.medianSeedPairTranslationMm, [5; 1], 'AbsTol', 1e-12);
+verifyEqual(testCase, seedAgreementTable.medianSeedPairRotationDeg, [0; 0], 'AbsTol', 1e-6);
+
+% With only one evaluated seed there is no pair to compare, so the result is NaN.
+perRunTable.evaluationStatus(2) = "failed";
+seedAgreementTable = calculateSeedAgreement(perRunTable, T_bone_ref_estimates);
+verifyTrue(testCase, isnan(seedAgreementTable.medianSeedPairTranslationMm(1)));
 end
 
 
@@ -394,6 +425,18 @@ perRunTable = table(runNumber, runId, combinationNumber, combinationId, ...
 % validator and planner.
 parameterNames = {'normalFacingToleranceDeg', 'intensitySmoothingSigmaMm', ...
     'kappa', 'weight'};
+end
+
+
+function T_bone_ref_estimates = createSyntheticFinalPoses()
+%CREATESYNTHETICFINALPOSES Build final poses that match the synthetic run table.
+% This function has no input. T_bone_ref_estimates holds one 4-by-4 pose per
+% run: runs 1 and 2 end 5 mm apart, runs 4 and 5 end 1 mm apart, and the
+% failed run 3 has no pose.
+
+T_bone_ref_estimates = {eye(4); eye(4); []; eye(4); eye(4)};
+T_bone_ref_estimates{2}(1:3, 4) = [3; 4; 0];
+T_bone_ref_estimates{5}(1:3, 4) = [1; 0; 0];
 end
 
 

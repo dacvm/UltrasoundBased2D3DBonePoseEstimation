@@ -130,6 +130,10 @@ perRunTable.surfaceRmseMm      = nan(numberOfRuns, 1);
 perRunTable.startToFinalTranslationMm = nan(numberOfRuns, 1);
 perRunTable.startToFinalRotationDeg   = nan(numberOfRuns, 1);
 
+% Keep every run's final pose so the seeds of one combination can be compared
+% with each other after the loop. Row i holds the pose of table row i.
+T_bone_ref_estimates = cell(numberOfRuns, 1);
+
 %% CALCULATE THE ERROR METRICS FOR EVERY COMPLETED RUN
 
 for runIndex = 1:numberOfRuns
@@ -162,6 +166,7 @@ for runIndex = 1:numberOfRuns
         % from the start pose; here the start pose takes the ground truth's place.
         perRunTable.startToFinalTranslationMm(runIndex) = calculateTranslationErrorMm(T_bone_ref_initial, T_bone_ref_estimate);
         perRunTable.startToFinalRotationDeg(runIndex)   = calculateRotationErrorDeg(T_bone_ref_initial, T_bone_ref_estimate);
+        T_bone_ref_estimates{runIndex}                  = T_bone_ref_estimate;
 
         perRunTable.evaluationStatus(runIndex)   = "evaluated";
 
@@ -175,6 +180,13 @@ for runIndex = 1:numberOfRuns
         perRunTable.evaluationMessage(runIndex)  = string(evaluationError.message);
     end
 end
+
+%% COMPARE THE FINAL POSES OF SEEDS WITH THE SAME SETTINGS
+
+% Measure how close the seeds of each combination end up to each other. This
+% must happen before the ranking below, because ranking reorders the table
+% rows and the stored poses would no longer line up with them.
+seedAgreementTable = calculateSeedAgreement(perRunTable, T_bone_ref_estimates);
 
 %% RANK INDIVIDUAL RUNS BY SURFACE RMSE
 
@@ -221,6 +233,10 @@ perRunTable = movevars(perRunTable, 'surfaceRmseRank', 'Before', 'runNumber');
 
 % Aggregate the seed rows using the parameter order saved by the experiment plan.
 perCombinationTable = createCombinationEvaluationTable(perRunTable, parameterNames);
+
+% Attach the seed-agreement columns to their combination rows. join keeps the
+% ranked row order of perCombinationTable.
+perCombinationTable = join(perCombinationTable, seedAgreementTable, 'Keys', 'combinationId');
 
 %% CREATE THE EXPERIMENT-LEVEL DERIVED STATISTICS
 

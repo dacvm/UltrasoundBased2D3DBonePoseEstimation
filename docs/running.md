@@ -29,7 +29,7 @@ The three scripts have different jobs:
 | --- | --- | --- |
 | `main_bonePoseOptimization_oneSweep.m` | One optimization with one setting and one seed, with figures before and after. Use it to check a setup, debug, or demonstrate the method. | Results in the MATLAB workspace and raw CMA-ES files on disk. |
 | `main_bonePoseOptimization_hyperparamSweep.m` | Many optimizations over a grid of settings and seeds, without figures. Use it for actual experiments. | One experiment folder under `output/` with every run saved. |
-| `main_bonePoseOptimization_evaluation.m` | Scores a finished sweep against the ground truth and ranks the settings. | Tables in the experiment folder and figures on screen. |
+| `main_bonePoseOptimization_evaluation.m` | Scores a finished sweep against the ground truth and ranks the settings. | Tables and figure images in the experiment folder, and figures on screen. |
 
 ## 1. Before you start
 
