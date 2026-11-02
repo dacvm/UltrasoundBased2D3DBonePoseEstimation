@@ -29,6 +29,13 @@ heatmapSettings.panelColumnParameter = '';
 % one value, so hold it at that value to keep it out of the figure layout.
 heatmapSettings.parametersToHold = struct('normalFacingToleranceDeg', 30);
 
+% Accuracy targets used by the derived statistics. A run is a "success" when
+% its surface RMSE is at or below the first value, and "clinically
+% acceptable" when both its translation and rotation errors are within tolerance.
+accuracyThresholds.successSurfaceRmseMm       = 1;
+accuracyThresholds.clinicalTranslationErrorMm = 1;
+accuracyThresholds.clinicalRotationErrorDeg   = 1;
+
 %% LOAD THE EXPERIMENT PLAN, SUMMARY, AND GROUND TRUTH
 
 % The experiment plan tells the evaluator which cost model was used and which
@@ -44,7 +51,8 @@ planData = load(planFilePath, 'experimentSpec', 'experimentPlan');
 % Check that the MAT-file contains both saved plan variables, uses the current
 % schema, and provides the ordered parameter-name list. These fields are needed
 % to build generic evaluation tables with the correct parameter columns.
-hasSupportedExperimentMetadata = isfield(planData, 'experimentSpec') && ...
+hasSupportedExperimentMetadata = ...
+    isfield(planData, 'experimentSpec') && ...
     isfield(planData, 'experimentPlan') && ...
     isfield(planData.experimentSpec, 'schemaVersion') && ...
     planData.experimentSpec.schemaVersion == 4 && ...
@@ -88,6 +96,24 @@ groundTruthBonePose    = validationData.validationContext.validationData.groundT
 T_bone_ref_groundTruth = groundTruthBonePose.T_bone_ref;
 boneMeshRefGroundTruth = groundTruthBonePose.boneMeshRef;
 
+%% MEASURE THE ERROR OF THE SHARED START POSE
+
+% Every run starts from the same pose, so its error is the baseline that
+% tells us whether the optimization moved the bone closer to the truth.
+T_bone_ref_initial = validationData.validationContext.T_bone_ref_initial;
+
+% Build the bone mesh at the start pose: express the ground-truth mesh in
+% the bone frame, then place it with the start pose. Keeping the original
+% connectivity gives vertex-to-vertex correspondence for the surface RMSE.
+T_ref_bone_groundTruth = inv(T_bone_ref_groundTruth);
+bonePointsBone         = applyRigidTransform(boneMeshRefGroundTruth.Points, T_ref_bone_groundTruth);
+boneMeshRefInitial     = triangulation(boneMeshRefGroundTruth.ConnectivityList, ...
+                                       applyRigidTransform(bonePointsBone, T_bone_ref_initial));
+
+initialPoseErrors.surfaceRmseMm      = calculateSurfaceRmseMm(boneMeshRefGroundTruth, boneMeshRefInitial);
+initialPoseErrors.translationErrorMm = calculateTranslationErrorMm(T_bone_ref_groundTruth, T_bone_ref_initial);
+initialPoseErrors.rotationErrorDeg   = calculateRotationErrorDeg(T_bone_ref_groundTruth, T_bone_ref_initial);
+
 %% PREPARE THE PER-RUN EVALUATION TABLE
 
 % Add empty evaluation columns while preserving all original sweep columns.
@@ -97,6 +123,16 @@ perRunTable.evaluationMessage  = repmat("", numberOfRuns, 1);
 perRunTable.translationErrorMm = nan(numberOfRuns, 1);
 perRunTable.rotationErrorDeg   = nan(numberOfRuns, 1);
 perRunTable.surfaceRmseMm      = nan(numberOfRuns, 1);
+
+% These two columns measure how far each run moved away from the start pose.
+% They compare the final pose with the start pose, not with the ground truth,
+% so they stay meaningful even when the ground truth is inaccurate.
+perRunTable.startToFinalTranslationMm = nan(numberOfRuns, 1);
+perRunTable.startToFinalRotationDeg   = nan(numberOfRuns, 1);
+
+% Keep every run's final pose so the seeds of one combination can be compared
+% with each other after the loop. Row i holds the pose of table row i.
+T_bone_ref_estimates = cell(numberOfRuns, 1);
 
 %% CALCULATE THE ERROR METRICS FOR EVERY COMPLETED RUN
 
@@ -125,6 +161,13 @@ for runIndex = 1:numberOfRuns
         perRunTable.translationErrorMm(runIndex) = calculateTranslationErrorMm(T_bone_ref_groundTruth, T_bone_ref_estimate);
         perRunTable.rotationErrorDeg(runIndex)   = calculateRotationErrorDeg(T_bone_ref_groundTruth, T_bone_ref_estimate);
         perRunTable.surfaceRmseMm(runIndex)      = calculateSurfaceRmseMm(boneMeshRefGroundTruth, boneMeshRefEstimate);
+
+        % The same pose-distance functions also measure how far the run moved
+        % from the start pose; here the start pose takes the ground truth's place.
+        perRunTable.startToFinalTranslationMm(runIndex) = calculateTranslationErrorMm(T_bone_ref_initial, T_bone_ref_estimate);
+        perRunTable.startToFinalRotationDeg(runIndex)   = calculateRotationErrorDeg(T_bone_ref_initial, T_bone_ref_estimate);
+        T_bone_ref_estimates{runIndex}                  = T_bone_ref_estimate;
+
         perRunTable.evaluationStatus(runIndex)   = "evaluated";
 
     catch evaluationError
@@ -137,6 +180,13 @@ for runIndex = 1:numberOfRuns
         perRunTable.evaluationMessage(runIndex)  = string(evaluationError.message);
     end
 end
+
+%% COMPARE THE FINAL POSES OF SEEDS WITH THE SAME SETTINGS
+
+% Measure how close the seeds of each combination end up to each other. This
+% must happen before the ranking below, because ranking reorders the table
+% rows and the stored poses would no longer line up with them.
+seedAgreementTable = calculateSeedAgreement(perRunTable, T_bone_ref_estimates);
 
 %% RANK INDIVIDUAL RUNS BY SURFACE RMSE
 
@@ -184,6 +234,21 @@ perRunTable = movevars(perRunTable, 'surfaceRmseRank', 'Before', 'runNumber');
 % Aggregate the seed rows using the parameter order saved by the experiment plan.
 perCombinationTable = createCombinationEvaluationTable(perRunTable, parameterNames);
 
+% Attach the seed-agreement columns to their combination rows. join keeps the
+% ranked row order of perCombinationTable.
+perCombinationTable = join(perCombinationTable, seedAgreementTable, 'Keys', 'combinationId');
+
+%% CREATE THE EXPERIMENT-LEVEL DERIVED STATISTICS
+
+% Summarize the whole sweep (optimizer health, cost validity, accuracy,
+% parameter effects) in one long table, computed the same way every time.
+derivedStatisticsTable = createDerivedStatisticsTable(perRunTable, ...
+    perCombinationTable, ...
+    parameterNames, ...
+    planData.experimentSpec, ...
+    initialPoseErrors, ...
+    accuracyThresholds);
+
 %% SAVE THE EVALUATION TABLES
 
 % Keep evaluation results beside the experiment that produced them.
@@ -194,15 +259,36 @@ end
 
 writetable(perRunTable, fullfile(evaluationFolder, 'per_run_evaluation.csv'));
 writetable(perCombinationTable, fullfile(evaluationFolder, 'per_combination_evaluation.csv'));
+writetable(derivedStatisticsTable, fullfile(evaluationFolder, 'derived_statistics.csv'));
 
 % Save the small metadata needed to interpret generic parameter columns later.
 evaluationMetadata.schemaVersion  = planData.experimentSpec.schemaVersion;
 evaluationMetadata.costModel      = char(expectedCostModel);
 evaluationMetadata.parameterNames = parameterNames;
-save(fullfile(evaluationFolder, 'evaluation_tables.mat'), 'perRunTable', 'perCombinationTable', 'evaluationMetadata');
+save(fullfile(evaluationFolder, 'evaluation_tables.mat'), 'perRunTable', 'perCombinationTable', 'derivedStatisticsTable', 'evaluationMetadata');
 
 % Show the main hyperparameter-selection table after saving exact values.
 disp(perCombinationTable);
+
+%% SAVE THE TABLES FOR THE HTML REPORT
+
+% The HTML sweep report is opened from disk. Browsers let such a page load
+% a script next to it, but block it from reading CSV or MAT files. So save
+% the same tables once more as a JavaScript file that sets one variable,
+% window.EVALUATION_TABLES. It holds no new numbers.
+
+% Use the same field names as the variables in evaluation_tables.mat, so
+% both files describe the evaluation in the same words.
+evaluationTables.experimentName         = experimentFolderName;
+evaluationTables.perRunTable            = perRunTable;
+evaluationTables.perCombinationTable    = perCombinationTable;
+evaluationTables.derivedStatisticsTable = derivedStatisticsTable;
+evaluationTables.evaluationMetadata     = evaluationMetadata;
+
+% jsonencode turns each table into a list of row objects and NaN into null,
+% which the report's JavaScript reads directly.
+writelines("window.EVALUATION_TABLES = " + jsonencode(evaluationTables) + ";", ...
+           fullfile(evaluationFolder, 'evaluation_tables.js'));
 
 %% DISPLAY THE EVALUATION PLOTS
 
@@ -211,3 +297,13 @@ figureSurfaceRmseBoxplot            = plotSurfaceRmseBoxplot(perRunTable, perCom
 figureTranslationRotationErrors     = plotTranslationRotationErrors(perCombinationTable, topCombinationCount);
 figureHyperparameterPaneledHeatmaps = plotHyperparameterPaneledHeatmaps(perCombinationTable, parameterNames, heatmapSettings);
 figureOptimizerDiagnostic           = plotOptimizerCostVsSurfaceRmse(perCombinationTable, topCombinationCount);
+
+%% SAVE THE EVALUATION PLOTS AS IMAGES
+
+% Save each figure beside the tables so the plots can be reviewed (and put
+% into reports) later without rerunning this script. Fixed file names let
+% other tools find the same plot in every experiment.
+exportgraphics(figureSurfaceRmseBoxplot,            fullfile(evaluationFolder, 'surfaceRmseBoxplot.png'),         'Resolution', 200);
+exportgraphics(figureTranslationRotationErrors,     fullfile(evaluationFolder, 'translationRotationErrors.png'),  'Resolution', 200);
+exportgraphics(figureHyperparameterPaneledHeatmaps, fullfile(evaluationFolder, 'hyperparameterHeatmaps.png'),     'Resolution', 200);
+exportgraphics(figureOptimizerDiagnostic,           fullfile(evaluationFolder, 'optimizerCostVsSurfaceRmse.png'), 'Resolution', 200);

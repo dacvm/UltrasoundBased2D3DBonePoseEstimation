@@ -29,7 +29,12 @@ output/bonePoseOptimization/experiments/
     ├── evaluation/                               only after running the evaluation
     │   ├── per_run_evaluation.csv
     │   ├── per_combination_evaluation.csv
-    │   └── evaluation_tables.mat
+    │   ├── derived_statistics.csv
+    │   ├── evaluation_tables.mat
+    │   ├── evaluation_tables.js                  the same tables, for report.html
+    │   ├── *.png                                 the four evaluation figures
+    │   ├── findings.md                           written by /analyze-hyperparamsweep
+    │   └── report.html                           written by /analyze-hyperparamsweep
     └── runs/
         ├── combination_0001/                     one set of parameter values
         │   ├── seed_1001/                        one run
@@ -149,11 +154,19 @@ Each run's `cmaes/run_yyyyMMdd_HHmmss/` folder holds what the bundled CMA-ES cod
 
 | File | What it holds |
 | --- | --- |
-| `per_run_evaluation.csv` | The summary table plus the errors of each run against the ground truth: `translationErrorMm`, `rotationErrorDeg`, and `surfaceRmseMm`. `evaluationStatus` is `evaluated`, `skipped` (the run did not complete), or `failed`. Sorted by `surfaceRmseRank`, best run first. |
-| `per_combination_evaluation.csv` | One row per combination: its parameter values, how many seeds completed and were evaluated, and the median, 25th and 75th percentile, and IQR of the cost, the three errors, and the runtime over its seeds. Sorted by `combinationRank`, which ranks the median surface RMSE. **This is the table for choosing hyperparameters.** |
-| `evaluation_tables.mat` | Both tables (`perRunTable`, `perCombinationTable`) plus `evaluationMetadata`: the schema version, cost model, and parameter names needed to read the parameter columns later. |
+| `per_run_evaluation.csv` | The summary table plus the errors of each run against the ground truth: `translationErrorMm`, `rotationErrorDeg`, and `surfaceRmseMm`. It also holds how far each run moved from the shared start pose, without using the ground truth: `startToFinalTranslationMm` and `startToFinalRotationDeg`. `evaluationStatus` is `evaluated`, `skipped` (the run did not complete), or `failed`. Sorted by `surfaceRmseRank`, best run first. |
+| `per_combination_evaluation.csv` | One row per combination: its parameter values, how many seeds completed and were evaluated, and the median, 25th and 75th percentile, and IQR of the cost, the three errors, the start-to-final movement, and the runtime over its seeds. `medianSeedPairTranslationMm` and `medianSeedPairRotationDeg` show how far apart the final poses of its seeds are. Sorted by `combinationRank`, which ranks the median surface RMSE. **This is the table for choosing hyperparameters.** |
+| `derived_statistics.csv` | Experiment-level statistics, one per row, with columns `group`, `statistic`, `detail`, `value`, `unit`, and `definition` (how the value is computed). Groups: `metadata` (cost model, input files, swept values, optimizer settings), `startPose`, `optimizerHealth`, `costValidity`, `movement`, `accuracy`, `seedSpread`, `parameterEffect`, and `gridEdge`. |
+| `evaluation_tables.mat` | The three tables (`perRunTable`, `perCombinationTable`, `derivedStatisticsTable`) plus `evaluationMetadata`: the schema version, cost model, and parameter names needed to read the parameter columns later. |
+| `evaluation_tables.js` | The same content as `evaluation_tables.mat`, plus `experimentName`, as JSON in one JavaScript statement that sets `window.EVALUATION_TABLES`. The HTML report loads it, because a page opened from disk cannot read CSV or MAT files. It holds no new numbers. |
+| `surfaceRmseBoxplot.png`, `translationRotationErrors.png`, `hyperparameterHeatmaps.png`, `optimizerCostVsSurfaceRmse.png` | The four evaluation figures, saved at 200 dpi. |
 
-The figures are only shown, not saved.
+The `/analyze-hyperparamsweep` Claude skill (`.claude/skills/analyze-hyperparamsweep/`) adds two files to the same folder. Both are generated; don't edit them by hand.
+
+| File | What it holds |
+| --- | --- |
+| `findings.md` | A short summary of the experiment: a fixed header (cost model, dataset, start pose, swept parameters, seeds), the two-part verdict, optimizer health, accuracy, hyperparameters, next step, and limitations. |
+| `report.html` | An interactive report to open in a browser. It reads `evaluation_tables.js` and the PNGs from the same folder, so keep the folder together. |
 
 ## 8. One-sweep output
 
