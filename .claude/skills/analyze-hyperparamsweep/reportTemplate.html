@@ -83,26 +83,32 @@
   .gate-line { margin-top: 14px; font-size: 14px; color: var(--text-secondary); }
 
   /* Ground-truth caveat banner. */
-  .caveat { border: 1px dashed var(--rule-strong); border-radius: 6px; padding: 8px 12px; font-size: 13px; color: var(--text-secondary); margin: 0 0 16px; background: var(--surface-sunk); }
-  .caveat::before { content: "Ground truth  "; font-weight: 700; color: var(--text-primary); }
+  .caveat { border: 1px solid var(--warning); border-left-width: 4px; border-radius: 6px; padding: 8px 12px; font-size: 13px; color: var(--text-primary); margin: 0 0 16px; background: var(--warning-tint); }
+  .caveat::before { content: "⚠ Ground truth: "; font-weight: 700; color: #8a5a00; }
 
   /* Stat tiles. */
-  .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px; margin: 8px 0 18px; }
+  .tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 8px 0 18px; }
   .tile { border: 1px solid var(--rule); border-radius: 6px; padding: 12px 14px; background: #fff; }
   .tile .label { font-size: 12px; color: var(--text-secondary); line-height: 1.35; }
   .tile .value { font-family: var(--font-serif); font-size: 24px; font-weight: 600; margin-top: 4px; }
   .tile .sub { font-size: 12px; color: var(--text-muted); }
+  .tile { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; align-items: center; }
+  .tile .text { min-width: 0; }
+  .tile .glyph svg { display: block; }
+  .glyph-key { font-size: 12px; color: var(--text-muted); margin: -10px 0 18px; }
 
   /* Search-bound bars. */
-  .bounds { display: grid; gap: 10px; margin: 6px 0 18px; }
-  .bound-row { display: grid; grid-template-columns: 120px minmax(0, 1fr) 150px; gap: 12px; align-items: center; font-size: 13px; }
+  .bounds { display: grid; gap: 20px; margin: 10px 0 18px; }
+  .bound-row { display: grid; grid-template-columns: 120px minmax(0, 1fr) max-content; gap: 12px; align-items: center; font-size: 13px; }
+  .bound-row .bound-label { font-weight: 700; }
+  .bound-row .bound-text { white-space: nowrap; }
   .bound-track { position: relative; height: 12px; background: var(--surface-sunk); border-radius: 6px; }
   .bound-fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 6px; }
   .bound-mark { position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--text-secondary); }
   .bound-mark.warn { background: var(--rule-strong); }
 
   /* Narrative text written by Claude. */
-  .narrative { max-width: 72ch; }
+  .narrative { max-width: none; }
   .narrative ul, .narrative ol { padding-left: 20px; margin: 0 0 12px; }
   .narrative li { margin-bottom: 6px; }
   .empty-note { color: var(--text-muted); font-style: italic; }
@@ -120,7 +126,7 @@
 
   /* Figures. */
   figure { margin: 0 0 22px; break-inside: avoid; }
-  figure img { width: 100%; max-width: 760px; height: auto; border: 1px solid var(--rule); border-radius: 6px; background: #fff; }
+  figure img { width: 100%; height: auto; border: 1px solid var(--rule); border-radius: 6px; background: #fff; }
   figcaption { font-size: 13px; color: var(--text-secondary); margin-top: 6px; }
   .chart-pair { display: grid; grid-template-columns: 1fr; gap: 18px; }
   .chart { border: 1px solid var(--rule); border-radius: 6px; background: #fff; padding: 8px 8px 4px; position: relative; }
@@ -158,6 +164,22 @@
   table.data.static tbody tr { cursor: default; }
   table.data td.wrap { white-space: normal; min-width: 260px; color: var(--text-secondary); }
 
+  /* Combination table: keep Rank and Combination in view while scrolling sideways.
+     Frozen cells need their own background so scrolled cells don't show through. */
+  #combination-table th:nth-child(1), #combination-table td:nth-child(1) { position: sticky; left: 0; z-index: 2; width: 64px; min-width: 64px; max-width: 64px; }
+  #combination-table th:nth-child(2), #combination-table td:nth-child(2) { position: sticky; left: 64px; z-index: 2; box-shadow: inset -1px 0 0 var(--rule-strong); }
+  #combination-table th:nth-child(-n+2) { z-index: 3; }
+  #combination-table td:nth-child(-n+2) { background: #fff; }
+  #combination-table tbody tr:hover td:nth-child(-n+2) { background: var(--surface-sunk); }
+  #combination-table tbody tr.sel td:nth-child(-n+2) { background: #e6effa; }
+
+  /* All-statistics table: keep Group and Statistic in view the same way. */
+  #definition-table th:nth-child(1), #definition-table td:nth-child(1) { position: sticky; left: 0; z-index: 2; width: 130px; min-width: 130px; max-width: 130px; }
+  #definition-table th:nth-child(2), #definition-table td:nth-child(2) { position: sticky; left: 130px; z-index: 2; box-shadow: inset -1px 0 0 var(--rule-strong); }
+  #definition-table th:nth-child(-n+2) { z-index: 3; }
+  #definition-table td:nth-child(-n+2) { background: #fff; }
+  #definition-table tbody tr:hover td:nth-child(-n+2) { background: var(--surface-sunk); }
+
   footer { margin-top: 40px; font-size: 12px; color: var(--text-muted); }
 
   /* Narrow screens: navigation becomes a top bar, grids become one column. */
@@ -167,6 +189,7 @@
     nav.toc .toc-title { width: 100%; }
     nav.toc a { border-left: 0; padding: 2px 0; }
     .verdicts, .chart-pair { grid-template-columns: 1fr; }
+    .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .bound-row { grid-template-columns: 90px minmax(0, 1fr); }
     .bound-row .bound-text { grid-column: 1 / -1; }
   }
@@ -213,7 +236,7 @@ window.REPORT_TEXT = {
 <div class="page">
   <nav class="toc" aria-label="Sections">
     <div class="toc-title">Contents</div>
-    <a href="#verdict">Verdict</a>
+    <a href="#verdict">At a glance</a>
     <a href="#health">Optimizer health</a>
     <a href="#accuracy">Accuracy</a>
     <a href="#hyperparameters">Hyperparameters</a>
@@ -231,7 +254,7 @@ window.REPORT_TEXT = {
       <div class="meta-line" id="generated-line"></div>
       <table class="kv" id="header-table"></table>
 
-      <h2 style="margin-top:28px">Verdict</h2>
+      <h2 style="margin-top:28px">At a glance</h2>
       <div class="verdicts">
         <div class="verdict" id="verdict-behave">
           <div class="q">1 · Does the optimization behave? <span class="tt-muted">(no ground truth needed)</span></div>
@@ -262,6 +285,7 @@ window.REPORT_TEXT = {
       <h2>Accuracy</h2>
       <div class="caveat">These numbers are valid only if the ground truth is accurate.</div>
       <div class="tiles" id="accuracy-tiles"></div>
+      <p class="glyph-key">RMSE scales run from 0 mm to just past the start pose: green = success zone, grey tick = start pose, blue dot = the tile's value.</p>
 
       <div class="controls" id="controls"></div>
       <div class="chart-pair">
@@ -406,25 +430,84 @@ window.REPORT_TEXT = {
   if (TEXT.focus && TEXT.focus.trim()) { $('focus').hidden = false; $('toc-focus').hidden = false; fill('text-focus', TEXT.focus); }
 
   // ---------- Tiles ----------
-  const tile = (label, value, sub) => `<div class="tile"><div class="label">${label}</div><div class="value">${value}</div>${sub ? `<div class="sub">${sub}</div>` : ''}</div>`;
+  // Each tile has a small graphic drawn from the same number, so the number has a picture next to it.
+  const tile = (label, value, sub, glyph) => `<div class="tile"><div class="text"><div class="label">${label}</div><div class="value">${value}</div>${sub ? `<div class="sub">${sub}</div>` : ''}</div>${glyph ? `<div class="glyph">${glyph}</div>` : ''}</div>`;
+  const clamp01 = (f) => (isFinite(f) ? Math.max(0, Math.min(1, f)) : 0);
+
+  // Ring filled to a fraction; optional ticks mark thresholds (e.g. the gate bands).
+  const ring = (fraction, color, ticks = []) => {
+    const C = 2 * Math.PI * 15;
+    const tickLines = ticks.map((t) => {
+      const a = 2 * Math.PI * t - Math.PI / 2;
+      return `<line x1="${20 + 10 * Math.cos(a)}" y1="${20 + 10 * Math.sin(a)}" x2="${20 + 20 * Math.cos(a)}" y2="${20 + 20 * Math.sin(a)}" stroke="var(--text-primary)" stroke-width="1.5"/>`;
+    }).join('');
+    return `<svg width="48" height="48" viewBox="0 0 40 40" aria-hidden="true"><circle cx="20" cy="20" r="15" fill="none" stroke="var(--surface-sunk)" stroke-width="6"/><circle cx="20" cy="20" r="15" fill="none" stroke="${color}" stroke-width="6" stroke-dasharray="${clamp01(fraction) * C} ${C}" transform="rotate(-90 20 20)"/>${tickLines}</svg>`;
+  };
+
+  // Horizontal bar split into shares (stop reasons, budget used).
+  const shareBar = (parts) => {
+    const W = 96;
+    let x = 0;
+    const bars = parts.map((p) => { const w = clamp01(p.f) * W; const s = `<rect x="${x}" y="4" width="${w}" height="12" fill="${p.color}"/>`; x += w; return s; }).join('');
+    return `<svg width="${W}" height="20" viewBox="0 0 ${W} 20" aria-hidden="true"><rect x="0" y="4" width="${W}" height="12" fill="var(--surface-sunk)"/>${bars}</svg>`;
+  };
+
+  // Surface RMSE scale from 0 to past the start pose: green success zone, tick at the start pose, dot at the value.
+  const successMm = num(statValue('accuracy', 'successSurfaceRmseThresholdMm'));
+  const rmseScale = (v) => {
+    const W = 96, max = startRmse * 1.1, x = (m) => 5 + (Math.min(m, max) / max) * (W - 10);
+    return `<svg width="${W}" height="28" viewBox="0 0 ${W} 28" aria-hidden="true">
+      <rect x="${x(0)}" y="9" width="${x(successMm) - x(0)}" height="10" fill="var(--good-tint)" stroke="var(--good)" stroke-width="1"/>
+      <line x1="${x(0)}" x2="${x(max)}" y1="14" y2="14" stroke="var(--rule-strong)" stroke-width="2"/>
+      <line x1="${x(startRmse)}" x2="${x(startRmse)}" y1="6" y2="22" stroke="var(--text-muted)" stroke-width="1.5"/>
+      ${isFinite(num(v)) ? `<circle cx="${x(num(v))}" cy="14" r="5" fill="var(--accent)" stroke="var(--surface)" stroke-width="1.5"/>` : ''}</svg>`;
+  };
+
+  // Dot cloud whose trend line follows the Spearman value: rising, flat or falling.
+  const slopeGlyph = (rho) => {
+    const r = isFinite(num(rho)) ? num(rho) : 0;
+    const noise = [0.5, -0.6, 0.2, -0.3, 0.7, -0.5, 0.1, -0.8, 0.4];
+    const dots = noise.map((n, i) => {
+      const xv = -1 + i * 0.25, yv = r * xv + n * (1 - Math.abs(r)) * 0.9;
+      return `<circle cx="${22 + xv * 16}" cy="${Math.max(3, Math.min(37, 20 - yv * 14))}" r="2.3" fill="var(--accent)"/>`;
+    }).join('');
+    return `<svg width="48" height="44" viewBox="0 0 44 40" aria-hidden="true"><line x1="6" x2="38" y1="${20 + r * 14}" y2="${20 - r * 14}" stroke="var(--text-secondary)" stroke-width="1.5" stroke-dasharray="3 2"/>${dots}</svg>`;
+  };
+
+  // Two dots whose gap follows the seed-pair difference, on the scale of the translation bound.
+  const gapGlyph = (mm, boundMm) => {
+    const gap = clamp01(num(mm) / boundMm) * 70;
+    return `<svg width="96" height="24" viewBox="0 0 96 24" aria-hidden="true"><line x1="10" x2="86" y1="12" y2="12" stroke="var(--rule)" stroke-width="2"/><circle cx="10" cy="12" r="5" fill="var(--accent)"/><circle cx="${10 + gap}" cy="12" r="5" fill="none" stroke="var(--accent)" stroke-width="2"/></svg>`;
+  };
+
   const stopRows = rowsOf('optimizerHealth', 'fractionRunsStoppedBy');
+  const stopColors = ['var(--accent)', 'var(--series-stayed)', 'var(--warning)', 'var(--critical)'];
+  const budget = num(statValue('metadata', 'optimizer', 'maxFunctionEvaluations'));
+  const evaluations = (DATA.perRunTable || []).map((r) => num(r.functionEvaluations)).filter(isFinite).sort((a, b) => a - b);
+  const medianEvaluations = evaluations.length ? evaluations[Math.floor(evaluations.length / 2)] : NaN;
+  const completed = num(statValue('optimizerHealth', 'numberOptimizerCompleted')), total = num(statValue('optimizerHealth', 'numberOfRuns'));
+  const fractionMoved = num(statValue('movement', 'fractionRunsMoved'));
   $('health-tiles').innerHTML = [
-    tile('Runs completed', `${statValue('optimizerHealth', 'numberOptimizerCompleted')} / ${statValue('optimizerHealth', 'numberOfRuns')}`, `${statValue('optimizerHealth', 'numberEvaluated')} evaluated`),
-    tile('Budget', `${statValue('metadata', 'optimizer', 'maxFunctionEvaluations')} evals`, `population ${statValue('metadata', 'optimizer', 'populationSize')}`),
-    tile('Stop reasons', stopRows.map((r) => pct(r.value, 0)).join(' / ') || '–', stopRows.map((r) => esc(r.detail)).join(' / ')),
-    tile('Runs that lowered the cost', pct(costDecreased), 'decides the gate'),
-    tile('Runs that moved from start', pct(statValue('movement', 'fractionRunsMoved')), `median ${fmt(statValue('movement', 'medianStartToFinalTranslationMm'))} mm / ${fmt(statValue('movement', 'medianStartToFinalRotationDeg'))}°`),
-    tile('Seed agreement', `${fmt(statValue('seedSpread', 'medianSeedPairTranslationMm'))} mm`, `${fmt(statValue('seedSpread', 'medianSeedPairRotationDeg'))}° · read with movement`),
+    tile('Runs completed', `${completed} / ${total}`, `${statValue('optimizerHealth', 'numberEvaluated')} evaluated`, ring(completed / total, 'var(--good)')),
+    tile('Budget', `${budget} evals`, `population ${statValue('metadata', 'optimizer', 'populationSize')} · median run used ${isFinite(medianEvaluations) ? medianEvaluations : '–'}`,
+      shareBar([{ f: medianEvaluations / budget, color: medianEvaluations >= budget ? 'var(--warning)' : 'var(--accent)' }])),
+    tile('Stop reasons', stopRows.map((r) => pct(r.value, 0)).join(' / ') || '–', stopRows.map((r, i) => `<span style="color:${stopColors[i % stopColors.length]}">■</span> ${esc(r.detail)}`).join(' &nbsp;'),
+      shareBar(stopRows.map((r, i) => ({ f: num(r.value), color: stopColors[i % stopColors.length] })))),
+    tile('Runs that lowered the cost', pct(costDecreased), 'decides the gate · ticks at 10% and 60%', ring(costDecreased, `var(--${gate.status})`, [0.10, 0.60])),
+    tile('Runs that moved from start', pct(fractionMoved), `median ${fmt(statValue('movement', 'medianStartToFinalTranslationMm'))} mm / ${fmt(statValue('movement', 'medianStartToFinalRotationDeg'))}°`, ring(fractionMoved, 'var(--series-moved)')),
+    tile('Seed agreement', `${fmt(statValue('seedSpread', 'medianSeedPairTranslationMm'))} mm`, `${fmt(statValue('seedSpread', 'medianSeedPairRotationDeg'))}° · read with movement`,
+      gapGlyph(statValue('seedSpread', 'medianSeedPairTranslationMm'), num(statValue('metadata', 'optimizer', 'translationBoundMm')))),
   ].join('');
 
   const bestRow = stat('accuracy', 'bestMedianSurfaceRmseMm') || {};
+  const successRate = num(statValue('accuracy', 'successRate')), clinicalRate = num(statValue('accuracy', 'clinicalRate'));
   $('accuracy-tiles').innerHTML = [
-    tile('Start-pose surface RMSE', `${fmt(startRmse)} mm`, 'reference for improvement'),
-    tile('Best median surface RMSE', `${fmt(bestRow.value)} mm`, esc(bestRow.detail || '')),
-    tile('Best single run', `${fmt(statValue('accuracy', 'bestRunSurfaceRmseMm'))} mm`, ''),
-    tile('Success rate', pct(statValue('accuracy', 'successRate')), `surface RMSE ≤ ${fmt(statValue('accuracy', 'successSurfaceRmseThresholdMm'), 0)} mm`),
-    tile('Clinical rate', pct(statValue('accuracy', 'clinicalRate')), `≤ ${fmt(statValue('accuracy', 'clinicalTranslationThresholdMm'), 0)} mm and ≤ ${fmt(statValue('accuracy', 'clinicalRotationThresholdDeg'), 0)}°`),
-    tile('Spearman cost vs RMSE', fmt(statValue('costValidity', 'spearmanBestCostVsSurfaceRmse')), 'weak signal only'),
+    tile('Start-pose surface RMSE', `${fmt(startRmse)} mm`, 'reference for improvement', rmseScale(startRmse)),
+    tile('Best median surface RMSE', `${fmt(bestRow.value)} mm`, esc(bestRow.detail || ''), rmseScale(bestRow.value)),
+    tile('Best single run', `${fmt(statValue('accuracy', 'bestRunSurfaceRmseMm'))} mm`, '', rmseScale(statValue('accuracy', 'bestRunSurfaceRmseMm'))),
+    tile('Success rate', pct(successRate), `surface RMSE ≤ ${fmt(successMm, 0)} mm`, ring(successRate, 'var(--good)')),
+    tile('Clinical rate', pct(clinicalRate), `≤ ${fmt(statValue('accuracy', 'clinicalTranslationThresholdMm'), 0)} mm and ≤ ${fmt(statValue('accuracy', 'clinicalRotationThresholdDeg'), 0)}°`, ring(clinicalRate, 'var(--good)')),
+    tile('Spearman cost vs RMSE', fmt(statValue('costValidity', 'spearmanBestCostVsSurfaceRmse')), 'weak signal only', slopeGlyph(statValue('costValidity', 'spearmanBestCostVsSurfaceRmse'))),
   ].join('');
 
   // ---------- Search-bound bars ----------
@@ -434,7 +517,7 @@ window.REPORT_TEXT = {
     const word = ratio > 1 ? 'out of reach' : ratio > 0.8 ? 'near the edge' : 'within bounds';
     const scaleMax = Math.max(bound, error) * 1.1;
     return `<div class="bound-row">
-      <div>${label}</div>
+      <div class="bound-label">${label}</div>
       <div class="bound-track" title="${fmt(error, 1)} ${unit} start error vs ±${fmt(bound, 0)} ${unit} bound">
         <div class="bound-fill" style="width:${(error / scaleMax) * 100}%;background:${color}"></div>
         <div class="bound-mark warn" style="left:${(0.8 * bound / scaleMax) * 100}%"></div>
@@ -590,6 +673,7 @@ window.REPORT_TEXT = {
   function drawCharts() {
     const clinT = num(statValue('accuracy', 'clinicalTranslationThresholdMm'));
     const clinR = num(statValue('accuracy', 'clinicalRotationThresholdDeg'));
+    const successMm = num(statValue('accuracy', 'successSurfaceRmseThresholdMm'));
     scatter($('chart-errors'), {
       title: 'Final pose error per run',
       x: 'translationErrorMm', y: 'rotationErrorDeg',
@@ -607,11 +691,25 @@ window.REPORT_TEXT = {
       title: 'Final cost vs surface RMSE per run',
       x: 'bestCost', y: 'surfaceRmseMm',
       xLabel: 'Final cost (a.u.; scale differs per combination)', yLabel: 'Surface RMSE (mm)',
-      extraY: [startRmse],
-      legendExtra: '<span>– – start-pose RMSE</span>',
+      extraY: [startRmse, 0],
+      yDomain: ([, hi]) => [0, hi],
+      legendExtra: `<span><i style="background:var(--good-tint);border:1px dashed var(--good);border-radius:2px"></i>success zone (≤ ${fmt(successMm, 0)} mm)</span><span>– – reference RMSE</span>`,
+      // Success zone and the accuracy-tile values as horizontal references, so the tiles can be read on this chart.
       decorate: (svg, sx, sy, x0, x1) => {
-        svgEl('line', { class: 'ref-line', x1: sx(x0), x2: sx(x1), y1: sy(startRmse), y2: sy(startRmse) }, svg);
-        svgEl('text', { class: 'ref-label', x: sx(x1) - 4, y: sy(startRmse) + 14, 'text-anchor': 'end' }, svg).textContent = `start ${fmt(startRmse)} mm`;
+        svgEl('rect', { class: 'target-box', x: sx(x0), y: sy(successMm), width: sx(x1) - sx(x0), height: sy(0) - sy(successMm) }, svg);
+        const stayedCount = runs.filter((r) => !r.moved).length;
+        [
+          { v: startRmse, label: `start pose ${fmt(startRmse)} mm · ${stayedCount} runs stayed here`, below: true },
+          { v: num(bestRow.value), label: `best median ${fmt(bestRow.value)} mm (${bestRow.detail || ''})` },
+          { v: num(statValue('accuracy', 'bestRunSurfaceRmseMm')), label: `best run ${fmt(statValue('accuracy', 'bestRunSurfaceRmseMm'))} mm` },
+        ].map((m) => ({ ...m, y: sy(m.v) + (m.below ? 14 : -5) }))
+          .sort((a, b) => a.y - b.y)
+          .forEach((m, i, list) => {
+            // When two values are close, push the lower label down so the labels don't overlap.
+            if (i > 0 && m.y < list[i - 1].y + 16) m.y = list[i - 1].y + 16;
+            svgEl('line', { class: 'ref-line', x1: sx(x0), x2: sx(x1), y1: sy(m.v), y2: sy(m.v) }, svg);
+            svgEl('text', { class: 'ref-label', x: sx(x1) - 4, y: m.y, 'text-anchor': 'end' }, svg).textContent = m.label;
+          });
       },
     });
   }

@@ -8,7 +8,7 @@
 | Swept parameters | {{name}}: {{values}}, one per parameter with more than one value; fixed: {{name}} = {{value}} |
 | Seeds | {{numberOfSeeds}} per combination, {{numberOfCombinations}} combinations |
 
-## Verdict
+## At a glance
 1. **Does the optimization behave?** {{behaves / partly / stuck}}: {{one sentence with 2–3 numbers}}
 2. **Is the result accurate?** {{accurate / partly / not accurate}}: {{one sentence with 2–3 numbers}}
    *Valid only if the ground truth is accurate.*

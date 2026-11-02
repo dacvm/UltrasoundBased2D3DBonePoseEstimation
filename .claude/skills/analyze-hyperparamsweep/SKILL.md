@@ -89,7 +89,7 @@ Start this subsection with: "These numbers are valid only if the ground truth is
   combinations. Never base the verdict on it alone.
 - State the limitation: all runs start from one pose, so this tests one starting point only.
 
-#### Verdict (two parts)
+#### Verdict (two parts; the "At a glance" section of findings.md and report.html)
 1. **Does the optimization behave?** behaves / partly / stuck, from B1.
 2. **Is the result accurate?** accurate / partly / not accurate, from B2, with the ground-truth caveat.
 Support each part with two or three numbers.
