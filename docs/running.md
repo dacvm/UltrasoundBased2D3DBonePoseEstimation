@@ -201,18 +201,13 @@ Every swept parameter must have exactly one of these roles. This way a new cost-
 
 ### 6.2. Analyze the results with Claude
 
-After the evaluation, Claude Code can interpret the results with the project skill in `.claude/skills/analyze-hyperparamsweep/`. In a Claude Code session in the repository root, run:
+After the evaluation, Claude Code can interpret the results for you. In a Claude Code session in the repository root, run:
 
 ```
 /analyze-hyperparamsweep <experimentFolderName>
 ```
 
-The skill reads only the CSV tables, the figure images, and the cost model's notes in `literatures/`; it does not run MATLAB. It checks the optimizer first, then answers two questions separately: does the optimization behave (judged without the ground truth), and is the result accurate (which depends on the ground truth being accurate). It writes two files to the experiment's `evaluation/` folder:
-
-- `findings.md`: a short summary with the verdict and the recommended next step.
-- `report.html`: an interactive report. Open it in a browser straight from the folder; it needs `evaluation_tables.js` and the PNGs next to it, so run the evaluation first and keep the folder together.
-
-Both files are generated: run the skill again instead of editing them by hand.
+It writes `findings.md` (a short summary with a two-part verdict and the recommended next step) and `report.html` (an interactive report) to the experiment's `evaluation/` folder. See [Analyzing a sweep with Claude](analyzing-sweeps.md) for what you need before running it and how to read the report.
 
 ## 7. Where to look next
 

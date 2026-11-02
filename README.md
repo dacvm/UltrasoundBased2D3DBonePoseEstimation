@@ -42,8 +42,9 @@ See [Running the project](docs/running.md) for the required toolboxes and full d
 | [Processing workflow](docs/workflow.md) | How configuration, planning, CMA-ES, and cost dispatch fit together. |
 | [Bookkeeping](docs/bookkeeping.md) | Saving results, failure cases, and resuming a stopped sweep. |
 | [Adding a new cost function](docs/adding-a-cost-function.md) | Naming rules and the recipe for a new cost model. |
+| [Analyzing a sweep with Claude](docs/analyzing-sweeps.md) | Using the `analyze-hyperparamsweep` skill to get a summary and an interactive report of an evaluated sweep. |
 
-## AI-assisted development
+## Disclaimer
 
 This project was developed with the help of [Claude Code](https://claude.com/claude-code). The AI assisted with writing code, while the method design, the geometric and algorithmic choices, and the review of every change remained with the authors. The code builds on our domain knowledge of ultrasound imaging, tracking, and bone registration, and its behavior is verified through unit tests and validation on recorded experiment data.
 
