@@ -119,7 +119,15 @@ This is the most important idea to understand. CMA-ES does **not** search for th
 - the last three are a rotation (a rotation vector, in radians);
 - a zero vector means "no correction", so exactly the coarse start pose.
 
-[`stateVectorToTMatrix`](../functions/bonePoseOptimization/poseEvaluation/stateVectorToTMatrix.m) turns that vector into a 4×4 candidate transform `T_CT_ref_candidate`. Every cost model starts with this call, then places the CT mesh at the candidate pose and scores it. [`TMatrixToStateVector`](../functions/bonePoseOptimization/poseEvaluation/TMatrixToStateVector.m) does the reverse.
+The rotation turns the bone about a fixed **pivot point**, `data.pivotPointRef`: the centre of the CT mesh (the plain mean of its vertices) at the start pose, in ref. A rotation on its own turns points about the origin of the frame, and the ref origin can be hundreds of millimetres from the bone. There, one degree would swing the bone several millimetres sideways and tangle rotation and translation together. About the pivot, the three rotation values only turn the bone about itself, and the three translation values only shift it: a point `p` in ref moves to
+
+```
+p_new = R*(p - c) + c + v,   with R = expm(hat(w)) and c = data.pivotPointRef
+```
+
+So `v` is exactly how far the pivot moves, and a pure rotation leaves the pivot in place. The pivot is computed once in `prepareBonePoseOptimizationInputs` and never changes during a run.
+
+[`stateVectorToTMatrix`](../functions/bonePoseOptimization/poseEvaluation/stateVectorToTMatrix.m) turns that vector into a 4×4 candidate transform `T_CT_ref_candidate`. Every cost model starts with this call, then places the CT mesh at the candidate pose and scores it. [`TMatrixToStateVector`](../functions/bonePoseOptimization/poseEvaluation/TMatrixToStateVector.m) does the reverse. Both take the pivot as their third input. Each optimization result stores the pivot next to `bestPoseVector`, because a saved vector only has a meaning together with its pivot.
 
 ### 3.2. The dispatcher and the registry
 

@@ -40,7 +40,8 @@ function [cost, details] = cost_intensityLine(poseVector, data, config)
 %   other cost models.
 %
 % Inputs:
-%   poseVector - Six-value perturbation around data.T_CT_ref_initial.
+%   poseVector - Six-value perturbation around data.T_CT_ref_initial,
+%                rotating about data.pivotPointRef.
 %   data       - Prepared data from prepareBonePoseOptimizationInputs. It
 %                must contain data.extra.intensityLine.smoothedImages, which
 %                preparation builds when the config sets
