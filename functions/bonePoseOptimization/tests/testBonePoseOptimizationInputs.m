@@ -438,6 +438,24 @@ verifyEqual(testCase, data.T_bone_ref_initial, ...
 end
 
 
+function testPivotPointIsTheMeshCentreInRef(testCase)
+%TESTPIVOTPOINTISTHEMESHCENTREINREF Check the fixed rotation pivot.
+% testCase supplies the prepared estimation data. This function has no output.
+
+data = testCase.TestData.data;
+
+% The pivot is one 3D point stored as a column, ready for c - R*c.
+verifySize(testCase, data.pivotPointRef, [3 1]);
+verifyTrue(testCase, all(isfinite(data.pivotPointRef)));
+
+% Compute the centre the other way round: move every vertex into ref
+% first, then average. A rigid move keeps the mean, so both must agree.
+bonePointsRefInitial = applyRigidTransform(data.boneMeshCT.Points, data.T_CT_ref_initial);
+expectedPivotPointRef = mean(bonePointsRefInitial, 1).';
+verifyEqual(testCase, data.pivotPointRef, expectedPivotPointRef, 'AbsTol', 1e-9);
+end
+
+
 function testSceneWithoutValidationShowsOnlyEstimate(testCase)
 %TESTSCENEWITHOUTVALIDATIONSHOWSONLYESTIMATE Check the optional display path.
 % testCase supplies prepared estimation data. This function has no output.
