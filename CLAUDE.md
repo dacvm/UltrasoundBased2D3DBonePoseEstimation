@@ -40,7 +40,7 @@ MATLAB project: estimate 3D bone pose by registering CT bone meshes to tracked 2
 
 ## Optimization pipeline
 - `functions/bonePoseOptimization/` owns orchestration. Root holds only stable entry points (cost dispatcher `bonePoseCostFunction.m`, one run, one experiment).
-- Optimizer state is a 6D perturbation `[vx; vy; vz; wx; wy; wz]` around `data.T_init_originct`; convert with the paired functions in `poseEvaluation/`.
+- Optimizer state is a 6D perturbation `[vx; vy; vz; wx; wy; wz]` around `data.T_CT_ref_initial`: `w` turns the bone about the fixed pivot `data.pivotPointRef` (mesh centre at the start pose, in ref) and `v` shifts that pivot in mm; convert with the paired functions in `poseEvaluation/`.
 - Do slow setup once in `inputPreparation/`; never load files inside a cost function.
 - New cost model: add the evaluator and its config validator together in `costModels/` and register it.
 - No plotting inside cost functions or optimizers.
