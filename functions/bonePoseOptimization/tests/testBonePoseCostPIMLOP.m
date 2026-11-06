@@ -370,6 +370,14 @@ verifyLessThanOrEqual(testCase, abs(bestPoseVector(1:3)), ...
     config.optimizer.translationBoundMm + 1e-12);
 verifyLessThanOrEqual(testCase, abs(bestPoseVector(4:6)), ...
     deg2rad(config.optimizer.rotationBoundDeg) + 1e-12);
+
+% The result must carry the pivot its pose vectors are relative to, and
+% that pivot must turn the saved vector back into the saved transform.
+pivotPointRef = optimizationResult.result.pivotPointRef;
+verifyEqual(testCase, pivotPointRef, testCase.TestData.data.pivotPointRef);
+T_CT_ref_rebuilt = stateVectorToTMatrix(bestPoseVector, ...
+    optimizationResult.result.T_CT_ref_initial, pivotPointRef);
+verifyEqual(testCase, T_CT_ref_rebuilt, optimizationResult.result.T_CT_ref_best, 'AbsTol', 1e-12);
 end
 
 
