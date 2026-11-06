@@ -199,7 +199,7 @@ searchOptions = struct( ...
 %
 % T_bone_ref_candidate is the same pose in the anatomical bone frame; it is
 % not needed for the cost, only reported in DETAILS.
-T_CT_ref_candidate   = stateVectorToTMatrix(poseVector, data.T_CT_ref_initial);
+T_CT_ref_candidate   = stateVectorToTMatrix(poseVector, data.T_CT_ref_initial, data.pivotPointRef);
 T_bone_ref_candidate = T_CT_ref_candidate * data.T_bone_CT;
 
 % The paper moves the data points with T = [R,t] onto the fixed model

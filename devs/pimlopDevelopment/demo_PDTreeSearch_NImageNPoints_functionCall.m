@@ -84,6 +84,11 @@ end
 data.extra.pimlop       = struct();
 data.extra.pimlop.PsiCT = PsiCT;
 
+% The saved fixture predates the pose pivot, so add it the same way
+% prepareBonePoseOptimizationInputs does: the mesh centre, moved into ref
+% with the start pose. The cost function needs it to build the candidate.
+data.pivotPointRef = applyRigidTransform(mean(data.boneMeshCT.Points, 1), data.T_CT_ref_initial).';
+
 %% 4. EVALUATE ONE CANDIDATE POSE THROUGH THE COST FUNCTION
 
 % A zero state means no correction around the saved coarse registration.

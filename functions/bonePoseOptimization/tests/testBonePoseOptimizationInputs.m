@@ -417,24 +417,78 @@ end
 
 function testFrameExplicitTransformConvention(testCase)
 %TESTFRAMEEXPLICITTRANSFORMCONVENTION Check state conversion and composition.
-% testCase supplies the initial transforms. This function has no output.
+% testCase supplies the initial transforms and the pivot. This function has
+% no output.
 
 data = testCase.TestData.data;
 
 % A zero state must reproduce the coarse CT-to-reference pose exactly.
-T_CT_ref_zero = stateVectorToTMatrix(zeros(6, 1), data.T_CT_ref_initial);
+T_CT_ref_zero = stateVectorToTMatrix(zeros(6, 1), data.T_CT_ref_initial, data.pivotPointRef);
 verifyEqual(testCase, T_CT_ref_zero, data.T_CT_ref_initial, 'AbsTol', 1e-12);
 
-% A small candidate state must survive a state-to-transform round trip.
-stateVector = [1; -2; 0.5; deg2rad(1); deg2rad(-0.5); deg2rad(0.25)];
-T_CT_ref_candidate = stateVectorToTMatrix(stateVector, data.T_CT_ref_initial);
-recoveredStateVector = TMatrixToStateVector( ...
-    T_CT_ref_candidate, data.T_CT_ref_initial);
-verifyEqual(testCase, recoveredStateVector, stateVector, 'AbsTol', 1e-10);
+% Candidate states inside the default search box (10 mm, 10 deg) must
+% survive a state-to-transform round trip. A fixed random stream keeps
+% the test repeatable.
+randomStream = RandStream('mt19937ar', 'Seed', 1);
+for sampleIndex = 1:20
+    stateVector = [10 * (2 * rand(randomStream, 3, 1) - 1); ...
+                   deg2rad(10) * (2 * rand(randomStream, 3, 1) - 1)];
+    T_CT_ref_candidate = stateVectorToTMatrix(stateVector, data.T_CT_ref_initial, data.pivotPointRef);
+    recoveredStateVector = TMatrixToStateVector( ...
+        T_CT_ref_candidate, data.T_CT_ref_initial, data.pivotPointRef);
+    verifyEqual(testCase, recoveredStateVector, stateVector, 'AbsTol', 1e-10);
+
+    % Every candidate must stay a proper rigid transform.
+    R_CT_ref_candidate = T_CT_ref_candidate(1:3, 1:3);
+    verifyEqual(testCase, R_CT_ref_candidate.' * R_CT_ref_candidate, eye(3), 'AbsTol', 1e-12);
+    verifyEqual(testCase, det(R_CT_ref_candidate), 1, 'AbsTol', 1e-12);
+    verifyEqual(testCase, T_CT_ref_candidate(4, :), [0 0 0 1]);
+end
 
 % The stored initial anatomical frame must use the project composition rule.
 verifyEqual(testCase, data.T_bone_ref_initial, ...
     data.T_CT_ref_initial * data.T_bone_CT, 'AbsTol', 1e-12);
+end
+
+
+function testRotationTurnsTheBoneAboutThePivot(testCase)
+%TESTROTATIONTURNSTHEBONEABOUTTHEPIVOT Check what each half of the state does.
+% testCase supplies the prepared data and the pivot. This function has no
+% output.
+
+data = testCase.TestData.data;
+pivotPointRef = data.pivotPointRef;
+pivotPointCT  = mean(data.boneMeshCT.Points, 1);
+
+% A pure rotation must leave the pivot where it is.
+pureRotation = [0; 0; 0; deg2rad(5); deg2rad(-3); deg2rad(2)];
+T_CT_ref_rotated = stateVectorToTMatrix(pureRotation, data.T_CT_ref_initial, pivotPointRef);
+pivotPointRefAfterRotation = applyRigidTransform(pivotPointCT, T_CT_ref_rotated).';
+verifyEqual(testCase, pivotPointRefAfterRotation, pivotPointRef, 'AbsTol', 1e-9);
+
+% A pure translation must move every mesh point, the pivot included, by
+% exactly v.
+pureTranslation = [2; -4; 7; 0; 0; 0];
+T_CT_ref_shifted = stateVectorToTMatrix(pureTranslation, data.T_CT_ref_initial, pivotPointRef);
+bonePointsRefInitial = applyRigidTransform(data.boneMeshCT.Points, data.T_CT_ref_initial);
+bonePointsRefShifted = applyRigidTransform(data.boneMeshCT.Points, T_CT_ref_shifted);
+verifyEqual(testCase, bonePointsRefShifted - bonePointsRefInitial, ...
+    repmat(pureTranslation(1:3).', size(bonePointsRefInitial, 1), 1), 'AbsTol', 1e-9);
+
+% A small rotation moves a point by about (distance to the pivot) x
+% (angle in rad). Check this for the mesh vertex farthest from the pivot,
+% using an axis perpendicular to the line from the pivot to that vertex,
+% so the motion is the full arc length.
+[farthestDistanceMm, farthestIndex] = max(vecnorm(bonePointsRefInitial - pivotPointRef.', 2, 2));
+leverDirection = (bonePointsRefInitial(farthestIndex, :).' - pivotPointRef) / farthestDistanceMm;
+rotationAxis = cross(leverDirection, [0; 0; 1]);
+rotationAxis = rotationAxis / norm(rotationAxis);
+angleRad = deg2rad(1);
+T_CT_ref_oneDegree = stateVectorToTMatrix([0; 0; 0; angleRad * rotationAxis], ...
+    data.T_CT_ref_initial, pivotPointRef);
+farthestPointRefMoved = applyRigidTransform(data.boneMeshCT.Points(farthestIndex, :), T_CT_ref_oneDegree);
+motionMm = norm(farthestPointRefMoved - bonePointsRefInitial(farthestIndex, :));
+verifyEqual(testCase, motionMm, 2 * farthestDistanceMm * sin(angleRad / 2), 'RelTol', 1e-9);
 end
 
 

@@ -35,7 +35,7 @@ figureName = char(figureName);
 
 % Convert the current state into the transform applied to CT mesh points.
 T_CT_ref_candidate = stateVectorToTMatrix( ...
-    poseVector, data.T_CT_ref_initial);
+    poseVector, data.T_CT_ref_initial, data.pivotPointRef);
 
 % Compute the mesh-plane intersections for this pose so the 2D overlays match the current 3D scene.
 poseEvaluation = computeProbeFacingPixelsForPose( ...

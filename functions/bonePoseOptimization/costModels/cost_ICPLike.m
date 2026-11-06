@@ -90,7 +90,7 @@ nearestVertexCount  = min(double(nearestVertexCount), numberOfVertices);
 % The candidate pose moves CT into ref. Its inverse (ref -> CT) is needed to
 % move the measured points into the frame of the KD-tree. The inverse of a
 % rigid [R t] is [R' -R'*t]; deriving it like this keeps it exactly rigid.
-T_CT_ref_candidate   = stateVectorToTMatrix(poseVector, data.T_CT_ref_initial);
+T_CT_ref_candidate   = stateVectorToTMatrix(poseVector, data.T_CT_ref_initial, data.pivotPointRef);
 T_bone_ref_candidate = T_CT_ref_candidate * data.T_bone_CT;
 
 R_CT_ref = T_CT_ref_candidate(1:3, 1:3);

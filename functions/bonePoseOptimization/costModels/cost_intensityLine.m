@@ -57,7 +57,7 @@ function [cost, details] = cost_intensityLine(poseVector, data, config)
 %% BUILD THE CANDIDATE POSE
 
 % Convert the optimizer state into the transform that places the CT mesh in ref.
-T_CT_ref_candidate   = stateVectorToTMatrix(poseVector, data.T_CT_ref_initial);
+T_CT_ref_candidate   = stateVectorToTMatrix(poseVector, data.T_CT_ref_initial, data.pivotPointRef);
 T_bone_ref_candidate = T_CT_ref_candidate * data.T_bone_CT;
 
 %% FIND WHERE THE BONE SHOULD APPEAR IN EVERY IMAGE
