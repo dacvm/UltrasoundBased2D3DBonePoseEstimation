@@ -33,6 +33,11 @@ addpath(genpath(fullfile(projectRoot, 'functions')));
 loadedSetup = load(fullfile(testFolder, 'optimization_setup.mat'), 'data');
 data = loadedSetup.data;
 
+% The saved fixture predates the pose pivot, so add it the same way
+% prepareBonePoseOptimizationInputs does: the mesh centre, moved into ref
+% with the start pose.
+data.pivotPointRef = applyRigidTransform(mean(data.boneMeshCT.Points, 1), data.T_CT_ref_initial).';
+
 % Use enough measurements from every image to exercise the multi-image
 % grouping while keeping this regression test much faster than the visual
 % demonstration, which intentionally uses half of all valid measurements.
@@ -195,7 +200,7 @@ searchOptions = struct( ...
     'MaxPairsPerBatch', 8192);
 
 T_CT_ref_candidate = stateVectorToTMatrix( ...
-    poseVector, data.T_CT_ref_initial);
+    poseVector, data.T_CT_ref_initial, data.pivotPointRef);
 R_CT_ref_candidate = T_CT_ref_candidate(1:3,1:3);
 t_CT_ref_candidate = T_CT_ref_candidate(1:3,4);
 T_ref_CT_candidate = eye(4);

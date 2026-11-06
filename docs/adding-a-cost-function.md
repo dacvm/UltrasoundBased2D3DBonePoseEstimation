@@ -78,8 +78,8 @@ The evaluator is the function CMA-ES calls for every candidate pose. Every evalu
 
 Its three inputs are:
 
-- **`poseVector`**: a 6×1 *correction* `[tx; ty; tz; rx; ry; rz]` (mm and radians) on top of the coarse start pose `data.T_CT_ref_initial`. A zero vector means "exactly the start pose". `stateVectorToTMatrix` turns it into the 4×4 candidate transform `T_CT_ref_candidate`. Almost every evaluator starts with this call. [Processing workflow](workflow.md#31-the-6d-pose-vector-statevectortotmatrix) explains the idea in more detail.
-- **`data`**: everything `prepareBonePoseOptimizationInputs` built once before the search. The fields you will use most are `data.boneMeshCT` (the CT mesh), `data.imagePlanesRef` (the ultrasound images and their planes), `data.boneSurfaceMeasurements` (segmented bone points in the ref frame), `data.T_CT_ref_initial`, and model-specific data under `data.extra.<model>`.
+- **`poseVector`**: a 6×1 *correction* `[tx; ty; tz; rx; ry; rz]` (mm and radians) on top of the coarse start pose `data.T_CT_ref_initial`; the rotation turns about the fixed pivot `data.pivotPointRef`, the centre of the bone. A zero vector means "exactly the start pose". `stateVectorToTMatrix` turns it into the 4×4 candidate transform `T_CT_ref_candidate`. Almost every evaluator starts with this call. [Processing workflow](workflow.md#31-the-6d-pose-vector-statevectortotmatrix) explains the idea in more detail.
+- **`data`**: everything `prepareBonePoseOptimizationInputs` built once before the search. The fields you will use most are `data.boneMeshCT` (the CT mesh), `data.imagePlanesRef` (the ultrasound images and their planes), `data.boneSurfaceMeasurements` (segmented bone points in the ref frame), `data.T_CT_ref_initial`, `data.pivotPointRef`, and model-specific data under `data.extra.<model>`.
 - **`config`**: the settings of this one run. Your model's settings are in `config.cost.parameters.<parameterName>`. The fixed parameters and the current value of each hyperparameter arrive there side by side, so the evaluator never needs to know which kind a setting is. The optimizer sometimes calls without `config`, so fall back to `data.config` when it is missing.
 
 Its two outputs are:
@@ -99,9 +99,10 @@ function [cost, details] = cost_nearestVertexDistance(poseVector, data, config)
 %
 % Inputs:
 %   poseVector - Six-value perturbation [tx; ty; tz; rx; ry; rz] (mm, rad)
-%                around data.T_CT_ref_initial.
+%                around data.T_CT_ref_initial, rotating about
+%                data.pivotPointRef.
 %   data       - Prepared data from prepareBonePoseOptimizationInputs. This
-%                function uses data.T_CT_ref_initial,
+%                function uses data.T_CT_ref_initial, data.pivotPointRef,
 %                data.boneSurfaceMeasurements, and the CT-frame KD-tree
 %                data.extra.icpLike.vertexTreeCT.
 %   config     - Runtime configuration; data.config when omitted. This
@@ -128,7 +129,7 @@ distanceCapMm = config.cost.parameters.distanceCapMm;
 
 % Turn the 6D correction into the candidate CT -> ref transform. Its inverse
 % moves the measured points into CT, the frame the KD-tree was built in.
-T_CT_ref_candidate = stateVectorToTMatrix(poseVector, data.T_CT_ref_initial);
+T_CT_ref_candidate = stateVectorToTMatrix(poseVector, data.T_CT_ref_initial, data.pivotPointRef);
 R_CT_ref = T_CT_ref_candidate(1:3, 1:3);
 t_CT_ref = T_CT_ref_candidate(1:3, 4);
 T_ref_CT_candidate = [R_CT_ref.', -R_CT_ref.' * t_CT_ref; 0 0 0 1];
@@ -295,7 +296,7 @@ The model works when this script runs without error and the `Initial cost` it pr
 A short checklist to go through before you open a pull request:
 
 - **Return one finite number, lower is better.** A `NaN` or `Inf` confuses CMA-ES. If a pose is impossible to score, return a large finite penalty instead.
-- **Start from `data.T_CT_ref_initial` every time.** Build the candidate with `stateVectorToTMatrix(poseVector, data.T_CT_ref_initial)`, and never store a moved mesh for the next call.
+- **Start from `data.T_CT_ref_initial` every time.** Build the candidate with `stateVectorToTMatrix(poseVector, data.T_CT_ref_initial, data.pivotPointRef)`, and never store a moved mesh for the next call.
 - **Read settings only from `config.cost.parameters`.** Fall back to `data.config` when `config` is not given.
 - **Do no slow setup.** No file loading, no tree building, no checks of settings. Those belong in `prepareBonePoseOptimizationInputs` and in the validator.
 - **Do no plotting.** Put what you would plot into `details` instead, and plot it afterwards.

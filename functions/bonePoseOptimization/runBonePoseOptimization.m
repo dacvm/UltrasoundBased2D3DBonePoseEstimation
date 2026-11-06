@@ -95,7 +95,7 @@ else
 end
 
 % Convert the best state into both frame-explicit transforms used downstream.
-T_CT_ref_best   = stateVectorToTMatrix(bestPoseVector, data.T_CT_ref_initial);
+T_CT_ref_best   = stateVectorToTMatrix(bestPoseVector, data.T_CT_ref_initial, data.pivotPointRef);
 T_bone_ref_best = T_CT_ref_best * data.T_bone_CT;
 
 %% PACKAGE RESULT
@@ -105,6 +105,7 @@ optimizationResult.result.initialPoseVector   = initialPoseVector; % Keep the st
 optimizationResult.result.initialCost         = initialCost;       % Keep the starting objective value so it can be compared directly with bestCost.
 optimizationResult.result.bestPoseVector      = bestPoseVector;    % Store the best bounded pose correction found anywhere in the run.
 optimizationResult.result.bestCost            = bestCost;          % Store the objective value belonging to bestPoseVector; lower is better.
+optimizationResult.result.pivotPointRef       = data.pivotPointRef; % Store the point the pose vectors rotate about; a saved vector means nothing without it.
 optimizationResult.result.T_CT_ref_initial    = data.T_CT_ref_initial;   % Store the coarse CT-to-reference pose around which CMA-ES searched.
 optimizationResult.result.T_bone_ref_initial  = data.T_bone_ref_initial; % Store the matching initial anatomical bone pose in the reference frame.
 optimizationResult.result.T_CT_ref_best       = T_CT_ref_best;           % Store the optimized transform used to move CT points into the reference frame.

@@ -95,10 +95,12 @@ function [cost, details] = cost_PIMLOP(poseVector, data, config)
 % poseVector : Six-value optimizer state [vx; vy; vz; wx; wy; wz].
 %     Translation is in millimetres and rotation is a rotation vector in
 %     radians. The state is applied around data.T_CT_ref_initial by
-%     stateVectorToTMatrix. Zero means "the coarse-registration pose".
+%     stateVectorToTMatrix, rotating about data.pivotPointRef. Zero means
+%     "the coarse-registration pose".
 %
 % data : Prepared optimization data. Fields used here:
 %     T_CT_ref_initial        - coarse start pose, CT -> ref;
+%     pivotPointRef           - fixed point in ref the pose rotates about;
 %     T_bone_CT               - anatomical bone frame -> CT (for details);
 %     imagePlanesRef(k)       - tracked image k; its T_image_ref gives the image orientation needed for R_p;
 %     boneSurfaceMeasurements(k) - bone surface segmented in image k, aligned with imagePlanesRef(k):
@@ -199,7 +201,7 @@ searchOptions = struct( ...
 %
 % T_bone_ref_candidate is the same pose in the anatomical bone frame; it is
 % not needed for the cost, only reported in DETAILS.
-T_CT_ref_candidate   = stateVectorToTMatrix(poseVector, data.T_CT_ref_initial);
+T_CT_ref_candidate   = stateVectorToTMatrix(poseVector, data.T_CT_ref_initial, data.pivotPointRef);
 T_bone_ref_candidate = T_CT_ref_candidate * data.T_bone_CT;
 
 % The paper moves the data points with T = [R,t] onto the fixed model

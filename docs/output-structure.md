@@ -118,7 +118,7 @@ runResult
 │   ├── poseVector
 │   └── cost
 ├── optimizationResult    what CMA-ES found
-│   ├── result            initial and best pose vectors, costs and transforms
+│   ├── result            initial and best pose vectors, costs, transforms, and the pivot point the vectors rotate about
 │   ├── cmaes             bounds, sigma, raw CMA-ES outputs and options
 │   └── run               CMA-ES output folder, seed, status
 ├── final                 the best pose, evaluated once more

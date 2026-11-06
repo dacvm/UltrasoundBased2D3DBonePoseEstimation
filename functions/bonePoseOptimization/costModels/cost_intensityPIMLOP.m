@@ -9,7 +9,8 @@ function [cost, details] = cost_intensityPIMLOP(poseVector, data, config)
 % objective easy to inspect and extend.
 %
 % Inputs:
-%   poseVector - Six-value perturbation around data.T_CT_ref_initial.
+%   poseVector - Six-value perturbation around data.T_CT_ref_initial,
+%                rotating about data.pivotPointRef.
 %   data       - Prepared estimation data containing image planes, the CT
 %                mesh, initial transforms, aligned 3D surface points with
 %                2D normals, the P-IMLOP model data.extra.pimlop.PsiCT, and

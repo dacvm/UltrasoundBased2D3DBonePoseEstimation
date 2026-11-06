@@ -27,6 +27,11 @@ setup = load(setupFilePath, 'data', 'config');
 % initial pose, so a zero vector is the initial pose itself.
 data = setup.data;
 config = setup.config;
+
+% The saved fixture predates the pose pivot, so add it the same way
+% prepareBonePoseOptimizationInputs does: the mesh centre, moved into ref
+% with the start pose.
+data.pivotPointRef = applyRigidTransform(mean(data.boneMeshCT.Points, 1), data.T_CT_ref_initial).';
 initialPoseVector = zeros(6, 1);
 
 %% EVALUATE THE INITIAL POSE

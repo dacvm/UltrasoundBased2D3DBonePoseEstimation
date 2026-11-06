@@ -65,7 +65,7 @@ poseVector = poseVector(:);
 
 % List the prepared-data fields used below. Checking them here gives a clear
 % setup error instead of a less helpful missing-field error later in the code.
-requiredDataFields = {'boneMeshCT', 'T_CT_ref_initial', 'T_bone_CT', 'hasBoneSurface', 'boneSurfaceMeasurements'};
+requiredDataFields = {'boneMeshCT', 'T_CT_ref_initial', 'pivotPointRef', 'T_bone_CT', 'hasBoneSurface', 'boneSurfaceMeasurements'};
 if ~isstruct(data) || ~all(isfield(data, requiredDataFields))
     error('dev_cost_ICPLike:MissingPreparedData', ...
           'The prepared data is missing fields required by the 3D point-cloud cost.');
@@ -116,7 +116,7 @@ validateattributes(nearestVertexCount, {'numeric'}, ...
 % Convert the six optimizer values into the candidate CT-to-reference rigid
 % transform. With the project's column-vector convention, a CT point moves as
 % \(\tilde{\mathbf{p}}_{ref}=\mathbf{T}_{CT\rightarrow ref}\tilde{\mathbf{p}}_{CT}\).
-T_CT_ref_candidate   = stateVectorToTMatrix(poseVector, data.T_CT_ref_initial);
+T_CT_ref_candidate   = stateVectorToTMatrix(poseVector, data.T_CT_ref_initial, data.pivotPointRef);
 
 % Compose the bone-to-CT and CT-to-reference transforms from right to left:
 % \(\mathbf{T}_{bone\rightarrow ref}=\mathbf{T}_{CT\rightarrow ref} \mathbf{T}_{bone\rightarrow CT}\). 

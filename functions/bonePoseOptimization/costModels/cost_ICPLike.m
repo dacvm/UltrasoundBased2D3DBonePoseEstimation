@@ -33,10 +33,11 @@ function [cost, details] = cost_ICPLike(poseVector, data, config)
 %   poseVector - Six-value candidate-pose perturbation [tx; ty; tz; rx; ry; rz]
 %                (mm, rad) applied around data.T_CT_ref_initial. The last
 %                three values form the rotation vector expected by
-%                STATEVECTORTOTMATRIX.
+%                STATEVECTORTOTMATRIX, turning about data.pivotPointRef.
 %   data       - Prepared optimization data from
 %                prepareBonePoseOptimizationInputs. This function uses the
-%                CT-frame mesh, the initial CT-to-ref transform, the
+%                CT-frame mesh, the initial CT-to-ref transform, the pivot
+%                point, the
 %                bone-to-CT transform, the measured surface points in the ref
 %                frame, and the pose-independent search data:
 %                  data.extra.icpLike.vertexTreeCT        - KDTreeSearcher over
@@ -90,7 +91,7 @@ nearestVertexCount  = min(double(nearestVertexCount), numberOfVertices);
 % The candidate pose moves CT into ref. Its inverse (ref -> CT) is needed to
 % move the measured points into the frame of the KD-tree. The inverse of a
 % rigid [R t] is [R' -R'*t]; deriving it like this keeps it exactly rigid.
-T_CT_ref_candidate   = stateVectorToTMatrix(poseVector, data.T_CT_ref_initial);
+T_CT_ref_candidate   = stateVectorToTMatrix(poseVector, data.T_CT_ref_initial, data.pivotPointRef);
 T_bone_ref_candidate = T_CT_ref_candidate * data.T_bone_CT;
 
 R_CT_ref = T_CT_ref_candidate(1:3, 1:3);

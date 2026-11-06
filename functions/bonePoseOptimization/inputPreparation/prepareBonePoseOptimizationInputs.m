@@ -48,6 +48,9 @@ function [data, validationData] = prepareBonePoseOptimizationInputs(config)
 % Outputs:
 %   data           - Estimation-only data containing the CT mesh, ultrasound
 %                    measurements, and initial transforms.
+%                    data.pivotPointRef (3x1, mm) is the mean of the mesh
+%                    vertices at the start pose, in ref: the fixed point
+%                    the optimizer rotates candidate poses about.
 %                    data.extra.pimlop.PsiCT holds the CT-frame P-IMLOP model
 %                    with its PD-tree, used by cost_PIMLOP.
 %                    data.extra.icpLike.vertexTreeCT is a KD-tree over the
@@ -297,6 +300,22 @@ end
 % would not be a valid starting point for this one.
 validateCoarseMesh(boneMeshCT, currentCoarseRegistration.boneMeshRef_est, T_CT_ref_initial);
 
+% The optimizer rotates every candidate pose about one fixed point, the
+% pivot. If that point were the ref origin (often hundreds of mm away from
+% the bone), a rotation of one degree would swing the whole bone several
+% millimetres sideways, and rotation and translation would be tangled
+% together. Rotating about the centre of the bone keeps a small rotation
+% a small motion at the bone. The centre is the plain mean of the mesh
+% vertices, the usual choice in point-cloud registration. It is computed
+% in CT and moved into ref with the start pose, and it stays fixed for the
+% whole run: it is not updated with the candidate pose.
+pivotPointCT  = mean(boneMeshCT.Points, 1);                               % 1x3, CT
+pivotPointRef = applyRigidTransform(pivotPointCT, T_CT_ref_initial).';   % 3x1, ref
+if ~all(isfinite(pivotPointRef))
+    error('prepareBonePoseOptimizationInputs:InvalidPivotPoint', ...
+          'The pivot point (mean of the mesh vertices) is not finite.');
+end
+
 %% PREPARE THE P-IMLOP MODEL AND PD-TREE
 
 % P-IMLOP is a point-to-surface registration method: for every measured
@@ -348,6 +367,7 @@ data.boneMeshCT              = boneMeshCT;
 data.T_bone_CT               = T_bone_CT;
 data.T_CT_ref_initial        = T_CT_ref_initial;
 data.T_bone_ref_initial      = T_bone_ref_initial;
+data.pivotPointRef           = pivotPointRef;
 data.imagePlanesRef          = imagePlanesRef;
 data.hasBoneSurface          = boneSurface.isAvailable;
 data.boneSurfaceMetadata     = boneSurface.extractionMetadata;

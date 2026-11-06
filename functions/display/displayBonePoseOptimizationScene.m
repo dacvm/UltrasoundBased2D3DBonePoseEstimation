@@ -48,7 +48,7 @@ end
 
 % Convert the current state into the transform applied to CT mesh points.
 T_CT_ref_candidate = stateVectorToTMatrix( ...
-    poseVector, data.T_CT_ref_initial);
+    poseVector, data.T_CT_ref_initial, data.pivotPointRef);
 % Derive the anatomical bone-frame pose for the coordinate-axis display.
 T_bone_ref_candidate = T_CT_ref_candidate * data.T_bone_CT;
 % Move CT vertices into the same reference frame as the ultrasound planes.

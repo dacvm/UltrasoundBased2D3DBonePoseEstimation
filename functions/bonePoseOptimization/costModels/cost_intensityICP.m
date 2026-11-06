@@ -7,7 +7,8 @@ function [cost, details] = cost_intensityICP(poseVector, data, config)
 % models unchanged makes the combined objective easy to inspect and extend.
 %
 % Inputs:
-%   poseVector - Six-value perturbation around data.T_CT_ref_initial.
+%   poseVector - Six-value perturbation around data.T_CT_ref_initial,
+%                rotating about data.pivotPointRef.
 %   data       - Prepared estimation data containing image planes, the CT
 %                mesh, initial transforms, aligned 3D surface points, and
 %                the smoothed images data.extra.intensityLine.smoothedImages.
