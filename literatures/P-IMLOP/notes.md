@@ -49,7 +49,7 @@ E_match = ½ (y_3dp − x_3dp)ᵀ Σ⁻¹ (y_3dp − x_3dp)  −  κ · ( P(R_p�
 - Speed of sound and segmentation uncertainty are not modelled.
 
 ## Where it lives in this repo
-Framework-level tests are in `functions/bonePoseOptimization/tests/testBonePoseCostPIMLOP.m`. The reusable functions are in `functions/PIMLOP/` (each with a scalar reference version and a `*_batchedProcess.m` version where listed). The cost model and its config validator are in `functions/bonePoseOptimization/costModels/`. Demos, development scripts, regression tests (`test_PIMLOP_batchedProcess.m`, `test_PIMLOPCostFunction.m`) and the `optimization_setup.mat` fixture stay in `devs/pimlopDevelopment/`.
+Framework-level tests are in `functions/bonePoseOptimization/tests/testBonePoseCostPIMLOP.m`. The reusable functions are in `functions/PIMLOP/` (each with a scalar reference version and a `*_batchedProcess.m` version where listed). The cost model and its config validator are in `functions/bonePoseOptimization/costModels/`. Two more suite tests guard the implementation: `testPIMLOPBatchedProcess.m` (batched functions against their scalar references) and `testPIMLOPCostMatchesDirectWorkflow.m` (`cost_PIMLOP` against the step-by-step demo workflow). The demos and step-by-step development walkthroughs are in `examples/pimlop/` (start with its `README.md`); they load `optimization_setup.mat`, which `examples/pimlop/makePIMLOPDemoSetup.m` refreshes.
 
 | Paper step | File |
 |---|---|

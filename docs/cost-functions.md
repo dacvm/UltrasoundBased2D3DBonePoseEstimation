@@ -93,7 +93,7 @@ cost = sum over all retained measurements of min_y E_match(x, y)
 | `positionZStandardDeviationImage` | Fixed | Positive position standard deviation in millimetres along the out-of-plane (image z) axis. |
 | `kappa` | Hyperparameter | Nonnegative orientation concentration. `0` switches the orientation term off; `50` corresponds to roughly 8 degrees of angular spread. Bigger values give a narrower spread (roughly `1/sqrt(kappa)` radians). |
 
-This model requires aligned 3D bone-surface measurements with 2D normals (`surfaceNormalXY` and `surfaceNormalMask`) from `boneSurfaceMatFile`. One evaluation takes several seconds, so keep `populationSize` and `maxFunctionEvaluations` small for first runs. The reference demos and regression tests in `devs/pimlopDevelopment/` still run independently.
+This model requires aligned 3D bone-surface measurements with 2D normals (`surfaceNormalXY` and `surfaceNormalMask`) from `boneSurfaceMatFile`. One evaluation takes several seconds, so keep `populationSize` and `maxFunctionEvaluations` small for first runs. To see step by step how the correspondence search and the cost work, run the demos in `examples/pimlop/` (start with its `README.md`); they need no local input files.
 
 ## 5. `intensityPIMLOP`: combined intensity and P-IMLOP
 
