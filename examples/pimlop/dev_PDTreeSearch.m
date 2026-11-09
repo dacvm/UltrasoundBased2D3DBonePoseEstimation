@@ -11,7 +11,7 @@ setupFilePath     = fullfile(developmentFolder, 'optimization_setup.mat');
 % Add the project functions, including preparePIMLOPModel in functions/PIMLOP/.
 addpath(genpath(fullfile(projectRoot, 'functions')));
 
-% Load the fixed fixture created from the one-sweep optimization workflow.
+% Load the saved demo input written by makePIMLOPDemoSetup.m.
 % The variables remain visible in the workspace for the next E_match steps.
 load(setupFilePath, 'data', 'config', 'initialPoseVector');
 
