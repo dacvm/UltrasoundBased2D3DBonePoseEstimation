@@ -1,0 +1,622 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bone-likelihood map</title>
+<link rel="stylesheet" href="../assets/katex/katex.min.css">
+<script defer src="../assets/katex/katex.min.js"></script>
+<script defer src="../assets/katex/contrib/auto-render.min.js"></script>
+<style>
+:root {
+  --bg: #fbfaf7; --surface: #f1efe8; --text: #2c2c2a; --muted: #5f5e5a; --rule: #d3d1c7;
+  --accent: #185fa5; --note-bg: #e6f1fb; --note-border: #378add; --warn-bg: #faeeda; --warn-border: #ba7517;
+  --code-bg: #ecebe4;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #1c1c1b; --surface: #2a2a28; --text: #e6e4dc; --muted: #b4b2a9; --rule: #444441;
+    --accent: #85b7eb; --note-bg: #0c2a47; --note-border: #378add; --warn-bg: #3a2a0c; --warn-border: #ba7517;
+    --code-bg: #2f2f2c;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #1c1c1b; --surface: #2a2a28; --text: #e6e4dc; --muted: #b4b2a9; --rule: #444441;
+  --accent: #85b7eb; --note-bg: #0c2a47; --note-border: #378add; --warn-bg: #3a2a0c; --warn-border: #ba7517;
+  --code-bg: #2f2f2c;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.65 Georgia, "Times New Roman", serif; }
+.page { max-width: 860px; margin: 0 auto; padding: 32px 16px 80px; }
+h1, h2, h3, nav, .meta, table, figcaption, .demo, .callout-title { font-family: "Segoe UI", system-ui, -apple-system, sans-serif; }
+h1 { font-size: 30px; font-weight: 600; margin: 0 0 6px; line-height: 1.25; }
+h2 { font-size: 22px; font-weight: 600; margin: 48px 0 12px; padding-top: 12px; border-top: 1px solid var(--rule); }
+h3 { font-size: 17px; font-weight: 600; margin: 28px 0 8px; }
+.meta { color: var(--muted); font-size: 14px; margin-bottom: 24px; }
+a { color: var(--accent); }
+code { font-family: Consolas, "Courier New", monospace; font-size: 0.88em; background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+pre { font-family: Consolas, "Courier New", monospace; font-size: 14px; background: var(--code-bg); padding: 12px 14px; border-radius: 6px; overflow-x: auto; line-height: 1.45; }
+nav.toc { background: var(--surface); border-radius: 8px; padding: 14px 20px; font-size: 14px; }
+nav.toc ol { margin: 6px 0 0; padding-left: 22px; columns: 2; column-gap: 32px; }
+nav.toc li { margin: 2px 0; break-inside: avoid; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; margin: 12px 0 20px; }
+th, td { border-bottom: 1px solid var(--rule); padding: 7px 10px; text-align: left; vertical-align: top; }
+th { background: var(--surface); font-weight: 600; }
+.table-wrap { overflow-x: auto; }
+figure { margin: 20px 0; }
+figure img { max-width: 100%; display: block; border-radius: 6px; border: 1px solid var(--rule); }
+figcaption { font-size: 14px; color: var(--muted); margin-top: 8px; }
+.fig-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.callout { border-left: 4px solid var(--note-border); background: var(--note-bg); padding: 10px 16px; border-radius: 0; margin: 18px 0; }
+.callout.warn { border-left-color: var(--warn-border); background: var(--warn-bg); }
+.callout-title { font-weight: 600; font-size: 14px; margin-bottom: 4px; }
+.katex-display { overflow-x: auto; overflow-y: hidden; padding: 4px 0; }
+.demo { background: var(--surface); border-radius: 8px; padding: 16px; margin: 20px 0; font-size: 14px; }
+.demo-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 16px; }
+.demo canvas { width: 100%; image-rendering: pixelated; border-radius: 6px; border: 1px solid var(--rule); cursor: crosshair; display: block; background: #000; }
+.demo .lbl { text-align: center; color: var(--muted); margin: 4px 0 0; }
+.demo .maps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 14px; }
+.demo .vals { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 6px; }
+.demo .val { background: var(--bg); border-radius: 6px; padding: 8px 10px; }
+.demo .val .k { color: var(--muted); font-size: 13px; }
+.demo .val .v { font-size: 20px; font-weight: 600; }
+.demo .controls { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; margin-top: 14px; color: var(--muted); }
+.demo input[type=range] { flex: 1; min-width: 140px; }
+svg text { font-family: "Segoe UI", system-ui, sans-serif; }
+@media (max-width: 640px) {
+  nav.toc ol { columns: 1; }
+  .fig-pair, .demo-grid { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<div class="page">
+
+<h1>Bone-likelihood map for the intensity cost</h1>
+<div class="meta">
+  Design document, draft · 2026-11-12 · branch <code>feature/newIntensityCostFunction</code><br>
+  Status: method described, not implemented and not yet tested on our data.
+</div>
+
+<nav class="toc" aria-label="Contents">
+  <strong>Contents</strong>
+  <ol>
+    <li><a href="#motivation">Motivation</a></li>
+    <li><a href="#notation">Notation</a></li>
+    <li><a href="#reflection">Reflection score R</a></li>
+    <li><a href="#below">Nothing-below score S</a></li>
+    <li><a href="#combine">Bone-likelihood B = R · S</a></li>
+    <li><a href="#behaviour">How S behaves</a></li>
+    <li><a href="#edge">Bottom edge of the image</a></li>
+    <li><a href="#settings">Settings</a></li>
+    <li><a href="#framework">Fit with the optimization framework</a></li>
+    <li><a href="#limits">Limitations and open points</a></li>
+    <li><a href="#refs">References</a></li>
+    <li><a href="#appendix">Appendix: evidence from tibia images</a></li>
+  </ol>
+</nav>
+
+<!-- ============================================================ -->
+<h2 id="motivation">1. Motivation</h2>
+
+<h3>1.1 The current intensity term barely moves</h3>
+<p>
+The combined cost model <code>intensityPIMLOP</code> blends the intensity term \(I\) (cost model <code>intensityLine</code>)
+with the mean P-IMLOP match error \(P\):
+</p>
+\[
+  C = w\, I + (1 - w)\, P .
+\]
+<p>
+In the sweep <code>intensityPIMLOP_20261106_144439_500</code> (420 runs) the two terms have similar sizes at the start pose,
+but during a run they change by very different amounts:
+</p>
+<div class="table-wrap"><table>
+  <tr><th>Quantity</th><th>Intensity term \(I\)</th><th>P-IMLOP term \(P\)</th></tr>
+  <tr><td>Value at the start pose</td><td>0.85 – 0.89 (depends on smoothing \(\sigma\))</td><td>0.90 – 1.88 (depends on \(\kappa\))</td></tr>
+  <tr><td>Median improvement over 325 runs that moved</td><td>0.0017</td><td>0.35</td></tr>
+  <tr><td>Runs where the term got worse</td><td>20 %</td><td>6 %</td></tr>
+</table></div>
+<p>
+The P-IMLOP term changes about 140 times more. Even at \(w = 0.99\) it still provides about half of the cost decrease, and at
+\(w \le 0.95\) more than 90 %. The two terms would contribute equally only at \(w \approx 0.992\). A weight that close to 1
+makes it look as if the P-IMLOP term does not matter, while in fact the intensity term is the one that barely acts.
+</p>
+
+<p>
+The reason is in how the intensity term reads the image. It blurs each image with a Gaussian of width \(\sigma\) and averages
+the blurred brightness under the predicted bone lines. Our bone echo is a very thin line (well under 1 mm) on an almost empty
+background, so blurring lowers its peak a lot:
+</p>
+<div class="table-wrap"><table>
+  <tr><th>\(\sigma\) (mm)</th><th>Brightest blurred value (÷ 255)</th><th>Background (÷ 255)</th><th>Mean evidence at start pose</th></tr>
+  <tr><td>0</td><td>0.92</td><td>0.06</td><td>–</td></tr>
+  <tr><td>1.5</td><td>0.24</td><td>0.06</td><td>0.155</td></tr>
+  <tr><td>3</td><td>0.16</td><td>0.06</td><td>0.128</td></tr>
+  <tr><td>5</td><td>0.12</td><td>0.07</td><td>0.109</td></tr>
+</table></div>
+<p>
+The start pose already sits between the background level and the blurred peak, so the term has only a few hundredths of room to
+improve. Values measured on the 15 tibia images of the sweep (dataset <code>validSnapshots_20260910_172849.mat</code>).
+</p>
+
+<h3>1.2 Requirement: no segmentation</h3>
+<p>
+The P-IMLOP term already uses the segmented bone surface. The new intensity term must <strong>not</strong> use the segmentation or any
+quantity computed by it, so that the two terms rest on independent evidence. The line we draw:
+</p>
+<ul>
+  <li><strong>Segmentation</strong> makes decisions: "these pixels are bone, those are not". It looks at the whole image, compares
+    candidate lines and picks one.</li>
+  <li><strong>A filter</strong> makes no decisions. It applies the same local formula to every pixel and returns a score.
+    Blurring is a filter; so is everything in this document.</li>
+</ul>
+<p>
+The choice of where the bone is stays with the pose optimizer: it searches for the pose whose predicted bone lines land on the most
+bone-like pixels.
+</p>
+
+<h3>1.3 What the phantom images look like</h3>
+<div class="fig-pair">
+  <figure>
+    <img src="figures/phantomFemurFrontal.png" alt="Phantom femur above the condyles, frontal view. Several thin bright horizontal lines in the upper third, speckle in between, and a thick curved bright band near the bottom.">
+    <figcaption>Figure 1. Femur above the condyles, frontal view (knee phantom). Thin bright layer lines in the upper third are as
+      bright as the bone; the bone is the thick band near the bottom, with fainter echoes trailing just below it.</figcaption>
+  </figure>
+  <figure>
+    <img src="figures/phantomTibiaMedialCondyle.png" alt="Phantom tibia medial condyle. A slanted bright line with two saturated spots and dim stretches, speckle above it and almost nothing below.">
+    <figcaption>Figure 2. Medial tibial condyle (knee phantom). The bone line is uneven: two saturated spots and dim stretches.
+      Speckle above it, almost nothing below it.</figcaption>
+  </figure>
+</div>
+<p>
+Brightness alone cannot tell bone from the layer lines in Figure 1. What does differ is what lies <em>below</em> each line: the layer
+lines have tissue (speckle) under them, the bone has (almost) nothing. This matches the literature, where the region under bone is
+the main clue for telling bone from soft-tissue interfaces [2][3][4], and where reading a bone-enhanced image under the CT-predicted
+visible surface is an established registration approach [9][10][11].
+</p>
+
+<!-- ============================================================ -->
+<h2 id="notation">2. Notation</h2>
+<div class="table-wrap"><table>
+  <tr><th>Symbol</th><th>Meaning</th><th>Unit</th></tr>
+  <tr><td>\(I(u, v)\)</td><td>Brightness of the B-mode image at column \(u\) and row \(v\) (row index grows with depth)</td><td>grey level 0 – 255</td></tr>
+  <tr><td>\(N_v\)</td><td>Number of rows (image depth in pixels)</td><td>–</td></tr>
+  <tr><td>\(\Delta_v\)</td><td>Pixel height (depth per row), \(H / N_v\)</td><td>mm</td></tr>
+  <tr><td>\(b\)</td><td>Background level: brightness of empty, sound-free regions</td><td>grey level</td></tr>
+  <tr><td>\(p\)</td><td>Echo peak level: brightness of a strong echo</td><td>grey level</td></tr>
+  <tr><td>\(t\)</td><td>Tissue level: typical brightness of soft-tissue speckle</td><td>grey level</td></tr>
+  <tr><td>\(h\)</td><td>Expected thickness of the bone echo, used for the light smoothing in \(R\)</td><td>mm</td></tr>
+  <tr><td>\(k\)</td><td>Half-width of that smoothing in rows, \((2k+1)\,\Delta_v \approx h\)</td><td>rows</td></tr>
+  <tr><td>\(g\)</td><td>Gap: depth skipped right below a pixel before its window starts</td><td>mm</td></tr>
+  <tr><td>\(L\)</td><td>Window length: depth range looked at below the gap</td><td>mm</td></tr>
+  <tr><td>\(L_{\min}\)</td><td>Shortest usable window near the bottom edge</td><td>mm</td></tr>
+  <tr><td>\(R, S, B\)</td><td>Reflection score, nothing-below score, bone-likelihood; one value per pixel</td><td>0 – 1</td></tr>
+</table></div>
+<p>
+The sound is assumed to travel straight down the image columns, which fits our rectangular images from a linear probe.
+In the code, images are stored as <code>[column, row]</code>, so \(I(u, v)\) is <code>image(u, v)</code>.
+We use the clipping function
+</p>
+\[
+  \operatorname{clip}(x) = \min\bigl(1, \max(0, x)\bigr).
+\]
+
+<!-- ============================================================ -->
+<h2 id="reflection">3. Reflection score \(R\): is it bright here?</h2>
+<p>
+First average each pixel with its direct neighbours above and below, so that a single bright speckle dot does not count as a
+reflection:
+</p>
+\[
+  \bar I(u, v) = \frac{1}{2k + 1} \sum_{j = -k}^{k} I(u, v + j).
+\]
+<p>
+Then map the result to the range 0 to 1, from background to echo peak:
+</p>
+\[
+  R(u, v) = \operatorname{clip}\!\left( \frac{\bar I(u, v) - b}{p - b} \right).
+\]
+<ul>
+  <li>Empty background gives \(R = 0\); a full-strength echo gives \(R = 1\); speckle gives a small value.</li>
+  <li>Side effect of the smoothing: a one-pixel-thin line is averaged with its dark neighbours and scores lower than a thick band.
+    Bone echoes are thicker than most layer lines (Figure 1), so this helps.</li>
+</ul>
+
+<!-- ============================================================ -->
+<h2 id="below">4. Nothing-below score \(S\): is it empty under me?</h2>
+<p>
+For each pixel, look down its own column. Skip a gap \(g\) (to step over the pixel's own echo), then take a window of length \(L\).
+The rows in the window are
+</p>
+\[
+  \mathcal{W}(u, v) = \bigl\{\, v' \in \{1, \dots, N_v\} \;:\; g \lt (v' - v)\,\Delta_v \le g + L \,\bigr\}.
+\]
+<p>
+Average the brightness in the window:
+</p>
+\[
+  \mu(u, v) = \frac{1}{|\mathcal{W}(u, v)|} \sum_{v' \in \mathcal{W}(u, v)} I(u, v').
+\]
+<p>
+Compare this average with two reference levels: the background \(b\) ("truly empty") and the tissue level \(t\) ("clearly tissue"):
+</p>
+\[
+  S(u, v) =
+  \begin{cases}
+    \operatorname{clip}\!\left( 1 - \dfrac{\mu(u, v) - b}{t - b} \right) & \text{if } |\mathcal{W}(u, v)|\,\Delta_v \ge L_{\min}, \\[10pt]
+    1 & \text{otherwise (window cut off by the bottom edge, see section 7).}
+  \end{cases}
+\]
+<ul>
+  <li>Window as dark as the background: \(S = 1\), "nothing below me, I could be bone".</li>
+  <li>Window as bright as tissue or brighter: \(S = 0\), "there is tissue under me, I am probably not bone".</li>
+</ul>
+
+<!-- ============================================================ -->
+<h2 id="combine">5. Bone-likelihood \(B = R \cdot S\)</h2>
+<p>
+Multiply the two scores pixel by pixel:
+</p>
+\[
+  B(u, v) = R(u, v)\; S(u, v).
+\]
+<p>
+\(R\), \(S\) and \(B\) all have the same size as the image, so this is an element-wise product (in MATLAB <code>B = R .* S</code>,
+not a matrix product). A pixel scores high only when both clues agree:
+</p>
+<div class="table-wrap"><table>
+  <tr><th>Pixel</th><th>\(R\)</th><th>\(S\)</th><th>\(B\)</th></tr>
+  <tr><td>Bone band</td><td>high (bright, thick)</td><td>high (empty below)</td><td>high</td></tr>
+  <tr><td>Thin layer line</td><td>medium</td><td>lower (speckle below)</td><td>low</td></tr>
+  <tr><td>Speckle in tissue</td><td>low</td><td>medium</td><td>low</td></tr>
+  <tr><td>Background below the bone</td><td>0</td><td>high</td><td>0</td></tr>
+</table></div>
+<div class="callout">
+  <div class="callout-title">Name</div>
+  \(B\) is called a bone-likelihood because it is high where bone is likely. It is a score between 0 and 1, not a calibrated
+  probability.
+</div>
+
+<!-- ============================================================ -->
+<h2 id="behaviour">6. How \(S\) behaves</h2>
+
+<h3>6.1 The dark stripe above bright structures</h3>
+<p>
+\(S\) at a pixel describes its window, not the pixel itself. A bright structure at depth \(d\) lowers \(S\) for every pixel at depth
+\(z\) whose window reaches it:
+</p>
+\[
+  d - g - L \;\le\; z \;\lt\; d - g .
+\]
+<p>
+So in the \(S\) map every bright structure casts a dark stripe <em>upward</em>, of height \(L\), ending a distance \(g\) above the
+structure. Increasing the gap by some amount moves the stripe up by the same amount (Figure 3).
+The stripe itself is harmless: it lies in tissue, where \(R\) is low anyway, so \(B\) stays low there. What matters is whether
+the bone pixel's own window is empty.
+</p>
+<figure>
+<svg viewBox="0 0 680 500" width="100%" role="img" aria-labelledby="fig3t fig3d" style="background:var(--surface);border-radius:6px">
+<title id="fig3t">Why the dark stripe in the S map moves up</title>
+<desc id="fig3d">One image column with a bone echo at 32 mm. Four test pixels each look at a window below them. Windows that contain the bone give a low S, forming a dark stripe above the bone. A larger gap moves every window down, so the stripe moves up.</desc>
+<g font-size="12" fill="var(--muted)">
+<text x="175" y="45" text-anchor="middle" font-size="14" fill="var(--text)">Gap g = 0.8 mm</text>
+<text x="515" y="45" text-anchor="middle" font-size="14" fill="var(--text)">Gap g = 4 mm</text>
+<rect x="90" y="70" width="36" height="360" rx="4" fill="#2C2C2A"/><rect x="90" y="286" width="36" height="10" fill="#F1EFE8"/>
+<line x1="90" y1="118" x2="126" y2="118" stroke="#EF9F27" stroke-width="2"/><line x1="90" y1="166" x2="126" y2="166" stroke="#EF9F27" stroke-width="2"/>
+<line x1="90" y1="214" x2="126" y2="214" stroke="#EF9F27" stroke-width="2"/><line x1="90" y1="283" x2="126" y2="283" stroke="#EF9F27" stroke-width="2"/>
+<text x="84" y="122" text-anchor="end">18 mm</text><text x="84" y="170" text-anchor="end">22 mm</text><text x="84" y="218" text-anchor="end">26 mm</text><text x="84" y="295" text-anchor="end">32 mm</text>
+<circle cx="140" cy="118" r="3" fill="#EF9F27"/><line x1="140" y1="118" x2="140" y2="128" stroke="#888780" stroke-dasharray="2 2"/><line x1="140" y1="128" x2="140" y2="204" stroke="#1D9E75" stroke-width="4"/>
+<circle cx="158" cy="166" r="3" fill="#EF9F27"/><line x1="158" y1="166" x2="158" y2="176" stroke="#888780" stroke-dasharray="2 2"/><line x1="158" y1="176" x2="158" y2="252" stroke="#1D9E75" stroke-width="4"/>
+<circle cx="176" cy="214" r="3" fill="#EF9F27"/><line x1="176" y1="214" x2="176" y2="224" stroke="#888780" stroke-dasharray="2 2"/><line x1="176" y1="224" x2="176" y2="300" stroke="#D85A30" stroke-width="4"/>
+<circle cx="194" cy="286" r="3" fill="#EF9F27"/><line x1="194" y1="286" x2="194" y2="296" stroke="#888780" stroke-dasharray="2 2"/><line x1="194" y1="296" x2="194" y2="372" stroke="#1D9E75" stroke-width="4"/>
+<rect x="220" y="70" width="36" height="360" rx="4" fill="#F1EFE8" stroke="#888780" stroke-width="0.5"/><rect x="220" y="200" width="36" height="76" fill="#2C2C2A"/>
+<line x1="220" y1="291" x2="256" y2="291" stroke="#D85A30" stroke-width="1" stroke-dasharray="3 2"/><text x="262" y="295">bone</text>
+<text x="108" y="452" text-anchor="middle">Image column</text><text x="238" y="452" text-anchor="middle">S map</text>
+<rect x="430" y="70" width="36" height="360" rx="4" fill="#2C2C2A"/><rect x="430" y="286" width="36" height="10" fill="#F1EFE8"/>
+<line x1="430" y1="118" x2="466" y2="118" stroke="#EF9F27" stroke-width="2"/><line x1="430" y1="166" x2="466" y2="166" stroke="#EF9F27" stroke-width="2"/>
+<line x1="430" y1="214" x2="466" y2="214" stroke="#EF9F27" stroke-width="2"/><line x1="430" y1="283" x2="466" y2="283" stroke="#EF9F27" stroke-width="2"/>
+<text x="424" y="122" text-anchor="end">18 mm</text><text x="424" y="170" text-anchor="end">22 mm</text><text x="424" y="218" text-anchor="end">26 mm</text><text x="424" y="295" text-anchor="end">32 mm</text>
+<circle cx="480" cy="118" r="3" fill="#EF9F27"/><line x1="480" y1="118" x2="480" y2="166" stroke="#888780" stroke-dasharray="2 2"/><line x1="480" y1="166" x2="480" y2="243" stroke="#1D9E75" stroke-width="4"/>
+<circle cx="498" cy="166" r="3" fill="#EF9F27"/><line x1="498" y1="166" x2="498" y2="214" stroke="#888780" stroke-dasharray="2 2"/><line x1="498" y1="214" x2="498" y2="291" stroke="#D85A30" stroke-width="4"/>
+<circle cx="516" cy="214" r="3" fill="#EF9F27"/><line x1="516" y1="214" x2="516" y2="262" stroke="#888780" stroke-dasharray="2 2"/><line x1="516" y1="262" x2="516" y2="339" stroke="#D85A30" stroke-width="4"/>
+<circle cx="534" cy="286" r="3" fill="#EF9F27"/><line x1="534" y1="286" x2="534" y2="334" stroke="#888780" stroke-dasharray="2 2"/><line x1="534" y1="334" x2="534" y2="411" stroke="#1D9E75" stroke-width="4"/>
+<rect x="560" y="70" width="36" height="360" rx="4" fill="#F1EFE8" stroke="#888780" stroke-width="0.5"/><rect x="560" y="161" width="36" height="77" fill="#2C2C2A"/>
+<line x1="560" y1="291" x2="596" y2="291" stroke="#D85A30" stroke-width="1" stroke-dasharray="3 2"/><text x="602" y="295">bone</text>
+<text x="448" y="452" text-anchor="middle">Image column</text><text x="578" y="452" text-anchor="middle">S map</text>
+<line x1="60" y1="480" x2="84" y2="480" stroke="#D85A30" stroke-width="4"/><text x="92" y="484">window contains bone: S low</text>
+<line x1="360" y1="480" x2="384" y2="480" stroke="#1D9E75" stroke-width="4"/><text x="392" y="484">window empty: S high</text>
+</g>
+</svg>
+<figcaption>Figure 3. One image column with a bone echo at 32 mm. Orange: four test pixels. Dashed: the skipped gap. Coloured bar:
+  the window (red when it contains the bone). The pixels whose window reaches the bone form the dark stripe in the S map. With a
+  larger gap (right) the windows sit lower, so the stripe moves up. The bone pixel's own window is empty in both cases.</figcaption>
+</figure>
+
+<h3>6.2 Trailing echoes under the bone</h3>
+<p>
+In Figure 1 the bone band is followed by fainter echoes just below it. If the gap is small, the bone pixel's window contains them,
+\(\mu\) rises, \(S\) drops, and the bone is treated like a layer with tissue under it. The fix is a gap larger than the bone band
+plus its trailing echoes. If \(\tau\) is the distance from the bone pixel to the end of its trailing echoes:
+</p>
+\[
+  g \ge \tau \quad\Longrightarrow\quad \text{the trailing echoes fall outside the bone pixel's window.}
+\]
+<div class="callout warn">
+  <div class="callout-title">Trade-off</div>
+  A large gap also ignores the first millimetres under a layer line. A layer with tissue only right under it can then look like
+  bone. The gap should be just larger than \(\tau\), measured on our own femur and tibia images.
+</div>
+
+<h3>6.3 Try it</h3>
+<p>
+A made-up image with a thin layer line at 8 mm, tissue speckle, and a bone band at 32 mm. Click a pixel in any of the four
+pictures to see its depth profile and scores. The three lower pictures are the \(R\), \(S\) and \(B\) maps: one cell per pixel,
+white = 1, black = 0.
+</p>
+<div class="demo" id="demo">
+  <div class="demo-grid">
+    <div>
+      <canvas id="img" width="40" height="60" aria-label="Synthetic ultrasound image"></canvas>
+      <p class="lbl">Image (click a pixel)</p>
+    </div>
+    <div>
+      <svg id="prof" width="100%" viewBox="0 0 440 250" role="img" aria-label="Brightness along the selected column with the window shaded"></svg>
+      <div class="vals">
+        <div class="val"><div class="k">Reflection R</div><div class="v" id="vR">–</div></div>
+        <div class="val"><div class="k">Nothing below S</div><div class="v" id="vS">–</div></div>
+        <div class="val"><div class="k">Bone-likelihood B</div><div class="v" id="vB">–</div></div>
+      </div>
+    </div>
+  </div>
+  <div class="maps">
+    <div><canvas id="mR" width="40" height="60" aria-label="R map"></canvas><p class="lbl">R map</p></div>
+    <div><canvas id="mS" width="40" height="60" aria-label="S map"></canvas><p class="lbl">S map</p></div>
+    <div><canvas id="mB" width="40" height="60" aria-label="B map"></canvas><p class="lbl">B = R · S map</p></div>
+  </div>
+  <div class="controls">
+    <label><input type="checkbox" id="trail"> Trailing echoes under the bone</label>
+    <span>Gap g</span>
+    <input type="range" id="gap" min="0" max="4.8" step="0.8" value="0.8" aria-label="Gap in millimetres">
+    <span id="gapOut" style="min-width:56px">0.8 mm</span>
+  </div>
+</div>
+<p>
+Things to try: compare the layer line with the bone; tick "Trailing echoes" and see the bone fade in the \(B\) map at
+\(g = 0.8\) mm; then raise the gap to 4 mm and see it return. Demo settings: \(\Delta_v = 0.8\) mm, \(b = 16\), \(p = 235\),
+\(t = 45\), \(k = 1\), \(L = 6.4\) mm.
+</p>
+
+<!-- ============================================================ -->
+<h2 id="edge">7. Bottom edge of the image</h2>
+<p>
+The window only looks down the same column, so the top, left and right edges need no special care. Near the bottom, part or all
+of the window falls outside the image, where nothing is known. The rule in section 4:
+</p>
+<ul>
+  <li>Use the part of the window that lies inside the image.</li>
+  <li>If that part is shorter than \(L_{\min}\) (for example 3 mm), set \(S = 1\): \(R\) alone decides there.</li>
+</ul>
+<div class="table-wrap"><table>
+  <tr><th>Alternative</th><th>Effect</th></tr>
+  <tr><td>Treat any cut-off window as empty (\(L_{\min} = 0\))</td><td>Simple, but \(S\) may rest on one or two noisy pixels.</td></tr>
+  <tr><td>Minimum length \(L_{\min}\), otherwise \(S = 1\) (chosen)</td><td>The edge neither helps nor hurts a pixel.</td></tr>
+  <tr><td>\(S = 0\) when the window does not fit</td><td>Bright structures near the bottom can never count as bone. Too strict for deep bones.</td></tr>
+</table></div>
+<p>
+In our tibia images the bone lies at 12 – 21 mm in a 48 mm deep image, so the bottom edge rarely matters.
+</p>
+
+<!-- ============================================================ -->
+<h2 id="settings">8. Settings</h2>
+<div class="table-wrap"><table>
+  <tr><th>Setting</th><th>Set per</th><th>How to choose it</th><th>Demo value</th></tr>
+  <tr><td>Background \(b\)</td><td>image</td><td>Median of the image; most pixels are empty background.</td><td>16</td></tr>
+  <tr><td>Echo peak \(p\)</td><td>image</td><td>A high percentile, e.g. the 99.9th. Our echoes clip at about 235.</td><td>235</td></tr>
+  <tr><td>Tissue level \(t\)</td><td>image</td><td>Typical speckle brightness. Open point: a rule that needs no segmentation, e.g. a percentile of the pixels above background.</td><td>45</td></tr>
+  <tr><td>Echo thickness \(h\) (sets \(k\))</td><td>dataset</td><td>Typical bone echo thickness in our images.</td><td>3 rows ≈ 2.4 mm</td></tr>
+  <tr><td>Gap \(g\)</td><td>dataset</td><td>Just larger than the bone band plus trailing echoes, \(\tau\).</td><td>0.8 – 4 mm</td></tr>
+  <tr><td>Window length \(L\)</td><td>dataset</td><td>Long enough to average out speckle; short enough to stop above the reverberation line, which appears about one bone depth further down (≈ 20 mm in the tibia images).</td><td>6.4 mm</td></tr>
+  <tr><td>Minimum window \(L_{\min}\)</td><td>dataset</td><td>A few speckle sizes.</td><td>3 mm</td></tr>
+</table></div>
+<p>
+\(b\), \(p\) and \(t\) are measured automatically from each image, so nothing is tuned by hand per image.
+</p>
+
+<!-- ============================================================ -->
+<h2 id="framework">9. Fit with the optimization framework</h2>
+<p>
+The map depends only on the image, not on the pose. It is therefore computed once per image during input preparation
+(<code>functions/bonePoseOptimization/inputPreparation/</code>), in the same place where the blurred images are made today
+(<a href="../../../functions/bonePoseOptimization/inputPreparation/smoothUltrasoundImages.m"><code>smoothUltrasoundImages.m</code></a>).
+The cost function then only reads values from it.
+</p>
+<p>
+The current intensity cost
+(<a href="../../../functions/bonePoseOptimization/costModels/cost_intensityLine.m"><code>cost_intensityLine.m</code></a>)
+places sample points \(\mathbf{s}_{im}\) every 0.1 mm along the probe-facing intersection lines of plane \(i\) and computes
+</p>
+\[
+  C_{\text{current}} = 1 - \frac{1}{N_{\text{planes}}} \sum_{i=1}^{N_{\text{planes}}} \frac{1}{M_i} \sum_{m=1}^{M_i} \frac{\tilde I_i(\mathbf{s}_{im})}{255},
+\]
+<p>
+where \(\tilde I_i\) is the blurred image and \(M_i\) the number of sample points (a plane without visible bone counts as 0 evidence).
+The new term keeps the sampling and replaces the blurred brightness by the bone-likelihood:
+</p>
+\[
+  C_{B} = 1 - \frac{1}{N_{\text{planes}}} \sum_{i=1}^{N_{\text{planes}}} \frac{1}{M_i} \sum_{m=1}^{M_i} B_i(\mathbf{s}_{im}).
+\]
+<p>
+Nothing else in the optimizer changes: same pose vector, same sampling, same planes. No segmentation output is read.
+</p>
+<div class="callout warn">
+  <div class="callout-title">Open design choice: reach</div>
+  \(B\) is sharp: it is high only on the bone band. Read directly, the cost gives the optimizer no hint when a predicted line is a few
+  millimetres off the bone. Today this is solved by blurring, which is exactly what lowers the peak (section 1.1). Options, still to
+  be compared:
+  <ul>
+    <li>Blur \(B\) and rescale each blurred map so its maximum is 1 again:
+      \(\tilde B_i = (G_\sigma * B_i) / \max(G_\sigma * B_i)\). This keeps the reach and restores the 0 – 1 range.</li>
+    <li>Turn \(B\) into a distance-based likelihood: how far each sample point is from bone-like pixels, scored as
+      \(\tfrac{1}{2}(d/\sigma)^2\) with a cap, so that it is in the same unit as the P-IMLOP position term.</li>
+  </ul>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="limits">10. Limitations and open points</h2>
+<ul>
+  <li><strong>Not tested.</strong> Nothing here has been computed on our real images yet. First check: compute \(R\), \(S\), \(B\) for
+    the femur and tibia images and look whether the bone stays bright and the layer lines fade.</li>
+  <li><strong>"Nothing below" is a weak difference in some images.</strong> In the tibia images the level 3 – 10 mm below the echo was
+    about 16 (background) in nearly every image, but the level above was only slightly higher (17 – 31). The three lateral tibia images
+    show texture both above and below (Appendix).</li>
+  <li><strong>Trailing echoes</strong> under the bone (Figure 1) require a gap of a few millimetres, which weakens the clue for layer lines
+    with tissue only right under them.</li>
+  <li><strong>Uneven bone brightness</strong> (Figure 2) is not solved by \(B\). A later step could weight sample points by how squarely the
+    beam hits the predicted surface (from the mesh normal).</li>
+  <li><strong>Tissue level \(t\)</strong> still needs a rule that uses no segmentation.</li>
+  <li><strong>Beam direction</strong> is assumed along the image columns (linear probe). A curved probe would need slanted windows.</li>
+  <li><strong>Reach</strong> of the cost (section 9) is an open design choice.</li>
+  <li><strong>Phantom only.</strong> The knee phantom may differ from real tissue, for example in speed of sound and speckle level.</li>
+</ul>
+
+<!-- ============================================================ -->
+<h2 id="refs">11. References</h2>
+<p style="font-size:14px;color:var(--muted)">Found with the Consensus literature search on 2026-11-11. Only the abstracts were read.</p>
+<ol style="font-size:15px">
+  <li id="r1">Jain AK, Taylor RH. Understanding bone responses in B-mode ultrasound images and automatic bone surface extraction using a Bayesian probabilistic framework. 2004. <a href="https://consensus.app/papers/details/b19c62a0fc2d538dbf1d363eb5038725/">link</a></li>
+  <li id="r2">Foroughi P, et al. Ultrasound bone segmentation using dynamic programming. IEEE Ultrasonics Symposium, 2007. <a href="https://consensus.app/papers/details/5d869dd1c87659a7a126771bf3a50714/">link</a></li>
+  <li id="r3">Jia R, et al. Automatic bone segmentation in ultrasound images using local phase features and dynamic programming. ISBI, 2016. <a href="https://consensus.app/papers/details/c0a7a9829236507faf6efc1d212673e6/">link</a></li>
+  <li id="r4">Pandey PU, et al. Fast and automatic bone segmentation and registration of 3D ultrasound to CT for the full pelvic anatomy: a comparative study. IJCARS, 2018. <a href="https://consensus.app/papers/details/5cb79c5bd55757e6a76bc3023a51b114/">link</a></li>
+  <li id="r5">Hacihaliloglu I, et al. Bone surface localization in ultrasound using image phase-based features. Ultrasound Med Biol, 2009. <a href="https://consensus.app/papers/details/bc5776203dd559ec9bc6badb3762cb03/">link</a></li>
+  <li id="r6">Hacihaliloglu I, et al. Automatic bone localization and fracture detection from volumetric ultrasound images using 3-D local phase features. Ultrasound Med Biol, 2011. <a href="https://consensus.app/papers/details/de2b7900b6675b3f833a4a4da7c1a04f/">link</a></li>
+  <li id="r7">Hacihaliloglu I, et al. Automatic adaptive parameterization in local phase feature-based bone segmentation in ultrasound. Ultrasound Med Biol, 2011. <a href="https://consensus.app/papers/details/0077b2257ccf5da8aa42276fc77a4758/">link</a></li>
+  <li id="r8">Karamalis A, et al. Ultrasound confidence maps using random walks. Med Image Anal, 2012. <a href="https://consensus.app/papers/details/2c1fdc9e337c5e2894849af4869448a0/">link</a></li>
+  <li id="r9">Brendel B, et al. Registration of 3D CT and ultrasound datasets of the spine using bone structures. Comput Aided Surg, 2002. <a href="https://consensus.app/papers/details/7077eff61c5351c5b488c06633f719f1/">link</a></li>
+  <li id="r10">Brendel B, et al. Bone registration with 3D CT and ultrasound datasets. 2003. <a href="https://consensus.app/papers/details/af4ae4d940755813a80ce0f136e33a33/">link</a></li>
+  <li id="r11">Tümer N, et al. Three-dimensional registration of freehand-tracked ultrasound to CT images of the talocrural joint. Sensors, 2018. <a href="https://consensus.app/papers/details/c5865ae8f38d5d669ddb94686d728def/">link</a></li>
+  <li id="r12">Penney GP, et al. Cadaver validation of intensity-based ultrasound to CT registration. MICCAI, 2006. <a href="https://consensus.app/papers/details/5d84a6198a0a5302828fa497865cdafc/">link</a></li>
+</ol>
+
+<!-- ============================================================ -->
+<h2 id="appendix">Appendix: evidence from tibia images</h2>
+<figure>
+  <img src="figures/tibiaDepthProfiles.png" alt="Fifteen depth profiles, one per tibia image, each with a sharp peak near 235 at the bone echo and a flat level near 16 below it.">
+  <figcaption>Figure 4. Brightness along depth through the bone echo, for the 15 tibia images of
+    <code>validSnapshots_20260910_172849.mat</code> (mean of the 10 brightest columns, depth 0 at the echo peak, positive = deeper).
+    Below the echo the level is flat at the background value in most images; the lateral images (top row, left) show texture on
+    both sides. The small peak about 23 mm below the echo in some medial and shaft images is likely a reverberation.</figcaption>
+</figure>
+<div class="table-wrap"><table>
+  <tr><th>Image group</th><th>Echo peak</th><th>Mean 3 – 10 mm above</th><th>Mean 3 – 10 mm below</th><th>Image median</th></tr>
+  <tr><td>tibia lateral #1 – #3</td><td>226 – 235</td><td>21 – 31</td><td>24 – 31</td><td>20 – 21</td></tr>
+  <tr><td>tibia lateral #4 – #5</td><td>235</td><td>23 – 25</td><td>16</td><td>16</td></tr>
+  <tr><td>tibia medial #1 – #5</td><td>235</td><td>16 – 21</td><td>16</td><td>16</td></tr>
+  <tr><td>tibia shaft #1 – #5</td><td>235</td><td>16 – 18</td><td>16 – 18</td><td>16</td></tr>
+</table></div>
+
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  renderMathInElement(document.body, {
+    delimiters: [
+      { left: '\\[', right: '\\]', display: true },
+      { left: '\\(', right: '\\)', display: false }
+    ],
+    throwOnError: false
+  });
+});
+
+(function () {
+  const W = 40, H = 60, MM = 0.8, F = 16, P = 235, T = 45, LEN = 8;
+  let seed = 7;
+  const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+  const speck = []; for (let i = 0; i < W * H; i++) speck.push(rnd());
+  let col = 20, row = 40;
+
+  function makeImage(trail) {
+    const I = new Float32Array(W * H);
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      let v = F; const r = speck[y * W + x];
+      if (y >= 4 && y < 40) v = F + (r > 0.55 ? -Math.log(1 - (r - 0.55) / 0.45 + 1e-6) * 22 : 0);
+      if (y === 10 && x > 3 && x < 37) v = 225;
+      if (y >= 40 && y <= 41 && x > 1) v = (y === 40) ? 235 : 200;
+      if (trail && y >= 43 && y <= 45 && x > 1) v = (y === 44) ? 130 : 70;
+      I[y * W + x] = Math.min(255, v);
+    }
+    return I;
+  }
+
+  function maps(I, gapRows) {
+    const R = new Float32Array(W * H), S = new Float32Array(W * H), B = new Float32Array(W * H);
+    const minRows = Math.round(3 / MM);
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      let s = 0, n = 0;
+      for (let d = -1; d <= 1; d++) { const yy = y + d; if (yy >= 0 && yy < H) { s += I[yy * W + x]; n++; } }
+      const r = Math.max(0, Math.min(1, (s / n - F) / (P - F)));
+      let b = 0, m = 0;
+      for (let d = gapRows + 1; d <= gapRows + LEN; d++) { const yy = y + d; if (yy < H) { b += I[yy * W + x]; m++; } }
+      const sc = (m >= minRows) ? Math.max(0, Math.min(1, 1 - (b / m - F) / (T - F))) : 1;
+      R[y * W + x] = r; S[y * W + x] = sc; B[y * W + x] = r * sc;
+    }
+    return { R, S, B };
+  }
+
+  function paint(id, A, scale, mark) {
+    const c = document.getElementById(id).getContext('2d'); const im = c.createImageData(W, H);
+    for (let i = 0; i < W * H; i++) {
+      const g = Math.round(Math.min(255, A[i] * scale));
+      im.data[4 * i] = g; im.data[4 * i + 1] = g; im.data[4 * i + 2] = g; im.data[4 * i + 3] = 255;
+    }
+    c.putImageData(im, 0, 0);
+    if (mark) { c.strokeStyle = '#EF9F27'; c.lineWidth = 0.6; c.strokeRect(col - 0.3, row - 0.3, 1.6, 1.6); }
+  }
+
+  function profile(I, gapRows) {
+    const svg = document.getElementById('prof'); const x0 = 40, x1 = 430, y0 = 24, y1 = 210;
+    const X = d => x0 + (d / (H - 1)) * (x1 - x0), Y = v => y1 - (v / 255) * (y1 - y0);
+    let h = '';
+    const ws = row + gapRows + 1, we = Math.min(H - 1, row + gapRows + LEN);
+    if (ws <= H - 1) h += `<rect x="${X(ws) - 2}" y="${y0}" width="${X(we) - X(ws) + 4}" height="${y1 - y0}" fill="#1D9E75" opacity="0.18"/>`;
+    h += `<line x1="${x0}" y1="${y1}" x2="${x1}" y2="${y1}" stroke="var(--rule)"/>`;
+    h += `<line x1="${x0}" y1="${Y(F)}" x2="${x1}" y2="${Y(F)}" stroke="var(--muted)" stroke-width="0.6" stroke-dasharray="3 3"/>`;
+    h += `<line x1="${x0}" y1="${Y(T)}" x2="${x1}" y2="${Y(T)}" stroke="#1D9E75" stroke-width="0.8" stroke-dasharray="3 3"/>`;
+    let pts = ''; for (let y = 0; y < H; y++) pts += `${X(y).toFixed(1)},${Y(I[y * W + col]).toFixed(1)} `;
+    h += `<polyline points="${pts}" fill="none" stroke="var(--text)" stroke-width="1.3"/>`;
+    h += `<line x1="${X(row)}" y1="${y0}" x2="${X(row)}" y2="${y1}" stroke="#EF9F27" stroke-width="1.6"/>`;
+    h += `<text x="${x0}" y="236" font-size="12" fill="var(--muted)">0 mm</text>`;
+    h += `<text x="${x1}" y="236" text-anchor="end" font-size="12" fill="var(--muted)">48 mm deep</text>`;
+    h += `<text x="${x0 - 6}" y="${Y(F) + 4}" text-anchor="end" font-size="11" fill="var(--muted)">b 16</text>`;
+    h += `<text x="${x0 - 6}" y="${Y(T) + 4}" text-anchor="end" font-size="11" fill="#1D9E75">t 45</text>`;
+    h += `<text x="${x0 - 6}" y="${Y(P) + 4}" text-anchor="end" font-size="11" fill="var(--muted)">p 235</text>`;
+    h += `<text x="${(x0 + x1) / 2}" y="14" text-anchor="middle" font-size="12" fill="var(--muted)">Brightness down column ${col}: orange = pixel, green = window</text>`;
+    svg.innerHTML = h;
+  }
+
+  function draw() {
+    const trail = document.getElementById('trail').checked;
+    const gapMm = parseFloat(document.getElementById('gap').value); const gapRows = Math.round(gapMm / MM);
+    document.getElementById('gapOut').textContent = gapMm.toFixed(1) + ' mm';
+    const I = makeImage(trail); const M = maps(I, gapRows);
+    paint('img', I, 1, true); paint('mR', M.R, 255, true); paint('mS', M.S, 255, true); paint('mB', M.B, 255, true);
+    profile(I, gapRows);
+    const k = row * W + col;
+    document.getElementById('vR').textContent = M.R[k].toFixed(2);
+    document.getElementById('vS').textContent = M.S[k].toFixed(2);
+    document.getElementById('vB').textContent = M.B[k].toFixed(2);
+  }
+
+  ['img', 'mR', 'mS', 'mB'].forEach(id => document.getElementById(id).addEventListener('click', e => {
+    const r = e.target.getBoundingClientRect();
+    col = Math.max(0, Math.min(W - 1, Math.floor((e.clientX - r.left) / r.width * W)));
+    row = Math.max(0, Math.min(H - 1, Math.floor((e.clientY - r.top) / r.height * H)));
+    draw();
+  }));
+  document.getElementById('trail').addEventListener('change', draw);
+  document.getElementById('gap').addEventListener('input', draw);
+  draw();
+})();
+</script>
+</body>
+</html>
