@@ -16,6 +16,9 @@ Nothing in this folder is implemented in `functions/` yet.
 | `assets/katex/` | Local copy of KaTeX 0.16.11 (MIT) so the HTML documents render their equations offline | Shared by all documents here |
 
 Further terms get their own sub-folder next to `boneLikelihoodIntensity/`, with the same two files.
+A part of a term (for example the reflection score `R` inside the bone-likelihood map) is documented
+inside that term's folder, not in a folder of its own. Each `notes.md` ends with a short design
+history that records ideas that were merged or dropped.
 
 ## How to read this folder
 

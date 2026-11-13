@@ -74,7 +74,7 @@ svg text { font-family: "Segoe UI", system-ui, sans-serif; }
 
 <h1>Bone-likelihood map for the intensity cost</h1>
 <div class="meta">
-  Design document, draft · 2026-11-12 · branch <code>feature/newIntensityCostFunction</code><br>
+  Design document, draft · 2026-11-12, updated 2026-11-13 (reflection score) · branch <code>feature/newIntensityCostFunction</code><br>
   Status: method described, not implemented and not yet tested on our data.<br>
   Implementation reference: <a href="notes.md"><code>notes.md</code></a> in this folder (keep both in sync).
 </div>
@@ -187,8 +187,8 @@ visible surface is an established registration approach [9][10][11].
   <tr><td>\(b\)</td><td>Background level: brightness of empty, sound-free regions</td><td>grey level</td></tr>
   <tr><td>\(p\)</td><td>Echo peak level: brightness of a strong echo</td><td>grey level</td></tr>
   <tr><td>\(t\)</td><td>Tissue level: typical brightness of soft-tissue speckle</td><td>grey level</td></tr>
-  <tr><td>\(h\)</td><td>Expected thickness of the bone echo, used for the light smoothing in \(R\)</td><td>mm</td></tr>
-  <tr><td>\(k\)</td><td>Half-width of that smoothing in rows, \((2k+1)\,\Delta_v \approx h\)</td><td>rows</td></tr>
+  <tr><td>\(h\)</td><td>Thickness of the bone echo along depth, measured on our images (width at half height)</td><td>mm</td></tr>
+  <tr><td>\(\sigma_d\)</td><td>Width of the depth Gaussian in \(R\), \(\sigma_d = h / \sqrt{2\pi} \approx h / 2.5\)</td><td>mm</td></tr>
   <tr><td>\(g\)</td><td>Gap: depth skipped right below a pixel before its window starts</td><td>mm</td></tr>
   <tr><td>\(L\)</td><td>Window length: depth range looked at below the gap</td><td>mm</td></tr>
   <tr><td>\(L_{\min}\)</td><td>Shortest usable window near the bottom edge</td><td>mm</td></tr>
@@ -205,12 +205,23 @@ We use the clipping function
 
 <!-- ============================================================ -->
 <h2 id="reflection">3. Reflection score \(R\): is it bright here?</h2>
+
+<h3>3.1 Definition</h3>
 <p>
-First average each pixel with its direct neighbours above and below, so that a single bright speckle dot does not count as a
-reflection:
+First average each pixel with its neighbours above and below it, along depth only (the same column, nothing sideways), with
+Gaussian weights:
 </p>
 \[
-  \bar I(u, v) = \frac{1}{2k + 1} \sum_{j = -k}^{k} I(u, v + j).
+  \bar I(u, v) = \frac{\sum_{j} w_j \, I(u, v + j)}{\sum_{j} w_j},
+  \qquad
+  w_j = \exp\!\left( -\frac{(j\,\Delta_v)^2}{2\sigma_d^2} \right).
+\]
+<p>
+The sums run over the rows within \(3\sigma_d\) that lie inside the image, so the top and bottom edges are not darkened. The width
+comes from the measured thickness \(h\) of the bone echo (section 3.4):
+</p>
+\[
+  \sigma_d = \frac{h}{\sqrt{2\pi}} \approx \frac{h}{2.5}.
 \]
 <p>
 Then map the result to the range 0 to 1, from background to echo peak:
@@ -219,10 +230,150 @@ Then map the result to the range 0 to 1, from background to echo peak:
   R(u, v) = \operatorname{clip}\!\left( \frac{\bar I(u, v) - b}{p - b} \right).
 \]
 <ul>
-  <li>Empty background gives \(R = 0\); a full-strength echo gives \(R = 1\); speckle gives a small value.</li>
-  <li>Side effect of the smoothing: a one-pixel-thin line is averaged with its dark neighbours and scores lower than a thick band.
-    Bone echoes are thicker than most layer lines (Figure 1), so this helps.</li>
+  <li>Empty background gives \(R = 0\); an echo that fills the Gaussian gives \(R = 1\); speckle gives a small value.</li>
+  <li>In the code this is the existing <code>blurWithGaussian</code> (inside <code>smoothUltrasoundImages.m</code>) with sigma
+    along the image width set to 0.</li>
 </ul>
+
+<h3>3.2 Why average along depth</h3>
+<p>
+"Thickness" in an ultrasound image is measured along the beam, which runs down the columns. Averaging along depth dilutes a
+bright structure by how much of the Gaussian it fills: a thin line is mixed with its dark neighbours and scores low, a thick band
+keeps its brightness. Bone and layer lines are both long sideways, so averaging sideways would not help tell them apart.
+</p>
+<div class="table-wrap"><table>
+  <tr><th>Bright structure along depth</th><th>Peak score \(R\)</th><th>Example (\(h = 2.4\) mm)</th></tr>
+  <tr><td>Thin line, thickness \(t \ll \sigma_d\)</td><td>\(\approx t / h\)</td><td>\(t = 0.4\) mm: about 0.17</td></tr>
+  <tr><td>Band of thickness \(T\)</td><td>\(\operatorname{erf}\!\bigl(T / (2\sqrt{2}\,\sigma_d)\bigr)\)</td><td>\(T = h\): about 0.8; \(T \ge 2h\): about 1</td></tr>
+</table></div>
+<p>
+The choice \(\sigma_d = h/\sqrt{2\pi}\) is what makes a thin line score \(t/h\), the same as a box average of height \(h\).
+The best \(h\) is the thickness of the bone echo itself:
+</p>
+<ul>
+  <li>Smaller \(h\): thin layer lines score higher, and when \(h\) is no thicker than a layer line both score about the same.</li>
+  <li>Larger \(h\): the bone is diluted as well. Both scores shrink, and the cost changes less during a run (the problem of
+    section 1.1).</li>
+</ul>
+<div class="callout warn">
+  <div class="callout-title">Only helps where the bone echo is thicker than the false lines</div>
+  In the tibia depth profiles (Figure 4) the bone echo is under 1 mm thick, about as thin as a layer line, so \(R\) barely tells
+  them apart there. In the phantom femur image (Figure 1) the bone band looks clearly thicker than the layer lines, so there it
+  should help. A sloped surface also looks thicker along the column than it really is.
+</div>
+
+<h3>3.3 Box or Gaussian</h3>
+<p>
+A box average of height \(h\) and a Gaussian with \(\sigma_d = h/\sqrt{2\pi}\) tell thick from thin about equally well. They
+differ in how the cost behaves as a predicted bone line moves across a band:
+</p>
+<div class="table-wrap"><table>
+  <tr><th></th><th>Box, height \(h\)</th><th>Gaussian, \(\sigma_d\) (chosen)</th></tr>
+  <tr><td>Meaning</td><td>Fraction of the window filled by echo; a thin line scores exactly \(t/h\)</td><td>Centre weighted more; a thin line scores about \(t/h\)</td></tr>
+  <tr><td>Inside a thick band</td><td>Flat top: every position inside the band scores the same</td><td>A peak at the centre of the band</td></tr>
+  <tr><td>Cost as the line moves</td><td>Kinks where the window edge crosses the echo</td><td>Changes smoothly</td></tr>
+  <tr><td>Code</td><td>New</td><td>Already exists (<code>blurWithGaussian</code>)</td></tr>
+</table></div>
+<p>
+The optimizer (CMA-ES) needs no gradients, but a smooth cost with one clear lowest point is still easier to search and gives
+more consistent results across seeds.
+</p>
+<p>
+Try it below. The made-up image has a thin layer line, speckle, and a thicker bone band 12 mm below it, both sloped. The coral
+line is the predicted bone line from the mesh, shifted by \(\Delta\): \(\Delta = 0\) lies on the bone, \(\Delta = -12\) mm on
+the layer line. The cost is \(1 - \text{mean } R\) along that line, as in section 9 without the nothing-below score.
+</p>
+<div class="demo" id="r3demo">
+  <div class="controls" style="margin-top:0">
+    <span style="min-width:150px">Depth Gaussian \(\sigma_d\)</span>
+    <input type="range" id="r3s" min="0.1" max="2.5" step="0.02" value="0.96" aria-label="Depth Gaussian sigma in millimetres">
+    <span id="r3sOut" style="min-width:110px"></span>
+  </div>
+  <div class="controls">
+    <span style="min-width:150px">Bone band thickness \(T\)</span>
+    <input type="range" id="r3T" min="0.4" max="4" step="0.2" value="2.4" aria-label="Bone band thickness in millimetres">
+    <span id="r3TOut" style="min-width:110px"></span>
+  </div>
+  <div class="controls">
+    <span style="min-width:150px">Layer line thickness \(t\)</span>
+    <input type="range" id="r3t" min="0.2" max="2" step="0.2" value="0.4" aria-label="Layer line thickness in millimetres">
+    <span id="r3tOut" style="min-width:110px"></span>
+  </div>
+  <div class="controls">
+    <span style="min-width:150px">Predicted line shift \(\Delta\)</span>
+    <input type="range" id="r3d" min="-16" max="8" step="0.1" value="0" aria-label="Predicted line shift in millimetres">
+    <span id="r3dOut" style="min-width:110px"></span>
+  </div>
+  <div class="controls">
+    <label><input type="checkbox" id="r3box"> Compare with a box of height \(h = \sqrt{2\pi}\,\sigma_d\)</label>
+  </div>
+  <div class="maps">
+    <div><canvas id="r3c1" width="80" height="400" style="aspect-ratio:32/40;cursor:default" aria-label="Synthetic image"></canvas><p class="lbl">Image \(I\)</p></div>
+    <div><canvas id="r3c2" width="80" height="400" style="aspect-ratio:32/40;cursor:default" aria-label="Image averaged along depth"></canvas><p class="lbl">Averaged along depth \(\bar I\)</p></div>
+    <div><canvas id="r3c3" width="80" height="400" style="aspect-ratio:32/40;cursor:default" aria-label="Reflection score map"></canvas><p class="lbl">Reflection score \(R\)</p></div>
+  </div>
+  <div class="vals">
+    <div class="val"><div class="k">Peak R, bone</div><div class="v" id="r3vb">–</div></div>
+    <div class="val"><div class="k">Peak R, layer line</div><div class="v" id="r3vl">–</div></div>
+    <div class="val"><div class="k">Cost at this \(\Delta\)</div><div class="v" id="r3vc">–</div></div>
+  </div>
+  <svg id="r3prof" width="100%" viewBox="0 0 460 220" role="img" aria-label="Brightness along depth in the middle column" style="margin-top:14px"></svg>
+  <svg id="r3cost" width="100%" viewBox="0 0 460 220" role="img" aria-label="Cost against predicted line shift" style="margin-top:6px"></svg>
+  <svg id="r3zoom" width="100%" viewBox="0 0 460 220" role="img" aria-label="Cost near the bone, zoomed" style="margin-top:6px"></svg>
+  <p class="lbl">Grey dashed: raw image (no averaging). Blue: Gaussian along depth. Orange: box (when ticked). Coral dot: current \(\Delta\).</p>
+</div>
+<p>
+Things to try: tick the box and compare the zoomed dips. At the default \(T = h\) the box gives a V with a sharp tip and kinks
+at its sides, the Gaussian a smooth bowl; raise \(T\) to 4 mm and the box dip gets a flat bottom, where every position inside the
+band costs the same. Set \(T = t = 0.4\) mm (like the tibia images) and see both dips become equally deep; raise \(\sigma_d\) well above \(T/2.5\) and see the bone dip get shallower too.
+Each dip is only about \(T\) plus a few \(\sigma_d\) wide, so a predicted line further away gets no pull: that is the reach
+question of section 9.
+</p>
+
+<h3>3.4 Choosing the echo thickness \(h\)</h3>
+<p>
+\(h\) describes something physical: how thick the bone echo is along the beam. That depends mainly on the probe (how long its
+sound pulse is) and the scanner setting, plus the roughness and tilt of the surface. It is therefore a <strong>fixed
+parameter</strong> (<code>boneEchoThicknessMm</code>, under <code>fixedParameters</code>), set by us from our own images and
+measured again when the probe or scanner setting changes. It is given in mm, so it does not depend on the pixel size.
+</p>
+<p>Proposed way to measure it, once per probe setting:</p>
+<ol>
+  <li>Pick several images where the bone is clearly visible.</li>
+  <li>Take brightness profiles along depth across the bone echo, as in Figure 4.</li>
+  <li>Measure the depth range where the brightness is above halfway between the background and the echo peak.</li>
+  <li>Use the median over the images.</li>
+</ol>
+<p>
+This is a one-off measurement by a person, not a step in the pipeline, and it uses no segmentation output.
+\(h\) is not swept as a hyperparameter for now: judging a sweep needs accurate ground truth, which we don't have yet; the seed
+scatter in the last sweep (about 0.7 mm) is likely larger than its effect; and its effect is tangled with the reach choice.
+A small check sweep (0.5×, 1× and 2× the measured value) can follow once new ground truth exists.
+</p>
+
+<h3>3.5 Relation to the current intensity term</h3>
+<p>
+On its own, \(R\) is the smoothing of the current intensity term (<code>cost_intensityLine</code>) with different settings, not a
+new idea. The new parts of this document are the nothing-below score \(S\) (section 4) and the reach step (section 9).
+</p>
+<div class="table-wrap"><table>
+  <tr><th>Step</th><th>Smoothing</th><th>Normalization</th><th>What it adds</th></tr>
+  <tr><td>Current <code>cost_intensityLine</code></td><td>Gaussian in both directions, \(\sigma\) = 1.5 – 5 mm, sized for reach</td><td>÷ 255</td><td>–</td></tr>
+  <tr><td>\(R\)</td><td>Gaussian along depth only, \(\sigma_d\) from \(h\)</td><td>\((\bar I - b)/(p - b)\), clipped</td><td>Thick echoes score higher than thin lines; full 0 – 1 range</td></tr>
+  <tr><td>\(B = R \cdot S\)</td><td>as \(R\)</td><td>as \(R\)</td><td>Nothing-below clue</td></tr>
+</table></div>
+<p>
+The current term uses one \(\sigma\) for two jobs that pull in opposite directions. Reach needs a large \(\sigma\), so that a line
+a few mm away still reads some echo. Telling thick from thin needs \(\sigma\) close to the echo thickness. A large \(\sigma\)
+dilutes the bone too, which is why the current term changes so little during a run (section 1.1). \(R\) keeps only the second job;
+reach is handled as a separate step.
+</p>
+<div class="callout">
+  <div class="callout-title">Design history</div>
+  The literature report (2026-11-11) first listed "reflection at bone thickness" as a separate approach next to the
+  bone-likelihood map. It turned out to be the \(R\) factor of \(B = R \cdot S\), so it is documented here and not in a folder of
+  its own. Box versus Gaussian and the fixed \(h\) were decided on 2026-11-13 (see <code>notes.md</code>, Design history).
+</div>
 
 <!-- ============================================================ -->
 <h2 id="below">4. Nothing-below score \(S\): is it empty under me?</h2>
@@ -385,7 +536,7 @@ white = 1, black = 0.
 <p>
 Things to try: compare the layer line with the bone; tick "Trailing echoes" and see the bone fade in the \(B\) map at
 \(g = 0.8\) mm; then raise the gap to 4 mm and see it return. Demo settings: \(\Delta_v = 0.8\) mm, \(b = 16\), \(p = 235\),
-\(t = 45\), \(k = 1\), \(L = 6.4\) mm.
+\(t = 45\), \(h = 2.4\) mm (\(\sigma_d \approx 0.96\) mm), \(L = 6.4\) mm.
 </p>
 
 <!-- ============================================================ -->
@@ -415,7 +566,7 @@ In our tibia images the bone lies at 12 – 21 mm in a 48 mm deep image, so the 
   <tr><td>Background \(b\)</td><td>image</td><td>Median of the image; most pixels are empty background.</td><td>16</td></tr>
   <tr><td>Echo peak \(p\)</td><td>image</td><td>A high percentile, e.g. the 99.9th. Our echoes clip at about 235.</td><td>235</td></tr>
   <tr><td>Tissue level \(t\)</td><td>image</td><td>Typical speckle brightness. Open point: a rule that needs no segmentation, e.g. a percentile of the pixels above background.</td><td>45</td></tr>
-  <tr><td>Echo thickness \(h\) (sets \(k\))</td><td>dataset</td><td>Typical bone echo thickness in our images.</td><td>3 rows ≈ 2.4 mm</td></tr>
+  <tr><td>Echo thickness \(h\) (sets \(\sigma_d\))</td><td>probe and scanner setting</td><td>Fixed parameter, measured once on our images (section 3.4). Not swept.</td><td>2.4 mm (\(\sigma_d \approx 0.96\) mm)</td></tr>
   <tr><td>Gap \(g\)</td><td>dataset</td><td>Just larger than the bone band plus trailing echoes, \(\tau\).</td><td>0.8 – 4 mm</td></tr>
   <tr><td>Window length \(L\)</td><td>dataset</td><td>Long enough to average out speckle; short enough to stop above the reverberation line, which appears about one bone depth further down (≈ 20 mm in the tibia images).</td><td>6.4 mm</td></tr>
   <tr><td>Minimum window \(L_{\min}\)</td><td>dataset</td><td>A few speckle sizes.</td><td>3 mm</td></tr>
@@ -476,6 +627,8 @@ Nothing else in the optimizer changes: same pose vector, same sampling, same pla
   <li><strong>Uneven bone brightness</strong> (Figure 2) is not solved by \(B\). A later step could weight sample points by how squarely the
     beam hits the predicted surface (from the mesh normal).</li>
   <li><strong>Tissue level \(t\)</strong> still needs a rule that uses no segmentation.</li>
+  <li><strong>Echo thickness \(h\)</strong> is not measured yet. Where the bone echo is as thin as the layer lines (tibia images),
+    \(R\) does not tell them apart (section 3.2).</li>
   <li><strong>Beam direction</strong> is assumed along the image columns (linear probe). A curved probe would need slanted windows.</li>
   <li><strong>Reach</strong> of the cost (section 9) is an open design choice.</li>
   <li><strong>Phantom only.</strong> The knee phantom may differ from real tissue, for example in speed of sound and speckle level.</li>
@@ -531,6 +684,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
 (function () {
   const W = 40, H = 60, MM = 0.8, F = 16, P = 235, T = 45, LEN = 8;
+  const GS = (2.4 / Math.sqrt(2 * Math.PI)) / MM, GK = Math.ceil(3 * GS);
   let seed = 7;
   const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
   const speck = []; for (let i = 0; i < W * H; i++) speck.push(rnd());
@@ -554,7 +708,7 @@ document.addEventListener('DOMContentLoaded', function () {
     const minRows = Math.round(3 / MM);
     for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
       let s = 0, n = 0;
-      for (let d = -1; d <= 1; d++) { const yy = y + d; if (yy >= 0 && yy < H) { s += I[yy * W + x]; n++; } }
+      for (let d = -GK; d <= GK; d++) { const yy = y + d; if (yy >= 0 && yy < H) { const w = Math.exp(-d * d / (2 * GS * GS)); s += w * I[yy * W + x]; n += w; } }
       const r = Math.max(0, Math.min(1, (s / n - F) / (P - F)));
       let b = 0, m = 0;
       for (let d = gapRows + 1; d <= gapRows + LEN; d++) { const yy = y + d; if (yy < H) { b += I[yy * W + x]; m++; } }
@@ -616,6 +770,157 @@ document.addEventListener('DOMContentLoaded', function () {
   }));
   document.getElementById('trail').addEventListener('change', draw);
   document.getElementById('gap').addEventListener('input', draw);
+  draw();
+})();
+
+// Section 3.3 demo: Gaussian versus box along depth, and the cost as a predicted line moves.
+(function () {
+  const NC = 80, NR = 400, PC = 0.4, PR = 0.1, F = 16, P = 235;
+  const $ = id => document.getElementById(id);
+  const zBone = x => 26 + 0.15 * (x - 16), zLayer = x => zBone(x) - 12;
+  let seed = 11;
+  const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+
+  // Speckle dots 0.2 mm tall, fixed for the whole session so only the sliders change the picture.
+  const speck = new Float32Array(NC * NR);
+  for (let r = 0; r < NR; r += 2) for (let c = 0; c < NC; c++) {
+    if (rnd() < 0.06) { const v = 40 + rnd() * 80; speck[r * NC + c] = v; speck[(r + 1) * NC + c] = v; }
+  }
+
+  function makeImage(T, t) {
+    const I = new Float32Array(NC * NR);
+    for (let c = 0; c < NC; c++) {
+      const x = (c + 0.5) * PC, zb = zBone(x), zl = zLayer(x);
+      for (let r = 0; r < NR; r++) {
+        const z = (r + 0.5) * PR; let v = F;
+        if (z > 4 && z < zb - T / 2 && speck[r * NC + c]) v = speck[r * NC + c];
+        if (Math.abs(z - zl) <= t / 2) v = P;
+        if (Math.abs(z - zb) <= T / 2) v = P;
+        I[r * NC + c] = v;
+      }
+    }
+    return I;
+  }
+
+  // Weighted average along depth only; rows outside the image are left out, as in blurWithGaussian.
+  function alongDepth(I, w) {
+    const k = (w.length - 1) / 2, out = new Float32Array(NC * NR);
+    for (let c = 0; c < NC; c++) for (let r = 0; r < NR; r++) {
+      let s = 0, n = 0;
+      for (let j = -k; j <= k; j++) { const rr = r + j; if (rr < 0 || rr >= NR) continue; s += w[j + k] * I[rr * NC + c]; n += w[j + k]; }
+      out[r * NC + c] = s / n;
+    }
+    return out;
+  }
+  function gaussWeights(sigmaMm) {
+    const s = sigmaMm / PR, k = Math.ceil(3 * s), w = [];
+    for (let j = -k; j <= k; j++) w.push(Math.exp(-j * j / (2 * s * s)));
+    return w;
+  }
+  function boxWeights(hMm) {
+    const k = Math.max(0, Math.round(hMm / PR / 2 - 0.5));
+    return new Array(2 * k + 1).fill(1);
+  }
+  const toScore = A => A.map(v => Math.min(1, Math.max(0, (v - F) / (P - F))));
+  function readAt(M, c, z) {
+    const r = z / PR - 0.5; if (r < 0 || r > NR - 1) return 0;
+    const r0 = Math.floor(r), f = r - r0, r1 = Math.min(NR - 1, r0 + 1);
+    return M[r0 * NC + c] * (1 - f) + M[r1 * NC + c] * f;
+  }
+  function cost(M, d) { let s = 0; for (let c = 0; c < NC; c++) s += readAt(M, c, zBone((c + 0.5) * PC) + d); return 1 - s / NC; }
+
+  function paint(id, M, scale, d) {
+    const ctx = $(id).getContext('2d'), im = ctx.createImageData(NC, NR);
+    for (let i = 0; i < NC * NR; i++) {
+      const g = Math.round(Math.min(255, M[i] * scale));
+      im.data[4 * i] = g; im.data[4 * i + 1] = g; im.data[4 * i + 2] = g; im.data[4 * i + 3] = 255;
+    }
+    ctx.putImageData(im, 0, 0);
+    ctx.strokeStyle = '#D85A30'; ctx.lineWidth = 2; ctx.beginPath();
+    ctx.moveTo(0, (zBone(0) + d) / PR); ctx.lineTo(NC, (zBone(NC * PC) + d) / PR); ctx.stroke();
+  }
+
+  // Small line plot in SVG: series = [{xs, ys, color, dash}], optional marker {x, y}.
+  function plot(id, series, xr, yr, xlabel, ylabel, marker) {
+    const x0 = 52, x1 = 446, y0 = 12, y1 = 178;
+    const X = v => x0 + (v - xr[0]) / (xr[1] - xr[0]) * (x1 - x0);
+    const Y = v => y1 - (v - yr[0]) / (yr[1] - yr[0]) * (y1 - y0);
+    const nice = span => { const raw = span / 5, m = Math.pow(10, Math.floor(Math.log10(raw))); const f = raw / m; return (f < 1.5 ? 1 : f < 3.5 ? 2 : f < 7.5 ? 5 : 10) * m; };
+    let h = '';
+    const ys = nice(yr[1] - yr[0]), xs = nice(xr[1] - xr[0]);
+    for (let v = Math.ceil(yr[0] / ys) * ys; v <= yr[1] + 1e-9; v += ys) {
+      h += `<line x1="${x0}" y1="${Y(v)}" x2="${x1}" y2="${Y(v)}" stroke="var(--rule)" stroke-width="0.6"/>`;
+      h += `<text x="${x0 - 6}" y="${Y(v) + 4}" text-anchor="end" font-size="11" fill="var(--muted)">${+v.toFixed(3)}</text>`;
+    }
+    for (let v = Math.ceil(xr[0] / xs) * xs; v <= xr[1] + 1e-9; v += xs) {
+      h += `<text x="${X(v)}" y="${y1 + 15}" text-anchor="middle" font-size="11" fill="var(--muted)">${+v.toFixed(2)}</text>`;
+    }
+    h += `<line x1="${x0}" y1="${y1}" x2="${x1}" y2="${y1}" stroke="var(--muted)" stroke-width="0.8"/>`;
+    h += `<text x="${(x0 + x1) / 2}" y="${y1 + 33}" text-anchor="middle" font-size="12" fill="var(--muted)">${xlabel}</text>`;
+    h += `<text x="12" y="${(y0 + y1) / 2}" text-anchor="middle" font-size="12" fill="var(--muted)" transform="rotate(-90 12 ${(y0 + y1) / 2})">${ylabel}</text>`;
+    series.forEach(s => {
+      let pts = '';
+      for (let i = 0; i < s.xs.length; i++) {
+        if (s.xs[i] < xr[0] || s.xs[i] > xr[1]) continue;
+        const yv = Math.min(yr[1], Math.max(yr[0], s.ys[i]));
+        pts += `${X(s.xs[i]).toFixed(1)},${Y(yv).toFixed(1)} `;
+      }
+      h += `<polyline points="${pts}" fill="none" stroke="${s.color}" stroke-width="${s.width || 2}" ${s.dash ? `stroke-dasharray="${s.dash}"` : ''} stroke-linejoin="round"/>`;
+    });
+    if (marker) h += `<circle cx="${X(marker.x)}" cy="${Y(Math.min(yr[1], Math.max(yr[0], marker.y)))}" r="5" fill="#D85A30" stroke="var(--surface)" stroke-width="2"/>`;
+    $(id).innerHTML = h;
+  }
+
+  const shifts = []; for (let i = 0; i <= 240; i++) shifts.push(+(-16 + i * 0.1).toFixed(1));
+  const depths = []; for (let r = 0; r < NR; r++) depths.push((r + 0.5) * PR);
+  const BLUE = 'var(--accent)', GREY = '#888780', ORANGE = '#BA7517';
+  let key = '', I, G, X, RG, RX, R0, cRaw, cG, cX;
+
+  function draw() {
+    const s = +$('r3s').value, T = +$('r3T').value, t = +$('r3t').value, d = +$('r3d').value, box = $('r3box').checked;
+    $('r3sOut').textContent = s.toFixed(2) + ' mm (h ' + (s * Math.sqrt(2 * Math.PI)).toFixed(1) + ')';
+    $('r3TOut').textContent = T.toFixed(1) + ' mm';
+    $('r3tOut').textContent = t.toFixed(1) + ' mm';
+    $('r3dOut').textContent = d.toFixed(1) + ' mm';
+
+    // Recompute the maps and cost curves only when a setting other than the shift changed.
+    const k = [s, T, t, box].join('|');
+    if (k !== key) {
+      key = k;
+      I = makeImage(T, t); R0 = toScore(I);
+      G = alongDepth(I, gaussWeights(s)); RG = toScore(G);
+      if (box) { X = alongDepth(I, boxWeights(Math.sqrt(2 * Math.PI) * s)); RX = toScore(X); }
+      cRaw = shifts.map(v => cost(R0, v)); cG = shifts.map(v => cost(RG, v)); cX = box ? shifts.map(v => cost(RX, v)) : [];
+      const c = NC / 2, x = (c + 0.5) * PC; let mb = 0, ml = 0;
+      for (let r = 0; r < NR; r++) {
+        const z = (r + 0.5) * PR, v = RG[r * NC + c];
+        if (Math.abs(z - zBone(x)) < 4) mb = Math.max(mb, v);
+        if (Math.abs(z - zLayer(x)) < 4) ml = Math.max(ml, v);
+      }
+      $('r3vb').textContent = mb.toFixed(2); $('r3vl').textContent = ml.toFixed(2);
+      const col = c, prof = [
+        { xs: depths, ys: depths.map((_, r) => I[r * NC + col]), color: GREY, dash: '4 3', width: 1.5 },
+        { xs: depths, ys: depths.map((_, r) => G[r * NC + col]), color: BLUE }
+      ];
+      if (box) prof.push({ xs: depths, ys: depths.map((_, r) => X[r * NC + col]), color: ORANGE, width: 1.5 });
+      plot('r3prof', prof, [0, 40], [0, 255], 'depth in the middle column (mm)', 'brightness');
+    }
+
+    const cNow = cost(RG, d);
+    $('r3vc').textContent = cNow.toFixed(3);
+    const curves = [{ xs: shifts, ys: cRaw, color: GREY, dash: '4 3', width: 1.5 }, { xs: shifts, ys: cG, color: BLUE }];
+    if (box) curves.push({ xs: shifts, ys: cX, color: ORANGE, width: 1.5 });
+    plot('r3cost', curves, [-16, 8], [0, 1], 'predicted line shift Δ (mm)', 'cost', { x: d, y: cNow });
+    const near = [];
+    shifts.forEach((v, i) => { if (v >= -4 && v <= 4) { near.push(cG[i]); if (box) near.push(cX[i]); } });
+    const lo = Math.max(0, Math.min(...near) - 0.03), hi = Math.min(1, Math.max(...near) + 0.03);
+    plot('r3zoom', curves.slice(1), [-4, 4], [lo, hi], 'zoom on the bone dip: Δ (mm)', 'cost', (d >= -4 && d <= 4) ? { x: d, y: cNow } : null);
+
+    paint('r3c1', I, 1, d); paint('r3c2', G, 1, d); paint('r3c3', RG, 255, d);
+  }
+
+  ['r3s', 'r3T', 'r3t', 'r3d'].forEach(id => $(id).addEventListener('input', draw));
+  $('r3box').addEventListener('change', draw);
   draw();
 })();
 </script>
