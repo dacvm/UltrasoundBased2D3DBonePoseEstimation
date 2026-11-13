@@ -27,7 +27,18 @@
 }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.65 Georgia, "Times New Roman", serif; }
-.page { display: grid; grid-template-columns: 210px minmax(0, 860px); gap: 40px; justify-content: center; max-width: 1150px; margin: 0 auto; padding: 32px 16px 80px; }
+.page { display: grid; grid-template-columns: 200px minmax(0, 820px) 290px; gap: 36px; justify-content: center; max-width: 1480px; margin: 0 auto; padding: 32px 16px 80px; }
+aside.notation { position: sticky; top: 24px; align-self: start; max-height: calc(100vh - 48px); overflow-y: auto; font-size: 13px; font-family: "Segoe UI", system-ui, sans-serif; }
+aside.notation .aside-title { font-weight: 600; font-size: 14px; margin-bottom: 4px; }
+aside.notation .aside-note { color: var(--muted); margin: 0 0 6px; }
+aside.notation table { font-size: 12.5px; margin: 0; }
+aside.notation th, aside.notation td { padding: 3px 6px; line-height: 1.4; }
+aside.notation td:first-child { white-space: nowrap; }
+aside.notation th:nth-child(3), aside.notation td:nth-child(3) { display: none; }
+@media (max-width: 1439px) {
+  .page { grid-template-columns: 210px minmax(0, 860px); max-width: 1150px; gap: 40px; }
+  aside.notation { display: none; }
+}
 main { min-width: 0; }
 h1, h2, h3, h4, nav, .meta, table, figcaption, .demo, .callout-title { font-family: "Segoe UI", system-ui, -apple-system, sans-serif; }
 h1 { font-size: 30px; font-weight: 600; margin: 0 0 6px; line-height: 1.25; }
@@ -388,7 +399,7 @@ comparison: \(n = 0\) gives every point weight 1, and \(S = 1\) everywhere reduc
 </p>
 
 <h3>4.2 Notation</h3>
-<div class="table-wrap"><table>
+<div class="table-wrap" id="notationTable"><table>
   <tr><th>Symbol</th><th>Meaning</th><th>Unit</th></tr>
   <tr><td>\(I(u, v)\)</td><td>Brightness of the B-mode image at column \(u\) and row \(v\) (row index grows with depth)</td><td>grey level 0 – 255</td></tr>
   <tr><td>\(N_v\)</td><td>Number of rows (image depth in pixels)</td><td>–</td></tr>
@@ -1092,6 +1103,15 @@ How the design got here, so later readers see the reasoning, not only the result
 </ul>
 
 </main>
+<aside class="notation" aria-label="Notation">
+  <div class="aside-title">Notation</div>
+  <p class="aside-note">Same table as <a href="#notationTable">section 4.2</a>; stays in view while you read.</p>
+</aside>
+<script>
+// Copy the notation table of section 4.2 into the right column (shown on wide screens only),
+// so the symbols can be looked up at any point of the document. One source, no duplicated text.
+document.querySelector("aside.notation").appendChild(document.querySelector("#notationTable table").cloneNode(true));
+</script>
 </div>
 
 <script>
