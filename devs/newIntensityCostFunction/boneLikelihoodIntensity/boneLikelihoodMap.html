@@ -27,7 +27,8 @@
 }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.65 Georgia, "Times New Roman", serif; }
-.page { max-width: 860px; margin: 0 auto; padding: 32px 16px 80px; }
+.page { display: grid; grid-template-columns: 210px minmax(0, 860px); gap: 40px; justify-content: center; max-width: 1150px; margin: 0 auto; padding: 32px 16px 80px; }
+main { min-width: 0; }
 h1, h2, h3, h4, nav, .meta, table, figcaption, .demo, .callout-title { font-family: "Segoe UI", system-ui, -apple-system, sans-serif; }
 h1 { font-size: 30px; font-weight: 600; margin: 0 0 6px; line-height: 1.25; }
 h2 { font-size: 22px; font-weight: 600; margin: 48px 0 12px; padding-top: 12px; border-top: 1px solid var(--rule); }
@@ -35,11 +36,15 @@ h3 { font-size: 17px; font-weight: 600; margin: 28px 0 8px; }
 h4 { font-size: 15px; font-weight: 600; margin: 22px 0 6px; color: var(--muted); }
 .meta { color: var(--muted); font-size: 14px; margin-bottom: 24px; }
 a { color: var(--accent); }
-code { font-family: Consolas, "Courier New", monospace; font-size: 0.88em; background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+code { font-family: Consolas, "Courier New", monospace; font-size: 0.88em; overflow-wrap: anywhere; background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
 pre { font-family: Consolas, "Courier New", monospace; font-size: 14px; background: var(--code-bg); padding: 12px 14px; border-radius: 6px; overflow-x: auto; line-height: 1.45; }
-nav.toc { background: var(--surface); border-radius: 8px; padding: 14px 20px; font-size: 14px; }
-nav.toc ul { list-style: none; margin: 6px 0 0; padding-left: 4px; columns: 2; column-gap: 32px; }
-nav.toc li { margin: 2px 0; break-inside: avoid; }
+nav.toc { position: sticky; top: 24px; align-self: start; max-height: calc(100vh - 48px); overflow-y: auto; font-size: 14px; }
+nav.toc strong { display: block; margin-bottom: 8px; }
+nav.toc ul { list-style: none; margin: 0; padding: 0; }
+nav.toc li { margin: 0; }
+nav.toc a { display: block; padding: 4px 0 4px 12px; color: var(--muted); text-decoration: none; border-left: 2px solid var(--rule); line-height: 1.35; }
+nav.toc a:hover { color: var(--text); }
+nav.toc a.active { color: var(--text); border-left-color: var(--accent); font-weight: 600; }
 table { border-collapse: collapse; width: 100%; font-size: 14px; margin: 12px 0 20px; }
 th, td { border-bottom: 1px solid var(--rule); padding: 7px 10px; text-align: left; vertical-align: top; }
 th { background: var(--surface); font-weight: 600; }
@@ -64,22 +69,17 @@ figcaption { font-size: 14px; color: var(--muted); margin-top: 8px; }
 .demo .controls { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; margin-top: 14px; color: var(--muted); }
 .demo input[type=range] { flex: 1; min-width: 140px; }
 svg text { font-family: "Segoe UI", system-ui, sans-serif; }
+@media (max-width: 900px) {
+  .page { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  nav.toc { position: static; max-height: none; background: var(--surface); border-radius: 8px; padding: 14px 16px; margin-bottom: 24px; }
+}
 @media (max-width: 640px) {
-  nav.toc ul { columns: 1; }
   .fig-pair, .demo-grid { grid-template-columns: 1fr; }
 }
 </style>
 </head>
 <body>
 <div class="page">
-
-<h1>Bone-likelihood intensity cost: method proposal</h1>
-<div class="meta">
-  Method proposal, draft · 2026-11-12, updated 2026-11-13 (reflection score, incidence weighting, restructured as a proposal) · branch <code>feature/newIntensityCostFunction</code><br>
-  Status: method described, not implemented and not yet tested on our data.<br>
-  Implementation reference: <a href="notes.md"><code>notes.md</code></a> in this folder (keep both in sync).
-</div>
-
 <nav class="toc" aria-label="Contents">
   <strong>Contents</strong>
   <ul>
@@ -98,6 +98,14 @@ svg text { font-family: "Segoe UI", system-ui, sans-serif; }
     <li><a href="#appendixB">Appendix B. Design history</a></li>
   </ul>
 </nav>
+<main>
+
+<h1>Bone-likelihood intensity cost: method proposal</h1>
+<div class="meta">
+  Method proposal, draft · 2026-11-12, updated 2026-11-13 (reflection score, incidence weighting, restructured as a proposal) · branch <code>feature/newIntensityCostFunction</code><br>
+  Status: method described, not implemented and not yet tested on our data.<br>
+  Implementation reference: <a href="notes.md"><code>notes.md</code></a> in this folder (keep both in sync).
+</div>
 
 <!-- ============================================================ -->
 <h2 id="summary">Summary</h2>
@@ -531,11 +539,10 @@ the layer line. The cost is \(1 - \text{mean } R\) along that line: the cost of 
   </div>
   <svg id="r3prof" width="100%" viewBox="0 0 460 220" role="img" aria-label="Brightness along depth in the middle column" style="margin-top:14px"></svg>
   <svg id="r3cost" width="100%" viewBox="0 0 460 220" role="img" aria-label="Cost against predicted line shift" style="margin-top:6px"></svg>
-  <svg id="r3zoom" width="100%" viewBox="0 0 460 220" role="img" aria-label="Cost near the bone, zoomed" style="margin-top:6px"></svg>
   <p class="lbl">Grey dashed: raw image (no averaging). Blue: Gaussian along depth. Orange: box (when ticked). Coral dot: current \(\Delta\).</p>
 </div>
 <p>
-Things to try: tick the box and compare the zoomed dips. At the default \(T = h\) the box gives a V with a sharp tip and kinks
+Things to try: tick the box and compare the dips around (Delta = 0). At the default \(T = h\) the box gives a V with a sharp tip and kinks
 at its sides, the Gaussian a smooth bowl; raise \(T\) to 4 mm and the box dip gets a flat bottom, where every position inside the
 band costs the same. Set \(T = t = 0.4\) mm (like the tibia images) and see both dips become equally deep; raise \(\sigma_d\) well above \(T/2.5\) and see the bone dip get shallower too.
 Each dip is only about \(T\) plus a few \(\sigma_d\) wide, so a predicted line further away gets no pull: that is the reach
@@ -1084,6 +1091,7 @@ How the design got here, so later readers see the reasoning, not only the result
     parts of the method, and incidence weighting is one of them rather than an add-on.</li>
 </ul>
 
+</main>
 </div>
 
 <script>
@@ -1326,10 +1334,6 @@ document.addEventListener('DOMContentLoaded', function () {
     const curves = [{ xs: shifts, ys: cRaw, color: GREY, dash: '4 3', width: 1.5 }, { xs: shifts, ys: cG, color: BLUE }];
     if (box) curves.push({ xs: shifts, ys: cX, color: ORANGE, width: 1.5 });
     plot('r3cost', curves, [-16, 8], [0, 1], 'predicted line shift Δ (mm)', 'cost', { x: d, y: cNow });
-    const near = [];
-    shifts.forEach((v, i) => { if (v >= -4 && v <= 4) { near.push(cG[i]); if (box) near.push(cX[i]); } });
-    const lo = Math.max(0, Math.min(...near) - 0.03), hi = Math.min(1, Math.max(...near) + 0.03);
-    plot('r3zoom', curves.slice(1), [-4, 4], [lo, hi], 'zoom on the bone dip: Δ (mm)', 'cost', (d >= -4 && d <= 4) ? { x: d, y: cNow } : null);
 
     paint('r3c1', I, 1, d); paint('r3c2', G, 1, d); paint('r3c3', RG, 255, d);
   }
@@ -1457,6 +1461,23 @@ document.addEventListener('DOMContentLoaded', function () {
 
   ['incOff', 'incM', 'incN'].forEach(id => $(id).addEventListener('input', draw));
   draw();
+})();
+</script>
+<script>
+// Highlight the section being read in the side navigation.
+// The active section is the last one whose heading has passed a third of the window height.
+(function () {
+  const links = [...document.querySelectorAll('nav.toc a')];
+  const headings = links.map(a => document.querySelector(a.getAttribute('href')));
+  const markActive = () => {
+    const line = window.innerHeight / 3;
+    let current = 0;
+    headings.forEach((h, k) => { if (h.getBoundingClientRect().top <= line) current = k; });
+    links.forEach((a, k) => a.classList.toggle('active', k === current));
+  };
+  window.addEventListener('scroll', markActive, { passive: true });
+  window.addEventListener('resize', markActive);
+  markActive();
 })();
 </script>
 </body>
