@@ -213,7 +213,7 @@ hand per image.
   model like `intensityPIMLOP`).
 - **O5 Measuring the echo thickness $h$.** Proposed procedure: pick several images per probe
   setting where the bone is clearly visible; take depth profiles across the bone echo (as in
-  Figure 4 of the HTML); measure the depth range where the brightness is above
+  Figure 5 of the HTML); measure the depth range where the brightness is above
   $b + (\text{peak} - b)/2$; use the median over images. A one-off measurement by a person, not a
   pipeline step. Known risk: in the tibia images the echo is under 1 mm thick, about as thin as
   the layer lines, so `R` barely separates them there ($\sigma_d \approx 0.3$ mm). In the phantom
@@ -268,14 +268,14 @@ bone stays bright and the layer lines fade.
   σ = 1.5 / 3 / 5 mm, background 0.06. Level 3–10 mm below the echo ≈ 16 (background) in most
   images; above 16–31. Lateral images #1–3 show texture on both sides.
 - Phantom femur (frontal): thin layer lines as bright as the bone above it, trailing echoes under the bone.
-- Bone echo thickness along depth: under 1 mm in the tibia depth profiles (Figure 4 of the HTML);
+- Bone echo thickness along depth: under 1 mm in the tibia depth profiles (Figure 5 of the HTML);
   visibly thicker than the layer lines in the phantom femur image. Not yet measured with the O5
   procedure.
 
 ## References
 
 Literature behind the clues and the "read a bone-enhanced image under the predicted surface"
-approach: see section 12 of `boneLikelihoodMap.html` (Jain 2004; Foroughi 2007; Jia 2016;
+approach: see section 10 of `boneLikelihoodMap.html` (Jain 2004; Foroughi 2007; Jia 2016;
 Pandey 2018; Brendel 2002/2003; Tümer 2018; Penney 2006; Karamalis 2012; Hacihaliloglu 2009/2011).
 
 Related code: `functions/bonePoseOptimization/costModels/cost_intensityLine.m`,
@@ -295,7 +295,7 @@ Short record of how the design got here, so later readers see the reasoning, not
   term. It also turned out to be the current `cost_intensityLine` smoothing with different settings
   (see Relation to the current intensity term). It is therefore documented here and gets no folder
   of its own.
-- **2026-11-13.** Box versus Gaussian compared with an interactive demo (section 3.3 of the HTML):
+- **2026-11-13.** Box versus Gaussian compared with an interactive demo (section 5.1, "Box or Gaussian", of the HTML):
   Gaussian chosen. The echo thickness $h$ made a fixed, measured parameter rather than a
   hyperparameter.
 - **2026-11-13.** The literature report's approach "C" (weight sample points by how squarely the
@@ -309,3 +309,8 @@ Short record of how the design got here, so later readers see the reasoning, not
 - **Side note (not part of this term).** `computeOutwardFaceNormals` recomputes the face normals
   for every plane and every pose, although they never change in the CT frame. Computing them once
   during preparation and rotating them per pose would speed up the current intensity cost too.
+- **2026-11-13.** `boneLikelihoodMap.html` restructured as a method proposal: problem,
+  requirements, three observations (bright and thick, nothing below, dim where tilted), each
+  leading to one part of the method (per-image map `R`, `S`, reach; per-pose incidence weight),
+  then the final cost, a validation plan (ground-truth-free checks first) and the open points.
+  Incidence weighting is now part of the method from the start, not an add-on section.

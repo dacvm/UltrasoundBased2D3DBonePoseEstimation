@@ -28,16 +28,17 @@
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.65 Georgia, "Times New Roman", serif; }
 .page { max-width: 860px; margin: 0 auto; padding: 32px 16px 80px; }
-h1, h2, h3, nav, .meta, table, figcaption, .demo, .callout-title { font-family: "Segoe UI", system-ui, -apple-system, sans-serif; }
+h1, h2, h3, h4, nav, .meta, table, figcaption, .demo, .callout-title { font-family: "Segoe UI", system-ui, -apple-system, sans-serif; }
 h1 { font-size: 30px; font-weight: 600; margin: 0 0 6px; line-height: 1.25; }
 h2 { font-size: 22px; font-weight: 600; margin: 48px 0 12px; padding-top: 12px; border-top: 1px solid var(--rule); }
 h3 { font-size: 17px; font-weight: 600; margin: 28px 0 8px; }
+h4 { font-size: 15px; font-weight: 600; margin: 22px 0 6px; color: var(--muted); }
 .meta { color: var(--muted); font-size: 14px; margin-bottom: 24px; }
 a { color: var(--accent); }
 code { font-family: Consolas, "Courier New", monospace; font-size: 0.88em; background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
 pre { font-family: Consolas, "Courier New", monospace; font-size: 14px; background: var(--code-bg); padding: 12px 14px; border-radius: 6px; overflow-x: auto; line-height: 1.45; }
 nav.toc { background: var(--surface); border-radius: 8px; padding: 14px 20px; font-size: 14px; }
-nav.toc ol { margin: 6px 0 0; padding-left: 22px; columns: 2; column-gap: 32px; }
+nav.toc ul { list-style: none; margin: 6px 0 0; padding-left: 4px; columns: 2; column-gap: 32px; }
 nav.toc li { margin: 2px 0; break-inside: avoid; }
 table { border-collapse: collapse; width: 100%; font-size: 14px; margin: 12px 0 20px; }
 th, td { border-bottom: 1px solid var(--rule); padding: 7px 10px; text-align: left; vertical-align: top; }
@@ -64,7 +65,7 @@ figcaption { font-size: 14px; color: var(--muted); margin-top: 8px; }
 .demo input[type=range] { flex: 1; min-width: 140px; }
 svg text { font-family: "Segoe UI", system-ui, sans-serif; }
 @media (max-width: 640px) {
-  nav.toc ol { columns: 1; }
+  nav.toc ul { columns: 1; }
   .fig-pair, .demo-grid { grid-template-columns: 1fr; }
 }
 </style>
@@ -72,36 +73,63 @@ svg text { font-family: "Segoe UI", system-ui, sans-serif; }
 <body>
 <div class="page">
 
-<h1>Bone-likelihood map for the intensity cost</h1>
+<h1>Bone-likelihood intensity cost: method proposal</h1>
 <div class="meta">
-  Design document, draft · 2026-11-12, updated 2026-11-13 (reflection score, incidence weighting) · branch <code>feature/newIntensityCostFunction</code><br>
+  Method proposal, draft · 2026-11-12, updated 2026-11-13 (reflection score, incidence weighting, restructured as a proposal) · branch <code>feature/newIntensityCostFunction</code><br>
   Status: method described, not implemented and not yet tested on our data.<br>
   Implementation reference: <a href="notes.md"><code>notes.md</code></a> in this folder (keep both in sync).
 </div>
 
 <nav class="toc" aria-label="Contents">
   <strong>Contents</strong>
-  <ol>
-    <li><a href="#motivation">Motivation</a></li>
-    <li><a href="#notation">Notation</a></li>
-    <li><a href="#reflection">Reflection score R</a></li>
-    <li><a href="#below">Nothing-below score S</a></li>
-    <li><a href="#combine">Bone-likelihood B = R · S</a></li>
-    <li><a href="#behaviour">How S behaves</a></li>
-    <li><a href="#edge">Bottom edge of the image</a></li>
-    <li><a href="#settings">Settings</a></li>
-    <li><a href="#framework">Fit with the optimization framework</a></li>
-    <li><a href="#incidence">Incidence weighting</a></li>
-    <li><a href="#limits">Limitations and open points</a></li>
-    <li><a href="#refs">References</a></li>
-    <li><a href="#appendix">Appendix: evidence from tibia images</a></li>
-  </ol>
+  <ul>
+    <li><a href="#summary">Summary</a></li>
+    <li><a href="#problem">1. Problem</a></li>
+    <li><a href="#requirements">2. Requirements and scope</a></li>
+    <li><a href="#observations">3. What bone looks like in our images</a></li>
+    <li><a href="#overview">4. Method overview</a></li>
+    <li><a href="#map">5. Per-image map: what value is read</a></li>
+    <li><a href="#incidence">6. Per-pose weighting: how much each point counts</a></li>
+    <li><a href="#cost">7. Final cost and integration</a></li>
+    <li><a href="#validation">8. Validation plan</a></li>
+    <li><a href="#limits">9. Limitations and open points</a></li>
+    <li><a href="#refs">10. References</a></li>
+    <li><a href="#appendixA">Appendix A. Evidence from tibia images</a></li>
+    <li><a href="#appendixB">Appendix B. Design history</a></li>
+  </ul>
 </nav>
 
 <!-- ============================================================ -->
-<h2 id="motivation">1. Motivation</h2>
+<h2 id="summary">Summary</h2>
+<div class="callout">
+  <p style="margin-top:0">
+  The intensity term of the combined cost <code>intensityPIMLOP</code> hardly changes during a run (median 0.0017, against 0.35 for
+  the P-IMLOP term), so the two terms only balance at a weight near 0.99. The cause is the blur that gives the term its reach: it
+  also flattens the thin bone echo (section 1).
+  </p>
+  <p>
+  This document proposes a replacement that rests on three things bone shows in our images (section 3):
+  </p>
+  <ol>
+    <li>a bright, thick echo: the <strong>reflection score \(R\)</strong>;</li>
+    <li>nothing below the echo: the <strong>nothing-below score \(S\)</strong>;</li>
+    <li>an echo that dims where the surface tilts away from the beam: the <strong>incidence weight \(w = c^{\,n}\)</strong>.</li>
+  </ol>
+  <p>
+  \(R\) and \(S\) are filters. They are combined into a bone-likelihood map \(B = R \cdot S\), computed once per image, which decides
+  <em>what value</em> is read at a point. The incidence weight comes from the probe-facing geometry that the cost already computes and
+  decides <em>how much</em> each point counts; it changes with the pose. The cost is a weighted mean of the map along the predicted bone
+  lines (section 7.1). No segmentation, and nothing derived from it, is used.
+  </p>
+  <p style="margin-bottom:0">
+  Status: designed, not implemented, not tested on our data. Section 8 lists the checks to run first, section 9 the open choices.
+  </p>
+</div>
 
-<h3>1.1 The current intensity term barely moves</h3>
+<!-- ============================================================ -->
+<h2 id="problem">1. Problem</h2>
+
+<h3>1.1 The current intensity term</h3>
 <p>
 The combined cost model <code>intensityPIMLOP</code> blends the intensity term \(I\) (cost model <code>intensityLine</code>)
 with the mean P-IMLOP match error \(P\):
@@ -109,6 +137,18 @@ with the mean P-IMLOP match error \(P\):
 \[
   C = w\, I + (1 - w)\, P .
 \]
+<p>
+The intensity term
+(<a href="../../../functions/bonePoseOptimization/costModels/cost_intensityLine.m"><code>cost_intensityLine.m</code></a>)
+places sample points \(\mathbf{s}_{im}\) every 0.1 mm along the probe-facing intersection lines of plane \(i\) and computes
+</p>
+\[
+  I = 1 - \frac{1}{N_{\text{planes}}} \sum_{i=1}^{N_{\text{planes}}} \frac{1}{M_i} \sum_{m=1}^{M_i} \frac{\tilde I_i(\mathbf{s}_{im})}{255},
+\]
+<p>
+where \(\tilde I_i\) is the image blurred with a Gaussian of width \(\sigma\) and \(M_i\) the number of sample points (a plane without
+visible bone counts as 0 evidence).
+</p>
 <p>
 In the sweep <code>intensityPIMLOP_20261106_144439_500</code> (420 runs) the two terms have similar sizes at the start pose,
 but during a run they change by very different amounts:
@@ -125,10 +165,9 @@ The P-IMLOP term changes about 140 times more. Even at \(w = 0.99\) it still pro
 makes it look as if the P-IMLOP term does not matter, while in fact the intensity term is the one that barely acts.
 </p>
 
+<h3>1.2 Why it barely moves</h3>
 <p>
-The reason is in how the intensity term reads the image. It blurs each image with a Gaussian of width \(\sigma\) and averages
-the blurred brightness under the predicted bone lines. Our bone echo is a very thin line (well under 1 mm) on an almost empty
-background, so blurring lowers its peak a lot:
+Our bone echo is a very thin line (well under 1 mm) on an almost empty background, so the blur lowers its peak a lot:
 </p>
 <div class="table-wrap"><table>
   <tr><th>\(\sigma\) (mm)</th><th>Brightest blurred value (÷ 255)</th><th>Background (÷ 255)</th><th>Mean evidence at start pose</th></tr>
@@ -142,7 +181,27 @@ The start pose already sits between the background level and the blurred peak, s
 improve. Values measured on the 15 tibia images of the sweep (dataset <code>validSnapshots_20260910_172849.mat</code>).
 </p>
 
-<h3>1.2 Requirement: no segmentation</h3>
+<h3>1.3 Root cause: one \(\sigma\) doing two jobs</h3>
+<p>
+The blur width \(\sigma\) is asked to do two jobs that pull in opposite directions:
+</p>
+<ul>
+  <li><strong>Reach.</strong> A predicted line a few millimetres off the bone should still read some echo, so that the optimizer knows
+    where to go. This needs a large \(\sigma\).</li>
+  <li><strong>Telling bone from other bright lines.</strong> A thick bone echo should score higher than a thin line. This needs
+    \(\sigma\) close to the echo thickness.</li>
+</ul>
+<p>
+A large \(\sigma\) dilutes the bone too, which is why the term changes so little. On top of that, the plain mean along the predicted line
+treats every point the same, although the bone itself is unevenly bright (section 3.3), so even the correct pose does not score
+clearly better. This proposal separates the jobs: a per-image map tells bone from other lines (sections 5.1 – 5.3), a separate step gives
+reach (section 5.4), and a per-point weight handles the uneven brightness (section 6).
+</p>
+
+<!-- ============================================================ -->
+<h2 id="requirements">2. Requirements and scope</h2>
+
+<h3>2.1 No segmentation</h3>
 <p>
 The P-IMLOP term already uses the segmented bone surface. The new intensity term must <strong>not</strong> use the segmentation or any
 quantity computed by it, so that the two terms rest on independent evidence. The line we draw:
@@ -158,7 +217,31 @@ The choice of where the bone is stays with the pose optimizer: it searches for t
 bone-like pixels.
 </p>
 
-<h3>1.3 What the phantom images look like</h3>
+<h3>2.2 Fit with the optimization framework</h3>
+<ul>
+  <li>Same optimizer state (the 6D perturbation around the start pose), same image planes, and the same sample points along the
+    probe-facing intersection lines as <code>cost_intensityLine</code>.</li>
+  <li>Work that does not depend on the pose is done once, in <code>functions/bonePoseOptimization/inputPreparation/</code>. The cost
+    function only reads prepared data; it loads no files and plots nothing.</li>
+  <li>The cost lies in [0, 1], with 0 best, like the other cost models, so it can be used on its own and inside a combined model with
+    P-IMLOP (section 7.3).</li>
+</ul>
+
+<h3>2.3 Assumptions</h3>
+<ul>
+  <li><strong>Linear probe.</strong> The sound is assumed to travel straight down the image columns, which fits our rectangular images.
+    The nothing-below score, the incidence weight and the existing probe-facing filter all rely on it. A convex probe would need a beam
+    direction per point, from a virtual apex \(\mathbf{a}\) behind the probe face,
+    \(\mathbf{b}(\mathbf{p}) = (\mathbf{p} - \mathbf{a})/\lVert \mathbf{p} - \mathbf{a} \rVert\), slanted windows for \(S\), and a new
+    pixel-to-mm mapping across the code. For now only linear probes are assumed.</li>
+  <li><strong>Phantom data.</strong> The images in this document come from a knee phantom (sections 3 and Appendix A).</li>
+</ul>
+
+<!-- ============================================================ -->
+<h2 id="observations">3. What bone looks like in our images</h2>
+<p>
+Three observations about bone in our images drive the method. Each one leads to one part of it.
+</p>
 <div class="fig-pair">
   <figure>
     <img src="figures/phantomFemurFrontal.png" alt="Phantom femur above the condyles, frontal view. Several thin bright horizontal lines in the upper third, speckle in between, and a thick curved bright band near the bottom.">
@@ -166,20 +249,137 @@ bone-like pixels.
       bright as the bone; the bone is the thick band near the bottom, with fainter echoes trailing just below it.</figcaption>
   </figure>
   <figure>
-    <img src="figures/phantomTibiaMedialCondyle.png" alt="Phantom tibia medial condyle. A slanted bright line with two saturated spots and dim stretches, speckle above it and almost nothing below.">
+    <img src="figures/phantomTibiaMedialCondyle.png" alt="Phantom tibia medial condyle. A slanted bright line with two saturated spots and dim stretches, speckle above it and almost nothing below it.">
     <figcaption>Figure 2. Medial tibial condyle (knee phantom). The bone line is uneven: two saturated spots and dim stretches.
       Speckle above it, almost nothing below it.</figcaption>
   </figure>
 </div>
+<div class="table-wrap"><table>
+  <tr><th>Observation</th><th>Seen in</th><th>Part of the method</th></tr>
+  <tr><td>3.1 Bone is bright and thick, but other lines can be just as bright</td><td>Figure 1, Figure 5</td><td>Reflection score \(R\) (section 5.1)</td></tr>
+  <tr><td>3.2 Below the bone there is (almost) nothing</td><td>Figures 1, 2, Appendix A</td><td>Nothing-below score \(S\) (section 5.2)</td></tr>
+  <tr><td>3.3 The bone echo dims where the surface is tilted</td><td>Figure 2</td><td>Incidence weight \(w\) (section 6)</td></tr>
+</table></div>
+
+<h3>3.1 Bright and thick, but bright is not enough</h3>
 <p>
-Brightness alone cannot tell bone from the layer lines in Figure 1. What does differ is what lies <em>below</em> each line: the layer
-lines have tissue (speckle) under them, the bone has (almost) nothing. This matches the literature, where the region under bone is
-the main clue for telling bone from soft-tissue interfaces [2][3][4], and where reading a bone-enhanced image under the CT-predicted
-visible surface is an established registration approach [9][10][11].
+Bone reflects most of the sound, so its echo is among the brightest structures in the image (about 235 in the tibia images, where the
+display clips). Brightness alone, however, also picks up the thin layer lines in the upper third of Figure 1, which are as bright as the
+bone. What differs there is the thickness along the beam: the bone is a thick band, the layer lines are thin. The reflection score \(R\)
+rewards brightness that fills a depth range about as thick as the bone echo.
+</p>
+<div class="callout warn">
+  <div class="callout-title">Not true in every image</div>
+  In the tibia depth profiles (Figure 5) the bone echo is under 1 mm thick, about as thin as a layer line. There \(R\) cannot tell them
+  apart, and the other two clues have to do the work.
+</div>
+
+<h3>3.2 Nothing below the bone</h3>
+<p>
+Bone stops the sound, so the region right below it is (almost) empty. The layer lines in Figure 1 have tissue speckle under them, and in
+Figure 2 there is speckle above the bone line but almost nothing below it. In the tibia images the level 3 – 10 mm below the echo is at
+the background value (about 16) in most images (Appendix A). The nothing-below score \(S\) rewards pixels whose column is empty just below.
+</p>
+<div class="callout warn">
+  <div class="callout-title">Two things that weaken this clue</div>
+  The bone band in Figure 1 is followed by fainter trailing echoes just below it, so the look-down window has to skip a gap first
+  (section 5.2). The three lateral tibia images show texture both above and below the echo, so there the clue is weak.
+</div>
+
+<h3>3.3 The echo dims where the bone is tilted</h3>
+<p>
+Bone reflects sound like a mirror. Where the beam hits the surface squarely, the echo comes straight back to the probe and the bone looks
+bright. Where the surface is tilted, most of the echo bounces away sideways and misses the probe, so the bone looks dim or disappears.
+That is one reason for the dim stretches between saturated spots in Figure 2.
+</p>
+<p>
+\(R\) and \(S\) cannot fix this: they describe the image, and a dim stretch is dim in the image. With a plain mean along the predicted
+line, the tilted parts drag the score down even at the correct pose, so the dip of the cost at the correct pose is shallow. The pose,
+however, tells us where the surface is tilted. The incidence weight uses that to let squarely hit points count more than tilted ones.
+</p>
+
+<h3>3.4 Support in the literature</h3>
+<p>
+The region under bone is the main clue for telling bone from soft-tissue interfaces in bone-segmentation work [2][3][4], and reading a
+bone-enhanced image under the CT-predicted visible surface is an established registration approach [9][10][11][12]. This proposal uses the
+same two ideas, but only as filters, without the step that picks a line.
+</p>
+<p>
+Two other clues were considered and left out: the length/continuity of a bright line, and its direction. The predicted bone line is
+already long and smooth, so reading along it rewards both without any extra term.
 </p>
 
 <!-- ============================================================ -->
-<h2 id="notation">2. Notation</h2>
+<h2 id="overview">4. Method overview</h2>
+
+<h3>4.1 Two parts: what is read, and how much it counts</h3>
+<figure>
+<svg viewBox="0 0 760 345" width="100%" role="img" aria-labelledby="ovT ovD" style="background:var(--surface);border-radius:6px">
+<title id="ovT">Overview of the bone-likelihood intensity cost</title>
+<desc id="ovD">Top lane, once per image: the image feeds the reflection score R and the nothing-below score S, which are multiplied into B and then given reach as B-hat. Bottom lane, for every candidate pose: the pose gives probe-facing lines, then sample points with their incidence c, then the weight w equals c to the power n. Both lanes meet in the cost, a weighted mean of B-hat along the lines.</desc>
+<defs>
+  <marker id="ovArrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+    <path d="M0,0 L10,5 L0,10 z" style="fill:var(--muted)"/>
+  </marker>
+</defs>
+<g font-size="13" style="fill:var(--text)">
+  <text x="16" y="26" font-size="14" font-weight="600">Once per image, in input preparation: what value is read</text>
+  <text x="16" y="232" font-size="14" font-weight="600">For every candidate pose, in the cost function: how much each point counts</text>
+</g>
+<g style="fill:var(--bg);stroke:var(--rule)" stroke-width="1.2">
+  <rect x="16" y="76" width="110" height="50" rx="6"/>
+  <rect x="160" y="42" width="150" height="48" rx="6"/>
+  <rect x="160" y="110" width="150" height="48" rx="6"/>
+  <rect x="345" y="76" width="105" height="50" rx="6"/>
+  <rect x="485" y="76" width="105" height="50" rx="6"/>
+  <rect x="16" y="262" width="110" height="50" rx="6"/>
+  <rect x="160" y="262" width="150" height="50" rx="6"/>
+  <rect x="345" y="262" width="105" height="50" rx="6"/>
+  <rect x="485" y="262" width="105" height="50" rx="6"/>
+</g>
+<rect x="620" y="155" width="126" height="78" rx="6" style="fill:var(--note-bg);stroke:var(--note-border)" stroke-width="1.5"/>
+<g font-size="13" text-anchor="middle" style="fill:var(--text)">
+  <text x="71" y="105">Image I</text>
+  <text x="235" y="62">Reflection R</text><text x="235" y="80" font-size="12" style="fill:var(--muted)">bright and thick?</text>
+  <text x="235" y="130">Nothing-below S</text><text x="235" y="148" font-size="12" style="fill:var(--muted)">empty below?</text>
+  <text x="397" y="105">B = R · S</text>
+  <text x="537" y="97">Reach</text><text x="537" y="115" font-size="12" style="fill:var(--muted)">gives B̂</text>
+  <text x="71" y="291">Candidate pose</text>
+  <text x="235" y="282">Probe-facing lines</text><text x="235" y="300" font-size="12" style="fill:var(--muted)">mesh cut by image plane</text>
+  <text x="397" y="282">Sample points</text><text x="397" y="300" font-size="12" style="fill:var(--muted)">with incidence c</text>
+  <text x="537" y="282">Weight</text><text x="537" y="300" font-size="12" style="fill:var(--muted)">w = cⁿ</text>
+  <text x="683" y="179" font-weight="600">Cost C_B</text>
+  <text x="683" y="199" font-size="12">weighted mean</text>
+  <text x="683" y="215" font-size="12">of B̂ along lines</text>
+</g>
+<g font-size="11" text-anchor="middle" style="fill:var(--muted)">
+  <text x="235" y="172">§5.1, §5.2</text><text x="397" y="140">§5.3</text><text x="537" y="140">§5.4</text>
+  <text x="235" y="328">existing geometry step</text><text x="397" y="328">§6.1</text><text x="537" y="328">§6.2</text>
+  <text x="683" y="249">§7.1</text>
+</g>
+<g style="stroke:var(--muted)" stroke-width="1.5" fill="none" marker-end="url(#ovArrow)">
+  <path d="M126,92 L158,70"/><path d="M126,110 L158,130"/>
+  <path d="M310,70 L343,92"/><path d="M310,130 L343,110"/>
+  <path d="M450,101 L483,101"/>
+  <path d="M126,287 L158,287"/><path d="M310,287 L343,287"/><path d="M450,287 L483,287"/>
+  <path d="M590,101 L618,172"/><path d="M590,287 L618,218"/>
+</g>
+</svg>
+<figcaption>Figure 3. Overview. The top lane depends only on the image and is computed once; it decides what value is read at a point.
+  The bottom lane depends on the pose and runs at every cost evaluation; it decides where the image is read and how much each point counts.
+  Both meet in the cost.</figcaption>
+</figure>
+<div class="table-wrap"><table>
+  <tr><th>Part</th><th>Depends on</th><th>Computed</th><th>Decides</th></tr>
+  <tr><td>Map \(\hat B\) (from \(R\), \(S\) and reach)</td><td>the image only</td><td>once per image, during input preparation</td><td><em>what value</em> is read at a point</td></tr>
+  <tr><td>Weight \(w = c^{\,n}\)</td><td>the image plane and the candidate pose</td><td>at every cost evaluation, from geometry the cost already computes</td><td><em>how much</em> that point counts</td></tr>
+</table></div>
+<p>
+The two parts do not overlap: changing the map never changes the weights, and the other way round. Each can be switched off for
+comparison: \(n = 0\) gives every point weight 1, and \(S = 1\) everywhere reduces \(B\) to \(R\).
+</p>
+
+<h3>4.2 Notation</h3>
 <div class="table-wrap"><table>
   <tr><th>Symbol</th><th>Meaning</th><th>Unit</th></tr>
   <tr><td>\(I(u, v)\)</td><td>Brightness of the B-mode image at column \(u\) and row \(v\) (row index grows with depth)</td><td>grey level 0 – 255</td></tr>
@@ -194,9 +394,14 @@ visible surface is an established registration approach [9][10][11].
   <tr><td>\(L\)</td><td>Window length: depth range looked at below the gap</td><td>mm</td></tr>
   <tr><td>\(L_{\min}\)</td><td>Shortest usable window near the bottom edge</td><td>mm</td></tr>
   <tr><td>\(R, S, B\)</td><td>Reflection score, nothing-below score, bone-likelihood; one value per pixel</td><td>0 – 1</td></tr>
+  <tr><td>\(\hat B\)</td><td>\(B\) after the reach step (section 5.4)</td><td>0 – 1</td></tr>
+  <tr><td>\(\mathbf{s}_{im}\), \(M_i\)</td><td>Sample point \(m\) on the predicted bone lines of plane \(i\); number of sample points of plane \(i\)</td><td>mm, –</td></tr>
+  <tr><td>\(\mathbf{n}_f\)</td><td>Outward unit normal of mesh face \(f\) at the candidate pose</td><td>–</td></tr>
+  <tr><td>\(\mathbf{e}_y\)</td><td>Unit image depth axis in 3D (<code>plane.ey</code>); the beam direction of a linear probe</td><td>–</td></tr>
+  <tr><td>\(c\)</td><td>Incidence, \(c = \mathbf{n}_f \cdot (-\mathbf{e}_y)\): 1 when the beam hits the surface squarely</td><td>–</td></tr>
+  <tr><td>\(n\), \(w\)</td><td>Incidence weight exponent; weight of a sample point, \(w = c^{\,n}\)</td><td>–</td></tr>
 </table></div>
 <p>
-The sound is assumed to travel straight down the image columns, which fits our rectangular images from a linear probe.
 In the code, images are stored as <code>[column, row]</code>, so \(I(u, v)\) is <code>image(u, v)</code>.
 We use the clipping function
 </p>
@@ -205,9 +410,15 @@ We use the clipping function
 \]
 
 <!-- ============================================================ -->
-<h2 id="reflection">3. Reflection score \(R\): is it bright here?</h2>
+<h2 id="map">5. Per-image map: what value is read</h2>
+<p>
+Everything in this section is a filter on one image: the same local formula for every pixel, no decisions. The map depends only on the
+image, not on the pose, so it is computed once during input preparation.
+</p>
 
-<h3>3.1 Definition</h3>
+<h3 id="reflection">5.1 Reflection score \(R\): is it bright and thick here?</h3>
+
+<h4>Definition</h4>
 <p>
 First average each pixel with its neighbours above and below it, along depth only (the same column, nothing sideways), with
 Gaussian weights:
@@ -219,7 +430,7 @@ Gaussian weights:
 \]
 <p>
 The sums run over the rows within \(3\sigma_d\) that lie inside the image, so the top and bottom edges are not darkened. The width
-comes from the measured thickness \(h\) of the bone echo (section 3.4):
+comes from the measured thickness \(h\) of the bone echo (see "Choosing the echo thickness" below):
 </p>
 \[
   \sigma_d = \frac{h}{\sqrt{2\pi}} \approx \frac{h}{2.5}.
@@ -236,7 +447,7 @@ Then map the result to the range 0 to 1, from background to echo peak:
     along the image width set to 0.</li>
 </ul>
 
-<h3>3.2 Why average along depth</h3>
+<h4>Why average along depth</h4>
 <p>
 "Thickness" in an ultrasound image is measured along the beam, which runs down the columns. Averaging along depth dilutes a
 bright structure by how much of the Gaussian it fills: a thin line is mixed with its dark neighbours and scores low, a thick band
@@ -254,16 +465,16 @@ The best \(h\) is the thickness of the bone echo itself:
 <ul>
   <li>Smaller \(h\): thin layer lines score higher, and when \(h\) is no thicker than a layer line both score about the same.</li>
   <li>Larger \(h\): the bone is diluted as well. Both scores shrink, and the cost changes less during a run (the problem of
-    section 1.1).</li>
+    section 1.2).</li>
 </ul>
 <div class="callout warn">
   <div class="callout-title">Only helps where the bone echo is thicker than the false lines</div>
-  In the tibia depth profiles (Figure 4) the bone echo is under 1 mm thick, about as thin as a layer line, so \(R\) barely tells
+  In the tibia depth profiles (Figure 5) the bone echo is under 1 mm thick, about as thin as a layer line, so \(R\) barely tells
   them apart there. In the phantom femur image (Figure 1) the bone band looks clearly thicker than the layer lines, so there it
   should help. A sloped surface also looks thicker along the column than it really is.
 </div>
 
-<h3>3.3 Box or Gaussian</h3>
+<h4>Box or Gaussian</h4>
 <p>
 A box average of height \(h\) and a Gaussian with \(\sigma_d = h/\sqrt{2\pi}\) tell thick from thin about equally well. They
 differ in how the cost behaves as a predicted bone line moves across a band:
@@ -282,7 +493,7 @@ more consistent results across seeds.
 <p>
 Try it below. The made-up image has a thin layer line, speckle, and a thicker bone band 12 mm below it, both sloped. The coral
 line is the predicted bone line from the mesh, shifted by \(\Delta\): \(\Delta = 0\) lies on the bone, \(\Delta = -12\) mm on
-the layer line. The cost is \(1 - \text{mean } R\) along that line, as in section 9 without the nothing-below score.
+the layer line. The cost is \(1 - \text{mean } R\) along that line: the cost of section 7.1 without \(S\), reach and weights.
 </p>
 <div class="demo" id="r3demo">
   <div class="controls" style="margin-top:0">
@@ -328,20 +539,21 @@ Things to try: tick the box and compare the zoomed dips. At the default \(T = h\
 at its sides, the Gaussian a smooth bowl; raise \(T\) to 4 mm and the box dip gets a flat bottom, where every position inside the
 band costs the same. Set \(T = t = 0.4\) mm (like the tibia images) and see both dips become equally deep; raise \(\sigma_d\) well above \(T/2.5\) and see the bone dip get shallower too.
 Each dip is only about \(T\) plus a few \(\sigma_d\) wide, so a predicted line further away gets no pull: that is the reach
-question of section 9.
+question of section 5.4.
 </p>
 
-<h3>3.4 Choosing the echo thickness \(h\)</h3>
+<h4>Choosing the echo thickness \(h\)</h4>
 <p>
 \(h\) describes something physical: how thick the bone echo is along the beam. That depends mainly on the probe (how long its
 sound pulse is) and the scanner setting, plus the roughness and tilt of the surface. It is therefore a <strong>fixed
 parameter</strong> (<code>boneEchoThicknessMm</code>, under <code>fixedParameters</code>), set by us from our own images and
 measured again when the probe or scanner setting changes. It is given in mm, so it does not depend on the pixel size.
 </p>
-<p>Proposed way to measure it, once per probe setting:</p>
+<p>Proposed way to measure it, once per probe setting (open point O5):</p>
 <ol>
   <li>Pick several images where the bone is clearly visible.</li>
-  <li>Take brightness profiles along depth across the bone echo, as in Figure 4.</li>
+  <li>Take brightness profiles along depth across the bone echo, as in Figure 5, only where the bone surface runs roughly across the
+    image (square to the beam, \(c \approx 1\) in the terms of section 6). A sloped surface looks thicker along the column than it is.</li>
   <li>Measure the depth range where the brightness is above halfway between the background and the echo peak.</li>
   <li>Use the median over the images.</li>
 </ol>
@@ -352,32 +564,24 @@ scatter in the last sweep (about 0.7 mm) is likely larger than its effect; and i
 A small check sweep (0.5×, 1× and 2× the measured value) can follow once new ground truth exists.
 </p>
 
-<h3>3.5 Relation to the current intensity term</h3>
+<h4>Relation to the current intensity term</h4>
 <p>
-On its own, \(R\) is the smoothing of the current intensity term (<code>cost_intensityLine</code>) with different settings, not a
-new idea. The new parts of this document are the nothing-below score \(S\) (section 4) and the reach step (section 9).
+On its own, \(R\) is the smoothing of the current intensity term with different settings, not a new idea: it keeps only the second of
+the two jobs of section 1.3. The new parts of this proposal are the nothing-below score \(S\), the separate reach step and the incidence
+weighting.
 </p>
 <div class="table-wrap"><table>
   <tr><th>Step</th><th>Smoothing</th><th>Normalization</th><th>What it adds</th></tr>
   <tr><td>Current <code>cost_intensityLine</code></td><td>Gaussian in both directions, \(\sigma\) = 1.5 – 5 mm, sized for reach</td><td>÷ 255</td><td>–</td></tr>
   <tr><td>\(R\)</td><td>Gaussian along depth only, \(\sigma_d\) from \(h\)</td><td>\((\bar I - b)/(p - b)\), clipped</td><td>Thick echoes score higher than thin lines; full 0 – 1 range</td></tr>
   <tr><td>\(B = R \cdot S\)</td><td>as \(R\)</td><td>as \(R\)</td><td>Nothing-below clue</td></tr>
+  <tr><td>\(\hat B\)</td><td>reach step (section 5.4)</td><td>back to 0 – 1</td><td>Pull toward the bone from a few mm away</td></tr>
+  <tr><td>Weighted mean (section 6)</td><td>–</td><td>–</td><td>Tilted, dim parts of the bone count less</td></tr>
 </table></div>
-<p>
-The current term uses one \(\sigma\) for two jobs that pull in opposite directions. Reach needs a large \(\sigma\), so that a line
-a few mm away still reads some echo. Telling thick from thin needs \(\sigma\) close to the echo thickness. A large \(\sigma\)
-dilutes the bone too, which is why the current term changes so little during a run (section 1.1). \(R\) keeps only the second job;
-reach is handled as a separate step.
-</p>
-<div class="callout">
-  <div class="callout-title">Design history</div>
-  The literature report (2026-11-11) first listed "reflection at bone thickness" as a separate approach next to the
-  bone-likelihood map. It turned out to be the \(R\) factor of \(B = R \cdot S\), so it is documented here and not in a folder of
-  its own. Box versus Gaussian and the fixed \(h\) were decided on 2026-11-13 (see <code>notes.md</code>, Design history).
-</div>
 
-<!-- ============================================================ -->
-<h2 id="below">4. Nothing-below score \(S\): is it empty under me?</h2>
+<h3 id="below">5.2 Nothing-below score \(S\): is it empty under me?</h3>
+
+<h4>Definition</h4>
 <p>
 For each pixel, look down its own column. Skip a gap \(g\) (to step over the pixel's own echo), then take a window of length \(L\).
 The rows in the window are
@@ -398,7 +602,7 @@ Compare this average with two reference levels: the background \(b\) ("truly emp
   S(u, v) =
   \begin{cases}
     \operatorname{clip}\!\left( 1 - \dfrac{\mu(u, v) - b}{t - b} \right) & \text{if } |\mathcal{W}(u, v)|\,\Delta_v \ge L_{\min}, \\[10pt]
-    1 & \text{otherwise (window cut off by the bottom edge, see section 7).}
+    1 & \text{otherwise (window cut off by the bottom edge, see below).}
   \end{cases}
 \]
 <ul>
@@ -406,35 +610,7 @@ Compare this average with two reference levels: the background \(b\) ("truly emp
   <li>Window as bright as tissue or brighter: \(S = 0\), "there is tissue under me, I am probably not bone".</li>
 </ul>
 
-<!-- ============================================================ -->
-<h2 id="combine">5. Bone-likelihood \(B = R \cdot S\)</h2>
-<p>
-Multiply the two scores pixel by pixel:
-</p>
-\[
-  B(u, v) = R(u, v)\; S(u, v).
-\]
-<p>
-\(R\), \(S\) and \(B\) all have the same size as the image, so this is an element-wise product (in MATLAB <code>B = R .* S</code>,
-not a matrix product). A pixel scores high only when both clues agree:
-</p>
-<div class="table-wrap"><table>
-  <tr><th>Pixel</th><th>\(R\)</th><th>\(S\)</th><th>\(B\)</th></tr>
-  <tr><td>Bone band</td><td>high (bright, thick)</td><td>high (empty below)</td><td>high</td></tr>
-  <tr><td>Thin layer line</td><td>medium</td><td>lower (speckle below)</td><td>low</td></tr>
-  <tr><td>Speckle in tissue</td><td>low</td><td>medium</td><td>low</td></tr>
-  <tr><td>Background below the bone</td><td>0</td><td>high</td><td>0</td></tr>
-</table></div>
-<div class="callout">
-  <div class="callout-title">Name</div>
-  \(B\) is called a bone-likelihood because it is high where bone is likely. It is a score between 0 and 1, not a calibrated
-  probability.
-</div>
-
-<!-- ============================================================ -->
-<h2 id="behaviour">6. How \(S\) behaves</h2>
-
-<h3>6.1 The dark stripe above bright structures</h3>
+<h4>The dark stripe above bright structures</h4>
 <p>
 \(S\) at a pixel describes its window, not the pixel itself. A bright structure at depth \(d\) lowers \(S\) for every pixel at depth
 \(z\) whose window reaches it:
@@ -444,7 +620,7 @@ not a matrix product). A pixel scores high only when both clues agree:
 \]
 <p>
 So in the \(S\) map every bright structure casts a dark stripe <em>upward</em>, of height \(L\), ending a distance \(g\) above the
-structure. Increasing the gap by some amount moves the stripe up by the same amount (Figure 3).
+structure. Increasing the gap by some amount moves the stripe up by the same amount (Figure 4).
 The stripe itself is harmless: it lies in tissue, where \(R\) is low anyway, so \(B\) stays low there. What matters is whether
 the bone pixel's own window is empty.
 </p>
@@ -481,12 +657,12 @@ the bone pixel's own window is empty.
 <line x1="360" y1="480" x2="384" y2="480" stroke="#1D9E75" stroke-width="4"/><text x="392" y="484">window empty: S high</text>
 </g>
 </svg>
-<figcaption>Figure 3. One image column with a bone echo at 32 mm. Orange: four test pixels. Dashed: the skipped gap. Coloured bar:
+<figcaption>Figure 4. One image column with a bone echo at 32 mm. Orange: four test pixels. Dashed: the skipped gap. Coloured bar:
   the window (red when it contains the bone). The pixels whose window reaches the bone form the dark stripe in the S map. With a
   larger gap (right) the windows sit lower, so the stripe moves up. The bone pixel's own window is empty in both cases.</figcaption>
 </figure>
 
-<h3>6.2 Trailing echoes under the bone</h3>
+<h4>Trailing echoes under the bone</h4>
 <p>
 In Figure 1 the bone band is followed by fainter echoes just below it. If the gap is small, the bone pixel's window contains them,
 \(\mu\) rises, \(S\) drops, and the bone is treated like a layer with tissue under it. The fix is a gap larger than the bone band
@@ -501,7 +677,26 @@ plus its trailing echoes. If \(\tau\) is the distance from the bone pixel to the
   bone. The gap should be just larger than \(\tau\), measured on our own femur and tibia images.
 </div>
 
-<h3>6.3 Try it</h3>
+<h4>Bottom edge of the image</h4>
+<p>
+The window only looks down the same column, so the top, left and right edges need no special care. Near the bottom, part or all
+of the window falls outside the image, where nothing is known. The rule in the definition above:
+</p>
+<ul>
+  <li>Use the part of the window that lies inside the image.</li>
+  <li>If that part is shorter than \(L_{\min}\) (for example 3 mm), set \(S = 1\): \(R\) alone decides there.</li>
+</ul>
+<div class="table-wrap"><table>
+  <tr><th>Alternative</th><th>Effect</th></tr>
+  <tr><td>Treat any cut-off window as empty (\(L_{\min} = 0\))</td><td>Simple, but \(S\) may rest on one or two noisy pixels.</td></tr>
+  <tr><td>Minimum length \(L_{\min}\), otherwise \(S = 1\) (proposed)</td><td>The edge neither helps nor hurts a pixel.</td></tr>
+  <tr><td>\(S = 0\) when the window does not fit</td><td>Bright structures near the bottom can never count as bone. Too strict for deep bones.</td></tr>
+</table></div>
+<p>
+In our tibia images the bone lies at 12 – 21 mm in a 48 mm deep image, so the bottom edge rarely matters.
+</p>
+
+<h4>Try it</h4>
 <p>
 A made-up image with a thin layer line at 8 mm, tissue speckle, and a bone band at 32 mm. Click a pixel in any of the four
 pictures to see its depth profile and scores. The three lower pictures are the \(R\), \(S\) and \(B\) maps: one cell per pixel,
@@ -540,115 +735,67 @@ Things to try: compare the layer line with the bone; tick "Trailing echoes" and 
 \(t = 45\), \(h = 2.4\) mm (\(\sigma_d \approx 0.96\) mm), \(L = 6.4\) mm.
 </p>
 
-<!-- ============================================================ -->
-<h2 id="edge">7. Bottom edge of the image</h2>
+<h3 id="combine">5.3 Bone-likelihood \(B = R \cdot S\)</h3>
 <p>
-The window only looks down the same column, so the top, left and right edges need no special care. Near the bottom, part or all
-of the window falls outside the image, where nothing is known. The rule in section 4:
+Multiply the two scores pixel by pixel:
+</p>
+\[
+  B(u, v) = R(u, v)\; S(u, v).
+\]
+<p>
+\(R\), \(S\) and \(B\) all have the same size as the image, so this is an element-wise product (in MATLAB <code>B = R .* S</code>,
+not a matrix product). A pixel scores high only when both clues agree:
+</p>
+<div class="table-wrap"><table>
+  <tr><th>Pixel</th><th>\(R\)</th><th>\(S\)</th><th>\(B\)</th></tr>
+  <tr><td>Bone band</td><td>high (bright, thick)</td><td>high (empty below)</td><td>high</td></tr>
+  <tr><td>Thin layer line</td><td>medium</td><td>lower (speckle below)</td><td>low</td></tr>
+  <tr><td>Speckle in tissue</td><td>low</td><td>medium</td><td>low</td></tr>
+  <tr><td>Background below the bone</td><td>0</td><td>high</td><td>0</td></tr>
+</table></div>
+<div class="callout">
+  <div class="callout-title">Name</div>
+  \(B\) is called a bone-likelihood because it is high where bone is likely. It is a score between 0 and 1, not a calibrated
+  probability.
+</div>
+
+<h3 id="reach">5.4 Reach: a pull from a few millimetres away</h3>
+<p>
+\(B\) is sharp: it is high only on the bone band. Read directly, the cost gives the optimizer no hint when a predicted line is a few
+millimetres off the bone. Today this is solved by blurring, which is exactly what lowers the peak (section 1.2). The reach step turns
+\(B\) into \(\hat B\), which still pulls from a distance but keeps the full 0 – 1 range. Two options, still to be compared:
 </p>
 <ul>
-  <li>Use the part of the window that lies inside the image.</li>
-  <li>If that part is shorter than \(L_{\min}\) (for example 3 mm), set \(S = 1\): \(R\) alone decides there.</li>
+  <li><strong>Blur and rescale.</strong> Blur \(B\) and rescale each blurred map so its maximum is 1 again:
+    \(\hat B_i = (G_\sigma * B_i) / \max(G_\sigma * B_i)\). This keeps the reach and restores the 0 – 1 range lost by plain blurring.</li>
+  <li><strong>Distance-based score.</strong> Score each sample point by how far it is from bone-like pixels, as
+    \(\tfrac{1}{2}(d/\sigma)^2\) with a cap, so that it is in the same unit as the P-IMLOP position term.</li>
 </ul>
-<div class="table-wrap"><table>
-  <tr><th>Alternative</th><th>Effect</th></tr>
-  <tr><td>Treat any cut-off window as empty (\(L_{\min} = 0\))</td><td>Simple, but \(S\) may rest on one or two noisy pixels.</td></tr>
-  <tr><td>Minimum length \(L_{\min}\), otherwise \(S = 1\) (chosen)</td><td>The edge neither helps nor hurts a pixel.</td></tr>
-  <tr><td>\(S = 0\) when the window does not fit</td><td>Bright structures near the bottom can never count as bone. Too strict for deep bones.</td></tr>
-</table></div>
-<p>
-In our tibia images the bone lies at 12 – 21 mm in a 48 mm deep image, so the bottom edge rarely matters.
-</p>
-
-<!-- ============================================================ -->
-<h2 id="settings">8. Settings</h2>
-<div class="table-wrap"><table>
-  <tr><th>Setting</th><th>Set per</th><th>How to choose it</th><th>Demo value</th></tr>
-  <tr><td>Background \(b\)</td><td>image</td><td>Median of the image; most pixels are empty background.</td><td>16</td></tr>
-  <tr><td>Echo peak \(p\)</td><td>image</td><td>A high percentile, e.g. the 99.9th. Our echoes clip at about 235.</td><td>235</td></tr>
-  <tr><td>Tissue level \(t\)</td><td>image</td><td>Typical speckle brightness. Open point: a rule that needs no segmentation, e.g. a percentile of the pixels above background.</td><td>45</td></tr>
-  <tr><td>Echo thickness \(h\) (sets \(\sigma_d\))</td><td>probe and scanner setting</td><td>Fixed parameter, measured once on our images (section 3.4). Not swept.</td><td>2.4 mm (\(\sigma_d \approx 0.96\) mm)</td></tr>
-  <tr><td>Gap \(g\)</td><td>dataset</td><td>Just larger than the bone band plus trailing echoes, \(\tau\).</td><td>0.8 – 4 mm</td></tr>
-  <tr><td>Window length \(L\)</td><td>dataset</td><td>Long enough to average out speckle; short enough to stop above the reverberation line, which appears about one bone depth further down (≈ 20 mm in the tibia images).</td><td>6.4 mm</td></tr>
-  <tr><td>Minimum window \(L_{\min}\)</td><td>dataset</td><td>A few speckle sizes.</td><td>3 mm</td></tr>
-  <tr><td>Incidence weight exponent \(n\)</td><td>dataset</td><td>0 turns the weighting off. Candidates 0, 2, 4 (section 10).</td><td>4</td></tr>
-</table></div>
-<p>
-\(b\), \(p\) and \(t\) are measured automatically from each image, so nothing is tuned by hand per image.
-</p>
-
-<!-- ============================================================ -->
-<h2 id="framework">9. Fit with the optimization framework</h2>
-<p>
-The map depends only on the image, not on the pose. It is therefore computed once per image during input preparation
-(<code>functions/bonePoseOptimization/inputPreparation/</code>), in the same place where the blurred images are made today
-(<a href="../../../functions/bonePoseOptimization/inputPreparation/smoothUltrasoundImages.m"><code>smoothUltrasoundImages.m</code></a>).
-The cost function then only reads values from it.
-</p>
-<p>
-The current intensity cost
-(<a href="../../../functions/bonePoseOptimization/costModels/cost_intensityLine.m"><code>cost_intensityLine.m</code></a>)
-places sample points \(\mathbf{s}_{im}\) every 0.1 mm along the probe-facing intersection lines of plane \(i\) and computes
-</p>
-\[
-  C_{\text{current}} = 1 - \frac{1}{N_{\text{planes}}} \sum_{i=1}^{N_{\text{planes}}} \frac{1}{M_i} \sum_{m=1}^{M_i} \frac{\tilde I_i(\mathbf{s}_{im})}{255},
-\]
-<p>
-where \(\tilde I_i\) is the blurred image and \(M_i\) the number of sample points (a plane without visible bone counts as 0 evidence).
-The new term keeps the sampling and replaces the blurred brightness by the bone-likelihood:
-</p>
-\[
-  C_{B} = 1 - \frac{1}{N_{\text{planes}}} \sum_{i=1}^{N_{\text{planes}}} \frac{1}{M_i} \sum_{m=1}^{M_i} B_i(\mathbf{s}_{im}).
-\]
-<p>
-Nothing else in the optimizer changes: same pose vector, same sampling, same planes. No segmentation output is read.
-Section 10 replaces the plain mean over the sample points of a plane by an incidence-weighted mean.
-</p>
 <div class="callout warn">
-  <div class="callout-title">Open design choice: reach</div>
-  \(B\) is sharp: it is high only on the bone band. Read directly, the cost gives the optimizer no hint when a predicted line is a few
-  millimetres off the bone. Today this is solved by blurring, which is exactly what lowers the peak (section 1.1). Options, still to
-  be compared:
-  <ul>
-    <li>Blur \(B\) and rescale each blurred map so its maximum is 1 again:
-      \(\tilde B_i = (G_\sigma * B_i) / \max(G_\sigma * B_i)\). This keeps the reach and restores the 0 – 1 range.</li>
-    <li>Turn \(B\) into a distance-based likelihood: how far each sample point is from bone-like pixels, scored as
-      \(\tfrac{1}{2}(d/\sigma)^2\) with a cap, so that it is in the same unit as the P-IMLOP position term.</li>
-  </ul>
+  <div class="callout-title">Open (O2)</div>
+  The choice is open. Section 8 proposes to compare both on the shape of the cost around the start pose.
 </div>
 
 <!-- ============================================================ -->
-<h2 id="incidence">10. Incidence weighting: dim where the bone is tilted</h2>
-
-<h3>10.1 The problem</h3>
+<h2 id="incidence">6. Per-pose weighting: how much each point counts</h2>
 <p>
-Bone reflects sound like a mirror. Where the beam hits the surface squarely, the echo comes straight back to the probe and the bone looks
-bright. Where the surface is tilted, most of the echo bounces away sideways and misses the probe, so the bone looks dim or disappears.
-That is one reason for the dim stretches between saturated spots in the phantom tibia image (Figure 2).
-</p>
-<p>
-\(R\) and \(S\) cannot fix this: they describe the image, and a dim stretch is dim in the image. With a plain mean along the predicted
-line, the tilted parts drag the score down even at the correct pose, so the dip in the cost at the correct pose is shallow.
+Section 3.3 showed that the bone echo dims where the surface is tilted, and that no filter on the image can undo that. The pose can:
+for every sample point it tells how squarely the beam hits the predicted surface. The idea is to count each sample point by how bright we
+expect the bone to be there. Points where the predicted surface faces the probe squarely count fully; points on tilted surface count less.
+\(R\) and \(S\) decide <em>what value</em> is read at a point; the weight decides <em>how much</em> that point counts. So this is not a
+new map and it does not overlap with \(R\) or \(S\).
 </p>
 
-<h3>10.2 The idea</h3>
-<p>
-Count each sample point by how bright we expect the bone to be there. Points where the predicted surface faces the probe squarely count
-fully; points on tilted surface count less. \(R\) and \(S\) decide <em>what value</em> is read at a point; the weight decides
-<em>how much</em> that point counts. So this is not a new map and it does not overlap with \(R\) or \(S\).
-</p>
-
-<h3>10.3 How the incidence is computed</h3>
+<h3>6.1 How the incidence is computed</h3>
 <p>
 For a sample point on mesh face \(f\), with outward unit normal \(\mathbf{n}_f\) at the candidate pose, and the image depth axis
 \(\mathbf{e}_y\) (<code>plane.ey</code>, the beam direction of a linear probe):
 </p>
 \[
-  c = \mathbf{n}_f \cdot (-\mathbf{e}_y), \qquad w = c^{\,n}.
+  c = \mathbf{n}_f \cdot (-\mathbf{e}_y).
 \]
 <p>
-\(c = 1\) means the surface faces the probe squarely; \(c = \cos 30^\circ \approx 0.87\) is the edge of today's facing filter. The
-exponent \(n\) sets how strict the weighting is; \(n = 0\) gives every point weight 1.
+\(c = 1\) means the surface faces the probe squarely; \(c = \cos 30^\circ \approx 0.87\) is the edge of today's facing filter.
 </p>
 <p>
 Nothing new has to be computed. The current intensity cost already needs the normals to decide which parts of the cut face the probe
@@ -669,23 +816,33 @@ own geometry step, not from the P-IMLOP model, so the term stays independent of 
 the weighting only adds \(c^n\) and a weighted mean.
 </p>
 
-<h3>10.4 The cost with weights</h3>
+<h3>6.2 Weight and weighted mean</h3>
+<p>
+The weight of sample point \(m\) in plane \(i\) is
+</p>
 \[
-  C_{B} = 1 - \frac{1}{N_{\text{planes}}} \sum_{i=1}^{N_{\text{planes}}}
-  \frac{\sum_{m=1}^{M_i} w_{im}\, \hat B_i(\mathbf{s}_{im})}{\sum_{m=1}^{M_i} w_{im}} .
+  w_{im} = c_{im}^{\,n}.
 \]
 <p>
-With \(n = 0\) this is exactly the plain-mean cost of section 9. Dividing by \(\sum_m w_{im}\) keeps each plane's evidence in [0, 1], and
-stops the optimizer from lowering the cost just by turning the bone so that fewer points carry weight.
+The exponent \(n\) sets how strict the weighting is; \(n = 0\) gives every point weight 1. Each plane's evidence becomes a weighted
+mean of the map along its predicted lines:
 </p>
-<div class="callout">
-  <div class="callout-title">Hard and soft versions of one idea</div>
-  Today's facing filter (<code>normalFacingToleranceDeg</code> = 30°) is the hard version: weight 1 inside the tolerance, 0 outside.
-  The incidence weight is the soft version: inside the tolerance, the weight falls smoothly with the angle. Both act on the same score
-  \(c\), so they overlap (open point O3a in <code>notes.md</code>).
-</div>
+\[
+  E_i = \frac{\sum_{m=1}^{M_i} w_{im}\, \hat B_i(\mathbf{s}_{im})}{\sum_{m=1}^{M_i} w_{im}} .
+\]
+<p>
+Dividing by \(\sum_m w_{im}\) keeps each plane's evidence in [0, 1], and stops the optimizer from lowering the cost just by turning the
+bone so that fewer points carry weight. With \(n = 0\), \(E_i\) is the plain mean.
+</p>
 
-<h3>10.5 Try it</h3>
+<h3>6.3 Hard and soft versions of one idea</h3>
+<p>
+Today's facing filter (<code>normalFacingToleranceDeg</code> = 30°) is the hard version of the same idea: weight 1 inside the tolerance,
+0 outside. The incidence weight is the soft version: inside the tolerance, the weight falls smoothly with the angle. Both act on the same
+score \(c\), so their effects overlap (open point O3a, section 9.2).
+</p>
+
+<h3>6.4 Try it</h3>
 <p>
 A synthetic cross-section of a curved bone, with the probe at the top and the beam straight down. The echo brightness falls with the
 tilt as \(c^m\). Shift the predicted line with the pose error and compare the plain and the weighted cost.
@@ -728,40 +885,154 @@ deeper. With \(m = 0\) (the echo does not fade with tilt) the weighting gains al
 from the angle. The demo also ignores the 30° facing filter, so that the effect of the weight alone is visible.
 </p>
 
-<h3>10.6 Assumptions and limits</h3>
+<!-- ============================================================ -->
+<h2 id="cost">7. Final cost and integration</h2>
+
+<h3>7.1 The cost</h3>
+<p>
+Putting the two parts together, the new term reads the map \(\hat B_i\) at the same sample points as the current term and takes the
+incidence-weighted mean per plane:
+</p>
+\[
+  C_{B} = 1 - \frac{1}{N_{\text{planes}}} \sum_{i=1}^{N_{\text{planes}}}
+  \frac{\sum_{m=1}^{M_i} w_{im}\, \hat B_i(\mathbf{s}_{im})}{\sum_{m=1}^{M_i} w_{im}},
+  \qquad w_{im} = c_{im}^{\,n}.
+\]
 <ul>
-  <li><strong>Linear probe.</strong> The beam is taken along \(\mathbf{e}_y\) everywhere, as in \(S\) and in the facing filter. A convex probe
-    would need a beam direction per point, from a virtual apex behind the probe face, \(\mathbf{b}(\mathbf{p}) = (\mathbf{p} - \mathbf{a})/\lVert \mathbf{p} - \mathbf{a} \rVert\),
-    and also a new pixel-to-mm mapping across the code. For now only linear probes are assumed.</li>
-  <li><strong>Not all dimness comes from the angle.</strong> Speckle or the phantom material can also make the echo uneven; weighting does not
-    fix that part.</li>
-  <li><strong>Exponent \(n\)</strong> should match how fast the echo fades with tilt in our images. Check the brightness against \(c\) along
-    predicted lines on real images before sweeping it.</li>
-  <li><strong>Planes with only grazing segments</strong> still get full say in the mean over planes (open point O3b).</li>
+  <li>A plane without visible bone counts as 0 evidence, as today. Every plane counts equally, whatever the length of its lines.</li>
+  <li>With \(n = 0\) the inner fraction is the plain mean. With \(n = 0\) and \(\hat B_i\) replaced by \(\tilde I_i / 255\), \(C_B\) is
+    exactly the current term \(I\) of section 1.1, which makes step-by-step comparisons easy.</li>
+  <li>\(\hat B_i\) is read with <code>interp2</code> exactly as <code>cost_intensityLine</code> reads the blurred image (same
+    mm-to-pixel conversion and edge clamping).</li>
 </ul>
+<p>
+Nothing else in the optimizer changes: same pose vector, same sampling, same planes. No segmentation output is read.
+</p>
+
+<h3>7.2 Where the code goes</h3>
+<div class="table-wrap"><table>
+  <tr><th>Piece</th><th>Location</th><th>When it runs</th></tr>
+  <tr><td>Map \(R\), \(S\), \(B\), \(\hat B\)</td><td>New function in <code>functions/bonePoseOptimization/inputPreparation/</code>, called from
+    <code>prepareBonePoseOptimizationInputs.m</code> next to
+    <a href="../../../functions/bonePoseOptimization/inputPreparation/smoothUltrasoundImages.m"><code>smoothUltrasoundImages.m</code></a>;
+    stored under <code>data.extra</code></td><td>Once per image (per hyperparameter combination)</td></tr>
+  <tr><td>Depth Gaussian for \(\bar I\)</td><td>Reuse <code>blurWithGaussian</code> (now a local function inside <code>smoothUltrasoundImages.m</code>)</td><td>Once per image</td></tr>
+  <tr><td>Sampling, incidence weight, cost</td><td>New evaluator in <code>functions/bonePoseOptimization/costModels/</code>, reusing the sampling of
+    <code>cost_intensityLine.m</code>; \(c\) taken from <code>poseEvaluation</code>. No change to <code>functions/2D3Dintersection/</code></td><td>Every cost evaluation</td></tr>
+  <tr><td>Validator, registration, config templates, tests</td><td>Next to the evaluator, as for every cost model</td><td>–</td></tr>
+</table></div>
+<p>
+Proposed file and config names are in <a href="notes.md"><code>notes.md</code></a> (section "Where the code goes").
+</p>
+
+<h3>7.3 Combining with P-IMLOP</h3>
+<p>
+The term can be used on its own or as the intensity term of a combined model like <code>intensityPIMLOP</code>,
+\(C = w\, C_B + (1 - w)\, P\). Because \(\hat B\) uses the full 0 – 1 range and is high only near the bone, the term is expected to
+change much more during a run than the current 0.0017, so that the two terms balance at a weight further from 1. This is an
+expectation, not a result: section 8 checks it. The model name and whether it replaces or sits next to <code>intensityPIMLOP</code> are
+open (O4).
+</p>
+
+<h3 id="settings">7.4 Settings</h3>
+<div class="table-wrap"><table>
+  <tr><th>Setting</th><th>Set per</th><th>How to choose it</th><th>Demo value</th></tr>
+  <tr><td>Background \(b\)</td><td>image</td><td>Median of the image; most pixels are empty background.</td><td>16</td></tr>
+  <tr><td>Echo peak \(p\)</td><td>image</td><td>A high percentile, e.g. the 99.9th. Our echoes clip at about 235.</td><td>235</td></tr>
+  <tr><td>Tissue level \(t\)</td><td>image</td><td>Typical speckle brightness. Open (O1): a rule that needs no segmentation, e.g. a percentile of the pixels above background.</td><td>45</td></tr>
+  <tr><td>Echo thickness \(h\) (sets \(\sigma_d\))</td><td>probe and scanner setting</td><td>Fixed parameter, measured once on our images (section 5.1, O5). Not swept.</td><td>2.4 mm (\(\sigma_d \approx 0.96\) mm)</td></tr>
+  <tr><td>Gap \(g\)</td><td>dataset</td><td>Just larger than the bone band plus trailing echoes, \(\tau\).</td><td>0.8 – 4 mm</td></tr>
+  <tr><td>Window length \(L\)</td><td>dataset</td><td>Long enough to average out speckle; short enough to stop above the reverberation line, which appears about one bone depth further down (≈ 20 mm in the tibia images).</td><td>6.4 mm</td></tr>
+  <tr><td>Minimum window \(L_{\min}\)</td><td>dataset</td><td>A few speckle sizes.</td><td>3 mm</td></tr>
+  <tr><td>Reach</td><td>dataset</td><td>Open (O2): blur width of the rescaled map, or width and cap of the distance score (section 5.4).</td><td>–</td></tr>
+  <tr><td>Incidence weight exponent \(n\)</td><td>dataset</td><td>0 turns the weighting off. Candidates 0, 2, 4 (section 6, O3c).</td><td>4</td></tr>
+</table></div>
+<p>
+\(b\), \(p\) and \(t\) are measured automatically from each image, so nothing is tuned by hand per image.
+</p>
 
 <!-- ============================================================ -->
-<h2 id="limits">11. Limitations and open points</h2>
+<h2 id="validation">8. Validation plan</h2>
+<p>
+The ground truth is not accurate enough yet to judge the method by pose error, so the first checks need no ground truth. They run in
+this order; each one can stop or change the design before the next.
+</p>
+
+<h3>8.1 Unit tests on synthetic images</h3>
+<p>
+Synthetic images with known answers, so the tests need no ground truth (full list in <code>notes.md</code>, Test plan):
+</p>
 <ul>
-  <li><strong>Not tested.</strong> Nothing here has been computed on our real images yet. First check: compute \(R\), \(S\), \(B\) for
-    the femur and tibia images and look whether the bone stays bright and the layer lines fade.</li>
+  <li>Exact values of \(R\), \(S\), \(B\) for a single column; a thin line peaks at \(R \approx t/h\), a thick band at \(R \approx 1\).</li>
+  <li>Layer line with speckle below versus bone band with background below: \(B\) of the bone is clearly higher.</li>
+  <li>Trailing echoes: a small gap lowers the bone's \(S\); \(g \ge \tau\) restores it. Bottom-edge rule as in section 5.2.</li>
+  <li>The map function receives no segmentation fields; the cost runs on data without <code>boneSurfaceMeasurements</code>.</li>
+  <li>With \(n = 0\) the cost equals the plain-mean cost exactly; on a curved bone whose echo fades with tilt, the weighted dip is deeper.</li>
+  <li>The weight of each sample point equals the facing score of the segment it was placed on.</li>
+</ul>
+
+<h3>8.2 Maps on real images</h3>
+<p>
+Compute \(R\), \(S\) and \(B\) for the phantom femur and tibia images and check by eye that the bone stays bright and the layer lines
+fade. This is also where the open measurements are made: the echo thickness \(h\) (O5), the trailing-echo depth \(\tau\) for the gap, and
+a candidate rule for the tissue level \(t\) (O1).
+</p>
+
+<h3>8.3 Brightness against incidence</h3>
+<p>
+Along the predicted lines at the start pose, plot the image brightness against \(c\). If the brightness clearly falls with \(c\), the
+weighting has something to correct, and the slope suggests \(n\) (O3c). If it does not, the dim stretches have another cause and
+\(n = 0\) is the honest choice.
+</p>
+
+<h3>8.4 Shape of the cost around the start pose</h3>
+<p>
+Move the pose along each of its six axes around the start pose and plot the current term and the new term. A useful term has a clear
+dip that is wider than a few millimetres (reach) and deeper than the current one. This check compares the two reach options (O2) and
+the effect of \(n\).
+</p>
+
+<h3>8.5 Balance with P-IMLOP</h3>
+<p>
+Run a small sweep with the new term inside the combined model and repeat the analysis of section 1.1: how much each term changes during
+a run, and at which weight the two contribute equally. The method has met its goal when that weight is clearly below 0.99. A further sign
+is agreement: the best poses of the intensity term alone and the P-IMLOP term alone should lie close to each other, since both look at
+the same bone.
+</p>
+
+<!-- ============================================================ -->
+<h2 id="limits">9. Limitations and open points</h2>
+
+<h3>9.1 Limitations</h3>
+<ul>
+  <li><strong>Not tested.</strong> Nothing here has been computed on our real images yet (section 8.2 is the first check).</li>
+  <li><strong>Thin bone echo in the tibia images.</strong> Where the bone echo is as thin as the layer lines, \(R\) does not tell them
+    apart (section 5.1).</li>
   <li><strong>"Nothing below" is a weak difference in some images.</strong> In the tibia images the level 3 – 10 mm below the echo was
     about 16 (background) in nearly every image, but the level above was only slightly higher (17 – 31). The three lateral tibia images
-    show texture both above and below (Appendix).</li>
+    show texture both above and below (Appendix A).</li>
   <li><strong>Trailing echoes</strong> under the bone (Figure 1) require a gap of a few millimetres, which weakens the clue for layer lines
     with tissue only right under them.</li>
-  <li><strong>Uneven bone brightness</strong> (Figure 2) is not solved by \(B\) itself. Proposed answer: incidence weighting of the sample
-    points (section 10). Still open: how it interacts with the facing filter, planes with only grazing segments, and the value of \(n\).</li>
-  <li><strong>Tissue level \(t\)</strong> still needs a rule that uses no segmentation.</li>
-  <li><strong>Echo thickness \(h\)</strong> is not measured yet. Where the bone echo is as thin as the layer lines (tibia images),
-    \(R\) does not tell them apart (section 3.2).</li>
-  <li><strong>Beam direction</strong> is assumed along the image columns (linear probe). A curved probe would need slanted windows.</li>
-  <li><strong>Reach</strong> of the cost (section 9) is an open design choice.</li>
+  <li><strong>Not all dimness comes from the angle.</strong> Speckle or the phantom material can also make the echo uneven; the incidence
+    weight does not fix that part.</li>
+  <li><strong>Linear probe only</strong> (section 2.3).</li>
   <li><strong>Phantom only.</strong> The knee phantom may differ from real tissue, for example in speed of sound and speckle level.</li>
 </ul>
 
+<h3>9.2 Open points</h3>
+<div class="table-wrap"><table>
+  <tr><th>ID</th><th>Question</th><th>Options</th><th>Next step</th></tr>
+  <tr><td>O1</td><td>Tissue level \(t\)</td><td>A rule without segmentation, e.g. a percentile of the pixels above background</td><td>Try on femur and tibia images (8.2)</td></tr>
+  <tr><td>O2</td><td>Reach (section 5.4)</td><td>Blur and rescale \(B\); or a capped distance score</td><td>Compare on the cost shape (8.4)</td></tr>
+  <tr><td>O3a</td><td>Incidence weight versus the 30° facing filter</td><td>Keep the cut and vary \(n\); or loosen the cut and let the weight do the work</td><td>Proposed start: keep the cut, vary only \(n\). Don't sweep both widely, their effects overlap</td></tr>
+  <tr><td>O3b</td><td>Planes with only grazing segments</td><td>Full say in the mean over planes (as now); or count such planes less, e.g. by their mean weight</td><td>Proposed start: full say; revisit if such planes show up</td></tr>
+  <tr><td>O3c</td><td>Value of \(n\)</td><td>Candidates 0, 2, 4</td><td>Brightness against \(c\) on real images (8.3)</td></tr>
+  <tr><td>O4</td><td>Model name and combination with P-IMLOP</td><td>Stand-alone model, combined model like <code>intensityPIMLOP</code>, or both</td><td>Decide after 8.2 – 8.4</td></tr>
+  <tr><td>O5</td><td>Measuring the echo thickness \(h\)</td><td>Procedure of section 5.1, only where \(c \approx 1\)</td><td>Measure on our images (8.2)</td></tr>
+</table></div>
+
 <!-- ============================================================ -->
-<h2 id="refs">12. References</h2>
+<h2 id="refs">10. References</h2>
 <p style="font-size:14px;color:var(--muted)">Found with the Consensus literature search on 2026-11-11. Only the abstracts were read.</p>
 <ol style="font-size:15px">
   <li id="r1">Jain AK, Taylor RH. Understanding bone responses in B-mode ultrasound images and automatic bone surface extraction using a Bayesian probabilistic framework. 2004. <a href="https://consensus.app/papers/details/b19c62a0fc2d538dbf1d363eb5038725/">link</a></li>
@@ -779,10 +1050,10 @@ from the angle. The demo also ignores the 30° facing filter, so that the effect
 </ol>
 
 <!-- ============================================================ -->
-<h2 id="appendix">Appendix: evidence from tibia images</h2>
+<h2 id="appendixA">Appendix A. Evidence from tibia images</h2>
 <figure>
   <img src="figures/tibiaDepthProfiles.png" alt="Fifteen depth profiles, one per tibia image, each with a sharp peak near 235 at the bone echo and a flat level near 16 below it.">
-  <figcaption>Figure 4. Brightness along depth through the bone echo, for the 15 tibia images of
+  <figcaption>Figure 5. Brightness along depth through the bone echo, for the 15 tibia images of
     <code>validSnapshots_20260910_172849.mat</code> (mean of the 10 brightest columns, depth 0 at the echo peak, positive = deeper).
     Below the echo the level is flat at the background value in most images; the lateral images (top row, left) show texture on
     both sides. The small peak about 23 mm below the echo in some medial and shaft images is likely a reverberation.</figcaption>
@@ -794,6 +1065,24 @@ from the angle. The demo also ignores the 30° facing filter, so that the effect
   <tr><td>tibia medial #1 – #5</td><td>235</td><td>16 – 21</td><td>16</td><td>16</td></tr>
   <tr><td>tibia shaft #1 – #5</td><td>235</td><td>16 – 18</td><td>16 – 18</td><td>16</td></tr>
 </table></div>
+
+<!-- ============================================================ -->
+<h2 id="appendixB">Appendix B. Design history</h2>
+<p>
+How the design got here, so later readers see the reasoning, not only the result. More detail in <code>notes.md</code>, Design history.
+</p>
+<ul>
+  <li><strong>2026-11-11.</strong> The literature report listed three approaches: the bone-likelihood map ("A"), reflection at bone
+    thickness ("B") and weighting by how squarely the beam hits the surface ("C").</li>
+  <li><strong>2026-11-13.</strong> "B" turned out to be the reflection score \(R\) inside \(B = R \cdot S\), and also the current
+    smoothing with different settings, so it is documented here and gets no folder of its own. Box versus Gaussian compared with the
+    demo of section 5.1: Gaussian chosen. The echo thickness \(h\) made a fixed, measured parameter rather than a hyperparameter.</li>
+  <li><strong>2026-11-13.</strong> "C" checked against A and B: no overlap, since A and B change the map that is read and C changes how
+    much each point counts. It became the answer to uneven bone brightness (O3). Settled concerns: the normals come from the intensity
+    cost's own geometry step, not from P-IMLOP; the incidence is already computed for every pose; only linear probes for now.</li>
+  <li><strong>2026-11-13.</strong> Document restructured as a method proposal: the three observations of section 3 now lead to the three
+    parts of the method, and incidence weighting is one of them rather than an add-on.</li>
+</ul>
 
 </div>
 
@@ -1052,7 +1341,7 @@ document.addEventListener('DOMContentLoaded', function () {
 </script>
 
 <script>
-// Demo of section 10: incidence weighting on a synthetic curved bone.
+// Demo of section 6.4: incidence weighting on a synthetic curved bone.
 (function () {
   const $ = id => document.getElementById(id);
   // Image size in mm, background, echo height above background, and echo half-width along depth (mm).
