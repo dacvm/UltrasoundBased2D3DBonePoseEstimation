@@ -102,6 +102,7 @@ function [cost, details] = cost_PIMLOP(poseVector, data, config)
 %     T_CT_ref_initial        - coarse start pose, CT -> ref;
 %     pivotPointRef           - fixed point in ref the pose rotates about;
 %     T_bone_CT               - anatomical bone frame -> CT (for details);
+%     boneMeshCT              - CT-frame bone triangulation (for details);
 %     imagePlanesRef(k)       - tracked image k; its T_image_ref gives the image orientation needed for R_p;
 %     boneSurfaceMeasurements(k) - bone surface segmented in image k, aligned with imagePlanesRef(k):
 %         surfaceCoordinatesXYZRef - N-by-3 points in ref (x_3dp before moving to CT);
@@ -137,8 +138,11 @@ function [cost, details] = cost_PIMLOP(poseVector, data, config)
 %     (resultsByImage), combined X (measurements) and YmatchesCT (matched
 %     model points) arrays, the individual match errors EMatchValues,
 %     settings, and source indices linking each match back to its image and
-%     surface point. CMA-ES normally requests only COST, so detailed search
-%     reports are produced only when this second output is requested.
+%     surface point. It also holds boneMeshRefCandidate, the bone mesh at the
+%     candidate pose in ref, which every cost model provides so the
+%     evaluation can compare it with the ground-truth mesh. CMA-ES normally
+%     requests only COST, so detailed search reports are produced only when
+%     this second output is requested.
 
 %% 1. READ THE FIXED INPUTS AND COST SETTINGS
 
@@ -380,11 +384,20 @@ YmatchesCT.faceIndex  = vertcat(Ysets.faceIndex);
 EMatchValues        = vertcat(resultsByImage(processedImageMask).EMatchValues);
 correspondenceIndex = table(X.imageIndex, X.sourcePointIndices, 'VariableNames', {'imageIndex','sourcePointIndex'});
 
+% The search above never moves the mesh (it moves the measurements into CT
+% instead), but the evaluation expects the candidate mesh in ref from every
+% cost model, without knowing which model ran. Build it here once, only
+% for this detailed call, by moving the CT vertices with the candidate pose
+% and keeping the original connectivity.
+bonePointsRefCandidate = applyRigidTransform(data.boneMeshCT.Points, T_CT_ref_candidate);
+boneMeshRefCandidate   = triangulation(data.boneMeshCT.ConnectivityList, bonePointsRefCandidate);
+
 details = struct();
 details.T_CT_ref_candidate      = T_CT_ref_candidate;
 details.T_ref_CT_candidate      = T_ref_CT_candidate;
 details.T_bone_ref_candidate    = T_bone_ref_candidate;
-details.processedImageMask      = processedImageMask;
+details.boneMeshRefCandidate    = boneMeshRefCandidate;
+details.processedImageMask     = processedImageMask;
 details.processedPlaneIndices   = processedPlaneIndices;
 details.resultsByImage          = resultsByImage;
 details.X                       = X;

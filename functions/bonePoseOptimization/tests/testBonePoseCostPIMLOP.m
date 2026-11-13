@@ -308,6 +308,26 @@ verifyEqual(testCase, publicDetails.status, 'pimlop_cost_computed');
 end
 
 
+function testDetailsContainCandidateMeshInRef(testCase)
+%TESTDETAILSCONTAINCANDIDATEMESHINREF Check the mesh the evaluation reads.
+% main_bonePoseOptimization_evaluation reads details.boneMeshRefCandidate
+% from every cost model, so P-IMLOP must provide it too. testCase supplies
+% prepared data. This function has no output.
+
+data = testCase.TestData.data;
+config = testCase.TestData.config;
+poseVector = [1; -0.5; 0.25; deg2rad(1); deg2rad(-0.5); deg2rad(0.25)];
+
+[~, details] = cost_PIMLOP(poseVector, data, config);
+
+% The mesh must be the CT mesh moved by the candidate pose, with the
+% original connectivity kept.
+expectedPointsRef = applyRigidTransform(data.boneMeshCT.Points, details.T_CT_ref_candidate);
+verifyEqual(testCase, details.boneMeshRefCandidate.ConnectivityList, data.boneMeshCT.ConnectivityList);
+verifyEqual(testCase, details.boneMeshRefCandidate.Points, expectedPointsRef);
+end
+
+
 function testSerialCMAESSmokeRun(testCase)
 %TESTSERIALCMAESSMOKERUN Run one short serial CMA-ES search.
 % testCase supplies prepared data. This function has no output.
