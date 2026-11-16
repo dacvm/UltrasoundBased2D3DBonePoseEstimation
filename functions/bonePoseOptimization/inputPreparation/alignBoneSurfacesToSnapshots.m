@@ -73,5 +73,7 @@ function absolutePath = canonicalPath(filePath)
 % filePath is a character vector or string scalar and absolutePath is the
 % canonical character path used for provenance comparisons.
 
-absolutePath = char(java.io.File(char(filePath)).getCanonicalPath());
+% Relative paths are anchored at the current folder, as Java's
+% getCanonicalPath did before; the shared resolver needs no Java runtime.
+absolutePath = resolveAbsolutePath(filePath, pwd);
 end

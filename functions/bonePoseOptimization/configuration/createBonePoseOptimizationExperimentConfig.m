@@ -334,11 +334,6 @@ function absolutePath = makeAbsolutePath(inputPath, baseFolder)
 % inputPath is the configured folder, baseFolder is the project root, and
 % absolutePath is the canonical absolute folder path.
 
-% Let Java identify absolute paths so Windows drive and UNC paths stay valid.
-pathObject = java.io.File(inputPath);
-if pathObject.isAbsolute()
-    absolutePath = char(pathObject.getCanonicalPath());
-else
-    absolutePath = char(java.io.File(fullfile(baseFolder, inputPath)).getCanonicalPath());
-end
+% The shared resolver keeps Windows drive and UNC paths valid without Java.
+absolutePath = resolveAbsolutePath(inputPath, baseFolder);
 end
