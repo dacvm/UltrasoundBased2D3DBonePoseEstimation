@@ -203,24 +203,7 @@ function absolutePath = makeAbsolutePath(inputPath, baseFolder)
 % inputPath is the configured path, baseFolder anchors relative paths, and
 % absolutePath is the normalized absolute result.
 
-% Normalize the configured path before checking whether it is already absolute.
-inputPath = char(inputPath);
-if isAbsolutePath(inputPath)
-    absolutePath = char(java.io.File(inputPath).getCanonicalPath());
-else
-    absolutePath = char(java.io.File(fullfile(baseFolder, inputPath)).getCanonicalPath());
-end
-end
-
-
-function isAbsolute = isAbsolutePath(inputPath)
-%ISABSOLUTEPATH Check whether a path is absolute on Windows or Unix.
-% inputPath is one character path and isAbsolute reports the result.
-
-% Recognize drive paths, UNC paths, and Unix root paths used by MATLAB.
-isDrivePath = numel(inputPath) >= 3 && isstrprop(inputPath(1), 'alpha') && ...
-    inputPath(2) == ':' && any(inputPath(3) == ['\' '/']);
-isUncPath = startsWith(inputPath, '\\');
-isUnixPath = startsWith(inputPath, '/');
-isAbsolute = isDrivePath || isUncPath || isUnixPath;
+% The shared resolver does the work without Java, so every config reader
+% resolves paths the same way.
+absolutePath = resolveAbsolutePath(inputPath, baseFolder);
 end
