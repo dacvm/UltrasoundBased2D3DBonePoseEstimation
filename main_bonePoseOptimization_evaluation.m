@@ -124,6 +124,12 @@ perRunTable.translationErrorMm = nan(numberOfRuns, 1);
 perRunTable.rotationErrorDeg   = nan(numberOfRuns, 1);
 perRunTable.surfaceRmseMm      = nan(numberOfRuns, 1);
 
+% The registration residual is the RMSE from the measured ultrasound points
+% to the mesh at the best pose. Each run computed and saved it, so it is
+% only read here. It shows how well the mesh fits the measurements, not how
+% close it is to the ground truth.
+perRunTable.registrationResidualRmseMm = nan(numberOfRuns, 1);
+
 % These two columns measure how far each run moved away from the start pose.
 % They compare the final pose with the start pose, not with the ground truth,
 % so they stay meaningful even when the ground truth is inaccurate.
@@ -161,6 +167,13 @@ for runIndex = 1:numberOfRuns
         perRunTable.translationErrorMm(runIndex) = calculateTranslationErrorMm(T_bone_ref_groundTruth, T_bone_ref_estimate);
         perRunTable.rotationErrorDeg(runIndex)   = calculateRotationErrorDeg(T_bone_ref_groundTruth, T_bone_ref_estimate);
         perRunTable.surfaceRmseMm(runIndex)      = calculateSurfaceRmseMm(boneMeshRefGroundTruth, boneMeshRefEstimate);
+
+        % Experiments run before the residual was added do not have it. Their
+        % row keeps NaN, so the other metrics of these runs stay usable.
+        savedResult = runData.runResult.optimizationResult.result;
+        if isfield(savedResult, 'registrationResidualRmseMm')
+            perRunTable.registrationResidualRmseMm(runIndex) = savedResult.registrationResidualRmseMm;
+        end
 
         % The same pose-distance functions also measure how far the run moved
         % from the start pose; here the start pose takes the ground truth's place.
