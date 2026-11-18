@@ -8,7 +8,8 @@ function perCombinationTable = createCombinationEvaluationTable(perRunTable, par
 %
 % Inputs:
 %   perRunTable         - One row per combination-seed run, including the
-%                         calculated translation, rotation, and surface errors.
+%                         calculated translation, rotation, and surface errors
+%                         and the registration residual RMSE.
 %   parameterNames      - Row cell array containing the swept parameter names
 %                         in the canonical order defined by the experiment plan.
 %
@@ -39,7 +40,7 @@ end
 requiredColumns = [{'runNumber', 'combinationNumber', 'combinationId', 'costModel', 'seed'}, parameterNames, ...
                    {'status', 'runtimeSeconds', 'bestCost', 'evaluationStatus', ...
                     'translationErrorMm', 'rotationErrorDeg', 'surfaceRmseMm', ...
-                    'startToFinalTranslationMm', 'startToFinalRotationDeg'}];
+                    'registrationResidualRmseMm', 'startToFinalTranslationMm', 'startToFinalRotationDeg'}];
 missingColumns = setdiff(requiredColumns, perRunTable.Properties.VariableNames, 'stable');
 if ~isempty(missingColumns)
     error('createCombinationEvaluationTable:MissingColumn', ...
@@ -104,6 +105,14 @@ perCombinationTable.medianSurfaceRmseMm         = nan(numberOfCombinations, 1);
 perCombinationTable.q25SurfaceRmseMm            = nan(numberOfCombinations, 1);
 perCombinationTable.q75SurfaceRmseMm            = nan(numberOfCombinations, 1);
 perCombinationTable.iqrSurfaceRmseMm            = nan(numberOfCombinations, 1);
+
+% Preallocate the registration-residual statistics: how closely the mesh
+% fits the measured ultrasound points. Like the movement below, they do not
+% use the ground truth.
+perCombinationTable.medianRegistrationResidualRmseMm = nan(numberOfCombinations, 1);
+perCombinationTable.q25RegistrationResidualRmseMm    = nan(numberOfCombinations, 1);
+perCombinationTable.q75RegistrationResidualRmseMm    = nan(numberOfCombinations, 1);
+perCombinationTable.iqrRegistrationResidualRmseMm    = nan(numberOfCombinations, 1);
 
 % Preallocate how far the seeds moved from the start pose. Unlike the errors
 % above, these do not use the ground truth.
@@ -198,6 +207,13 @@ for combinationIndex = 1:numberOfCombinations
      perCombinationTable.q75SurfaceRmseMm(combinationIndex), ...
      perCombinationTable.iqrSurfaceRmseMm(combinationIndex)] = ...
         summarizeMetric(currentRuns.surfaceRmseMm(evaluatedRows));
+
+    % Calculate registration-residual statistics across the same seeds.
+    [perCombinationTable.medianRegistrationResidualRmseMm(combinationIndex), ...
+     perCombinationTable.q25RegistrationResidualRmseMm(combinationIndex), ...
+     perCombinationTable.q75RegistrationResidualRmseMm(combinationIndex), ...
+     perCombinationTable.iqrRegistrationResidualRmseMm(combinationIndex)] = ...
+        summarizeMetric(currentRuns.registrationResidualRmseMm(evaluatedRows));
 
     % Calculate how far the seeds moved from the start pose, in translation...
     [perCombinationTable.medianStartToFinalTranslationMm(combinationIndex), ...

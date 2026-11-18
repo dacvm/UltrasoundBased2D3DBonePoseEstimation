@@ -232,6 +232,11 @@ verifyEqual(testCase, optimizationResult.run.status, 'cmaes_completed');
 verifyEqual(testCase, optimizationResult.run.seed, config.optimizer.seed);
 verifyTrue(testCase, isfinite(optimizationResult.result.bestCost));
 
+% For ICPLike the cost already is the point-to-mesh RMSE, computed with the
+% same search settings, so the saved residual must equal the best cost.
+verifyEqual(testCase, optimizationResult.result.registrationResidualRmseMm, ...
+    optimizationResult.result.bestCost, 'AbsTol', 1e-12);
+
 % The best pose must respect the configured translation and rotation bounds.
 bestPoseVector = optimizationResult.result.bestPoseVector;
 verifyLessThanOrEqual(testCase, abs(bestPoseVector(1:3)), ...

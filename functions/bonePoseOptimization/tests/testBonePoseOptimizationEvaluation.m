@@ -103,6 +103,10 @@ verifyEqual(testCase, perCombinationTable.iqrSurfaceRmseMm, ...
 % one moved 1 and 0 mm, combination two moved 3 and 0 mm.
 verifyEqual(testCase, perCombinationTable.medianStartToFinalTranslationMm, [0.5; 1.5]);
 
+% The residual is summarized the same way: combination one has 1 and 3 mm,
+% combination two has 2 and 4 mm.
+verifyEqual(testCase, perCombinationTable.medianRegistrationResidualRmseMm, [2; 3]);
+
 % The generic identity and parameter columns must keep the saved plan order.
 expectedLeadingColumns = [{'combinationRank', 'combinationNumber', ...
     'combinationId', 'costModel'}, parameterNames];
@@ -235,6 +239,13 @@ verifyEqual(testCase, getDerivedValue(derivedStatisticsTable, "medianSurfaceRmse
 % Runs 1 and 4 moved; run 5's 1e-6 deg rotation is below the movement tolerance.
 verifyEqual(testCase, getDerivedValue(derivedStatisticsTable, "fractionRunsMoved", ""), "0.5");
 verifyEqual(testCase, getDerivedValue(derivedStatisticsTable, "medianStartToFinalTranslationMm", ""), "0.5");
+
+% The residuals of the four evaluated runs are 1, 3, 2 and 4 mm. Their ranks
+% differ from the surface-RMSE ranks for two runs by one place each, so the
+% Spearman correlation is 1 - 6 * 2 / (4 * 15) = 0.8.
+verifyEqual(testCase, getDerivedValue(derivedStatisticsTable, "medianRegistrationResidualRmseMm", ""), "2.5");
+verifyEqual(testCase, getDerivedValue(derivedStatisticsTable, "bestRunRegistrationResidualRmseMm", ""), "1");
+verifyEqual(testCase, getDerivedValue(derivedStatisticsTable, "spearmanResidualVsSurfaceRmse", ""), "0.8");
 
 % The seed pairs are 5 and 1 mm apart, so the median over combinations is 3 mm.
 verifyEqual(testCase, getDerivedValue(derivedStatisticsTable, "medianSeedPairTranslationMm", ""), "3");
@@ -410,6 +421,10 @@ translationErrorMm = [1; 3; NaN; 5; 7];
 rotationErrorDeg = [2; 4; NaN; 6; 8];
 surfaceRmseMm = [2; 4; NaN; 5; 7];
 
+% The residual orders runs 2 and 4 the other way round than the surface
+% RMSE does, so its rank correlation with the surface RMSE is below one.
+registrationResidualRmseMm = [1; 3; NaN; 2; 4];
+
 % Runs 1 and 4 move away from the start pose. Run 5 only shows the tiny
 % rotation that two identical poses produce, so it must count as not moved.
 startToFinalTranslationMm = [1; 0; NaN; 3; 0];
@@ -419,7 +434,7 @@ perRunTable = table(runNumber, runId, combinationNumber, combinationId, ...
     costModel, seed, normalFacingToleranceDeg, intensitySmoothingSigmaMm, kappa, ...
     weight, status, runtimeSeconds, bestCost, evaluationStatus, ...
     translationErrorMm, rotationErrorDeg, surfaceRmseMm, ...
-    startToFinalTranslationMm, startToFinalRotationDeg);
+    registrationResidualRmseMm, startToFinalTranslationMm, startToFinalRotationDeg);
 
 % Match the canonical parameter order returned by the intensityPIMLOP
 % validator and planner.

@@ -15,7 +15,8 @@ function optimizationResult = runBonePoseOptimization(initialPoseVector, data, c
 %
 % Output:
 %   optimizationResult - Nested result struct organized into five groups:
-%       result     - Initial and best pose vectors and costs.
+%       result     - Initial and best pose vectors and costs, and the
+%                    registration residual RMSE at the best pose.
 %       transforms - Initial and best frame-explicit rigid transforms.
 %       search     - Search bounds, initial sigma, and CMA-ES options.
 %       cmaes      - Raw outputs returned by the CMA-ES implementation.
@@ -98,6 +99,13 @@ end
 T_CT_ref_best   = stateVectorToTMatrix(bestPoseVector, data.T_CT_ref_initial, data.pivotPointRef);
 T_bone_ref_best = T_CT_ref_best * data.T_bone_CT;
 
+% Measure how closely the mesh at the best pose fits the measured ultrasound
+% points. bestCost cannot be compared between cost models, but this residual
+% is computed the same way for all of them. It is done here, while the
+% measured points and the mesh are still in memory, so later evaluation only
+% has to read the saved number.
+registrationResidualRmseMm = calculateRegistrationResidualRmseMm(bestPoseVector, data);
+
 %% PACKAGE RESULT
 
 % Group the values most users inspect when comparing the starting and optimized poses.
@@ -105,6 +113,7 @@ optimizationResult.result.initialPoseVector   = initialPoseVector; % Keep the st
 optimizationResult.result.initialCost         = initialCost;       % Keep the starting objective value so it can be compared directly with bestCost.
 optimizationResult.result.bestPoseVector      = bestPoseVector;    % Store the best bounded pose correction found anywhere in the run.
 optimizationResult.result.bestCost            = bestCost;          % Store the objective value belonging to bestPoseVector; lower is better.
+optimizationResult.result.registrationResidualRmseMm = registrationResidualRmseMm; % Store the RMSE from the ultrasound points to the mesh at the best pose, in mm.
 optimizationResult.result.pivotPointRef       = data.pivotPointRef; % Store the point the pose vectors rotate about; a saved vector means nothing without it.
 optimizationResult.result.T_CT_ref_initial    = data.T_CT_ref_initial;   % Store the coarse CT-to-reference pose around which CMA-ES searched.
 optimizationResult.result.T_bone_ref_initial  = data.T_bone_ref_initial; % Store the matching initial anatomical bone pose in the reference frame.

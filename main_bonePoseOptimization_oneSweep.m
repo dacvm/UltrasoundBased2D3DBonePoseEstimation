@@ -162,6 +162,12 @@ optimizationResult = runBonePoseOptimization(initialPoseVector, data, config, in
 % away. The full struct stays in the workspace for closer inspection.
 disp(optimizationResult);
 
+% Print the registration residual: the RMSE from the measured ultrasound
+% points to the mesh at the best pose. It shows how well the mesh fits the
+% measurements, but not how close it is to the ground truth.
+fprintf('Registration residual RMSE at the best pose: %.3f mm\n', ...
+    optimizationResult.result.registrationResidualRmseMm);
+
 %% STEP 5: DISPLAY THE FINAL ESTIMATE
 
 % Draw the 3D scene again, now at the best pose found by CMA-ES. This time
